@@ -17,6 +17,7 @@ _setup_dry_run() {
     log_info "Distribution: ${DISTRO_NAME:-unknown} (family: ${DISTRO_FAMILY:-unknown})"
     log_info "Swap enabled: ${SWAP_ENABLED}"
     log_info "Install Helm: ${INSTALL_HELM}"
+    log_info "Install Kustomize: ${INSTALL_KUSTOMIZE}"
     log_info "Shell Completion: ${ENABLE_COMPLETION} (shells: ${COMPLETION_SHELLS})"
     [ -n "$KUBEADM_POD_CIDR" ] && log_info "Pod network CIDR: $KUBEADM_POD_CIDR"
     [ -n "$KUBEADM_SERVICE_CIDR" ] && log_info "Service CIDR: $KUBEADM_SERVICE_CIDR"
@@ -166,6 +167,9 @@ _run_cleanup() {
     cleanup_kubernetes_completions || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
     if [ "${REMOVE_HELM:-false}" = true ]; then
         cleanup_helm || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    fi
+    if [ "${REMOVE_KUSTOMIZE:-false}" = true ]; then
+        cleanup_kustomize || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
     fi
 
     if [ "$CLEANUP_ERRORS" -gt 0 ]; then
@@ -327,6 +331,7 @@ _run_setup() {
 
     show_versions
     setup_helm
+    setup_kustomize
     setup_k8s_shell_completion
     log_info "Setup completed successfully!"
 }

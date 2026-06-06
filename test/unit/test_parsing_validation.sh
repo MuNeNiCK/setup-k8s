@@ -22,7 +22,7 @@ test_parse_setup_args() {
         parse_setup_args --cri crio --kubernetes-version 1.31 \
             --join-token abc --join-address 1.2.3.4:6443 \
             --discovery-token-hash sha256:xyz \
-            --proxy-mode ipvs --install-helm true \
+            --proxy-mode ipvs --install-helm true --install-kustomize true \
             --pod-network-cidr 10.244.0.0/16 --service-cidr 10.96.0.0/12
 
         _assert_eq "ACTION" "join" "$ACTION"
@@ -32,6 +32,7 @@ test_parse_setup_args() {
         _assert_eq "JOIN_ADDRESS parsed" "1.2.3.4:6443" "$JOIN_ADDRESS"
         _assert_eq "PROXY_MODE parsed" "ipvs" "$PROXY_MODE"
         _assert_eq "INSTALL_HELM parsed" "true" "$INSTALL_HELM"
+        _assert_eq "INSTALL_KUSTOMIZE parsed" "true" "$INSTALL_KUSTOMIZE"
         _assert_eq "KUBEADM_POD_CIDR parsed" "10.244.0.0/16" "$KUBEADM_POD_CIDR"
         _assert_eq "KUBEADM_SERVICE_CIDR parsed" "10.96.0.0/12" "$KUBEADM_SERVICE_CIDR"
     )

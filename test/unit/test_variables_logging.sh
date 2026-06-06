@@ -16,6 +16,7 @@ test_variables_defaults() {
         _assert_eq "FORCE default" "false" "$FORCE"
         _assert_eq "ENABLE_COMPLETION default" "true" "$ENABLE_COMPLETION"
         _assert_eq "INSTALL_HELM default" "false" "$INSTALL_HELM"
+        _assert_eq "INSTALL_KUSTOMIZE default" "false" "$INSTALL_KUSTOMIZE"
         _assert_eq "JOIN_AS_CONTROL_PLANE default" "false" "$JOIN_AS_CONTROL_PLANE"
         _assert_eq "HA_ENABLED default" "false" "$HA_ENABLED"
         _assert_eq "KUBEADM_POD_CIDR default" "" "$KUBEADM_POD_CIDR"

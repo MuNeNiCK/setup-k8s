@@ -91,6 +91,11 @@ validate_completion_options() {
         exit 1
     fi
 
+    if [ "$INSTALL_KUSTOMIZE" != "true" ] && [ "$INSTALL_KUSTOMIZE" != "false" ]; then
+        log_error "--install-kustomize must be 'true' or 'false'"
+        exit 1
+    fi
+
     if [ "$COMPLETION_SHELLS" != "auto" ]; then
         _validate_single_shell() {
             local shell_name

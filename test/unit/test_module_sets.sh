@@ -55,7 +55,7 @@ test_module_set_setup() {
             check_ipvs_availability check_nftables_availability \
             cleanup_pre_common cleanup_kube_configs reset_iptables \
             initialize_cluster join_cluster \
-            show_versions setup_helm setup_k8s_shell_completion \
+            show_versions setup_helm setup_kustomize setup_k8s_shell_completion \
             log_info log_error
     )
 }
@@ -78,7 +78,7 @@ test_module_set_cleanup() {
             cleanup_kube_configs cleanup_crictl_config \
             reset_iptables reset_containerd_config \
             _service_reload \
-            cleanup_kubernetes_completions cleanup_helm \
+            cleanup_kubernetes_completions cleanup_helm cleanup_kustomize \
             detect_distribution log_info log_error
     )
 }

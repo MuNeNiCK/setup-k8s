@@ -26,7 +26,7 @@ fi
 # Canonical module lists (single source of truth).
 # Used by per-subcommand module sets, bundle generation, and distro detection.
 # bootstrap is listed for bundling but excluded from runtime loading (already sourced).
-_LIB_MODULES="variables logging detection validation system helpers cri_helpers join_token ssh_args etcd_helpers kubevip ssh ssh_credentials ssh_session bundle health diagnostics state networking swap completion helm kubeadm upgrade_helpers upgrade_orchestration runners"
+_LIB_MODULES="variables logging detection validation system helpers cri_helpers join_token ssh_args etcd_helpers kubevip ssh ssh_credentials ssh_session bundle health diagnostics state networking swap completion helm kustomize kubeadm upgrade_helpers upgrade_orchestration runners"
 _COMMAND_MODULES="etcd_common init join cleanup deploy upgrade remove backup restore renew status preflight"
 # Combined list for bundle generation (BUNDLE_COMMON_MODULES in variables.sh)
 _COMMON_MODULES="$_LIB_MODULES $_COMMAND_MODULES"
@@ -35,9 +35,9 @@ _DISTRO_MODULES="cleanup containerd crio dependencies kubernetes"
 
 # Per-subcommand module sets for selective loading (curl|sh and local mode)
 _SETUP_CMD_MODULES="init join cleanup"
-_SETUP_LIB_MODULES="variables logging detection validation system helpers cri_helpers join_token kubevip networking swap completion helm kubeadm"
+_SETUP_LIB_MODULES="variables logging detection validation system helpers cri_helpers join_token kubevip networking swap completion helm kustomize kubeadm"
 _CLEANUP_CMD_MODULES="cleanup"
-_CLEANUP_LIB_MODULES="variables logging detection validation system helpers networking swap completion helm"
+_CLEANUP_LIB_MODULES="variables logging detection validation system helpers networking swap completion helm kustomize"
 _UPGRADE_LOCAL_CMD_MODULES="upgrade"
 _UPGRADE_LOCAL_LIB_MODULES="variables logging detection validation system helpers upgrade_helpers bundle"
 _ETCD_LOCAL_CMD_MODULES="etcd_common backup restore"

@@ -365,6 +365,7 @@ show_deploy_help() {
     echo "  --swap-enabled          Keep swap enabled (K8s 1.28+)"
     echo "  --enable-completion BOOL  Enable shell completion setup (default: true)"
     echo "  --install-helm BOOL     Install Helm package manager (default: false)"
+    echo "  --install-kustomize BOOL  Install Kustomize (default: false)"
     echo "  --completion-shells LIST  Shells to configure (auto, bash, zsh, fish, or comma-separated)"
     echo "  --kubernetes-version VER Kubernetes version (e.g., 1.32)"
     echo "  --pod-network-cidr CIDR Pod network CIDR"
@@ -410,7 +411,7 @@ parse_deploy_args() {
                 DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_flag "$DEPLOY_PASSTHROUGH_ARGS" "$1")
                 shift
                 ;;
-            --enable-completion|--install-helm|--completion-shells)
+            --enable-completion|--install-helm|--install-kustomize|--completion-shells)
                 _require_value $# "$1" "${2:-}"
                 DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_pair "$DEPLOY_PASSTHROUGH_ARGS" "$1" "$2")
                 shift 2

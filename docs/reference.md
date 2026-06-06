@@ -61,6 +61,7 @@ These options apply to all subcommands and are parsed before subcommand-specific
 | `--enable-completion BOOL` | Enable shell completion setup | `true` | `--enable-completion false` |
 | `--completion-shells LIST` | Shells to configure (auto, bash, zsh, fish, or comma-separated) | `auto` | `--completion-shells bash,zsh` |
 | `--install-helm BOOL` | Install Helm package manager | `false` | `--install-helm true` |
+| `--install-kustomize BOOL` | Install Kustomize | `false` | `--install-kustomize true` |
 
 ### SSH Options (shared)
 
@@ -212,4 +213,5 @@ Checks performed: CPU count (>= 2), memory (>= 1700 MB), disk space, required po
 | `--force` | Skip confirmation prompt | — | `--force` |
 | `--preserve-cni` | Preserve CNI configurations | — | `--preserve-cni` |
 | `--remove-helm` | Remove Helm binary and configuration | — | `--remove-helm` |
+| `--remove-kustomize` | Remove Kustomize binary and configuration | — | `--remove-kustomize` |
 | `--dry-run` | Show cleanup plan and exit | — | `--dry-run` |

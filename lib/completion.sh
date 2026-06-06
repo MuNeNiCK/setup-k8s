@@ -214,6 +214,7 @@ setup_kubernetes_completions() {
         _setup_tool_completion kubeadm "$shell_type" || true
         _setup_tool_completion crictl "$shell_type" || true
         _setup_tool_completion helm "$shell_type" || true
+        _setup_tool_completion kustomize "$shell_type" || true
     done
 
     log_info "Shell completion setup completed!"
@@ -245,5 +246,6 @@ cleanup_kubernetes_completions() {
     _cleanup_tool_completion kubeadm
     _cleanup_tool_completion crictl
     _cleanup_tool_completion helm
+    _cleanup_tool_completion kustomize
     log_info "Shell completion cleanup completed!"
 }

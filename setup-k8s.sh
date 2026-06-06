@@ -93,6 +93,7 @@ Options (init/join):
   --enable-completion BOOL  Enable shell completion setup (default: true)
   --completion-shells LIST  Shells to configure (auto, bash, zsh, fish, or comma-separated)
   --install-helm BOOL     Install Helm package manager (default: false)
+  --install-kustomize BOOL  Install Kustomize (default: false)
   --dry-run               Show configuration summary and exit without making changes
   --verbose               Enable debug logging
   --quiet                 Suppress informational messages (errors only)
@@ -131,6 +132,7 @@ Options (cleanup):
   --force                 Skip confirmation prompt
   --preserve-cni          Preserve CNI configurations
   --remove-helm           Remove Helm binary and configuration
+  --remove-kustomize      Remove Kustomize binary and configuration
   --dry-run               Show cleanup plan and exit
 
   Run 'setup-k8s.sh cleanup --help' for details.
@@ -213,7 +215,7 @@ HELPEOF
             RESUME_ENABLED=true
             shift
             ;;
-        --ha|--control-plane|--swap-enabled|--first-control-plane|--skip-drain|--no-rollback|--auto-step-upgrade|--force|--preserve-cni|--remove-helm|--check-only|--preflight-strict)
+        --ha|--control-plane|--swap-enabled|--first-control-plane|--skip-drain|--no-rollback|--auto-step-upgrade|--force|--preserve-cni|--remove-helm|--remove-kustomize|--check-only|--preflight-strict)
             _cli_argc=$((_cli_argc + 1)); eval "_cli_${_cli_argc}=\$arg"
             shift
             ;;

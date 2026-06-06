@@ -50,6 +50,7 @@ KUBEADM_CP_ENDPOINT=""
 # Shell completion variables
 ENABLE_COMPLETION=true  # Enable shell completion setup for kubectl, kubeadm, etc.
 INSTALL_HELM=false  # Install Helm package manager
+INSTALL_KUSTOMIZE=false  # Install Kustomize
 COMPLETION_SHELLS="auto"  # auto, bash, zsh, fish, or comma-separated list
 
 # Deploy subcommand
@@ -126,3 +127,4 @@ RESUME_ENABLED=false  # Resume from a previous interrupted operation
 
 # Cleanup options
 REMOVE_HELM=false  # Remove Helm during cleanup (opt-in via --remove-helm)
+REMOVE_KUSTOMIZE=false  # Remove Kustomize during cleanup (opt-in via --remove-kustomize)

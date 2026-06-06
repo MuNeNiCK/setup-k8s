@@ -134,8 +134,13 @@ cleanup_dry_run() {
     log_info " 12. Reload systemd daemon"
     log_info " 13. Distribution-specific cleanup"
     log_info " 14. Remove shell completions (kubectl, kubeadm, crictl)"
+    local optional_step=15
     if [ "${REMOVE_HELM:-false}" = true ]; then
-        log_info " 15. Remove Helm binary and configuration (--remove-helm)"
+        log_info " ${optional_step}. Remove Helm binary and configuration (--remove-helm)"
+        optional_step=$((optional_step + 1))
+    fi
+    if [ "${REMOVE_KUSTOMIZE:-false}" = true ]; then
+        log_info " ${optional_step}. Remove Kustomize binary and configuration (--remove-kustomize)"
     fi
     log_info ""
     log_info "=== End of dry-run (no changes made) ==="
@@ -155,6 +160,7 @@ show_cleanup_help() {
     echo "  --force                 Skip confirmation prompt"
     echo "  --preserve-cni          Preserve CNI configurations"
     echo "  --remove-helm           Remove Helm binary and configuration"
+    echo "  --remove-kustomize      Remove Kustomize binary and configuration"
     echo "  --distro FAMILY         Override distro family detection (debian, rhel, suse, arch, alpine, generic)"
     _show_help_footer "  " "Show cleanup plan and exit"
     exit "${1:-0}"
@@ -177,6 +183,11 @@ parse_cleanup_args() {
             --remove-helm)
                 # shellcheck disable=SC2034 # used by setup-k8s.sh cleanup subcommand
                 REMOVE_HELM=true
+                shift
+                ;;
+            --remove-kustomize)
+                # shellcheck disable=SC2034 # used by setup-k8s.sh cleanup subcommand
+                REMOVE_KUSTOMIZE=true
                 shift
                 ;;
             *)

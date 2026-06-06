@@ -83,6 +83,12 @@ parse_setup_args() {
                 INSTALL_HELM="$2"
                 shift 2
                 ;;
+            --install-kustomize)
+                _require_value $# "$1" "${2:-}"
+                # shellcheck disable=SC2034 # used by validation.sh
+                INSTALL_KUSTOMIZE="$2"
+                shift 2
+                ;;
             --completion-shells)
                 _require_value $# "$1" "${2:-}"
                 # shellcheck disable=SC2034 # used by completion.sh
