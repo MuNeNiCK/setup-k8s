@@ -4,6 +4,36 @@ Use the `deploy` subcommand when you want to create a multi-node cluster from on
 
 The orchestrator does not need local root privileges. Remote nodes need SSH access with sudo.
 
+## Deployment model
+
+Run `setup-k8s.sh deploy` from your workstation or automation host. The script connects to each node over SSH, uploads a self-contained bundle, initializes the first control-plane node, then joins the rest of the cluster.
+
+```mermaid
+flowchart LR
+  operator["Workstation / CI runner"]
+  bundle["setup-k8s bundle"]
+
+  subgraph cluster["Kubernetes cluster"]
+    cp1["control-plane-1\nkubeadm init"]
+    cp2["control-plane-2\noptional HA join"]
+    cp3["control-plane-3\noptional HA join"]
+    worker1["worker-1\nkubeadm join"]
+    worker2["worker-2\nkubeadm join"]
+  end
+
+  operator -->|"run deploy"| bundle
+  bundle -->|"SSH + sudo"| cp1
+  bundle -->|"SSH + sudo"| cp2
+  bundle -->|"SSH + sudo"| cp3
+  bundle -->|"SSH + sudo"| worker1
+  bundle -->|"SSH + sudo"| worker2
+
+  cp1 -->|"join command + certificates"| cp2
+  cp1 -->|"join command + certificates"| cp3
+  cp1 -->|"join token"| worker1
+  cp1 -->|"join token"| worker2
+```
+
 ## Basic deployment
 
 ```bash
