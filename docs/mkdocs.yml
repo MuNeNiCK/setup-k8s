@@ -1,8 +1,8 @@
 site_name: setup-k8s
 site_description: Set up, operate, and tear down kubeadm Kubernetes clusters with one script.
 site_url: https://munenick.github.io/setup-k8s/
-repo_url: https://github.com/MuNeNICK/setup-k8s
-repo_name: MuNeNICK/setup-k8s
+repo_url: https://github.com/MuNeNiCK/setup-k8s
+repo_name: MuNeNiCK/setup-k8s
 docs_dir: content
 site_dir: ../site
 

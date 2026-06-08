@@ -14,7 +14,7 @@ source "$SCRIPT_DIR/lib/vm_harness.sh"
 SETUP_K8S_SCRIPT="$SCRIPT_DIR/../setup-k8s.sh"
 # cleanup is now integrated into setup-k8s.sh as the 'cleanup' subcommand
 DOCKER_VM_RUNNER_IMAGE="${DOCKER_VM_RUNNER_IMAGE:-ghcr.io/munenick/docker-vm-runner:latest}"
-GITHUB_BASE_URL="${GITHUB_BASE_URL:-https://raw.githubusercontent.com/MuNeNICK/setup-k8s/main}"
+GITHUB_BASE_URL="${GITHUB_BASE_URL:-https://raw.githubusercontent.com/MuNeNiCK/setup-k8s/main}"
 VM_DATA_DIR="${VM_DATA_DIR:-$SCRIPT_DIR/data}"
 
 SUPPORTED_DISTROS=(

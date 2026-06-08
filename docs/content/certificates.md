@@ -7,14 +7,14 @@ Kubeadm certificates expire after one year by default. Expired certificates can 
 ## Check expiration
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
   renew --check-only
 ```
 
 ## Renew all certificates
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- renew
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- renew
 ```
 
 After renewal, control-plane static pod components are restarted with `crictl stop`. Kubelet restarts the stopped containers, and the script waits for the API server to become ready.
@@ -22,14 +22,14 @@ After renewal, control-plane static pod components are restarted with `crictl st
 ## Renew specific certificates
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
   renew --certs apiserver,front-proxy-client
 ```
 
 ## Remote check
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- \
   renew \
   --control-planes root@192.168.1.10,root@192.168.1.11 \
   --ssh-key ~/.ssh/id_rsa \
@@ -39,7 +39,7 @@ curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sh -s -
 ## Remote renewal
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- \
   renew \
   --control-planes root@192.168.1.10,root@192.168.1.11 \
   --ssh-key ~/.ssh/id_rsa

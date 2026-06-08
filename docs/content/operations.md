@@ -5,13 +5,13 @@
 The `status` subcommand performs read-only local checks and does not require `sudo`.
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- status
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- status
 ```
 
 Use wide output for cluster-level information:
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- status --output wide
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- status --output wide
 ```
 
 Text mode checks:

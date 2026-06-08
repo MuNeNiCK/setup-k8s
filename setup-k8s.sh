@@ -29,7 +29,7 @@ case "$0" in
 esac
 
 # Default GitHub base URL (can be overridden)
-GITHUB_BASE_URL="${GITHUB_BASE_URL:-https://raw.githubusercontent.com/MuNeNICK/setup-k8s/main}"
+GITHUB_BASE_URL="${GITHUB_BASE_URL:-https://raw.githubusercontent.com/MuNeNiCK/setup-k8s/main}"
 
 # Defaults for global flags parsed before modules are loaded
 LOG_DIR="${LOG_DIR:-}"

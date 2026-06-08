@@ -5,7 +5,7 @@
 Set pod and service CIDRs during initialization:
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
   init \
   --pod-network-cidr 192.168.0.0/16 \
   --service-cidr 10.96.0.0/12
@@ -16,7 +16,7 @@ curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh
 Pass comma-separated CIDRs, one IPv4 and one IPv6:
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
   init \
   --pod-network-cidr 10.244.0.0/16,fd00:10:244::/48 \
   --service-cidr 10.96.0.0/12,fd00:20::/108
@@ -25,7 +25,7 @@ curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh
 ## IPv6 single-stack
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
   init \
   --pod-network-cidr fd00:10:244::/48 \
   --service-cidr fd00:20::/108
@@ -36,7 +36,7 @@ curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh
 IPv6 addresses are supported for `--ha-vip`. The control-plane endpoint is automatically formatted with brackets.
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
   init \
   --ha \
   --ha-vip fd00::100 \

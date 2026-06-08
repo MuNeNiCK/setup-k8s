@@ -16,28 +16,28 @@ It supports local node-by-node execution and remote orchestration over SSH.
 Run on the first control-plane node:
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
   upgrade --kubernetes-version 1.33.2 --first-control-plane
 ```
 
 Run on additional control-plane nodes and workers:
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
   upgrade --kubernetes-version 1.33.2
 ```
 
 For a single-node cluster:
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
   upgrade --kubernetes-version 1.33.2 --first-control-plane --skip-drain
 ```
 
 ## Remote mode
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- \
   upgrade \
   --control-planes 10.0.0.1,10.0.0.2 \
   --workers 10.0.0.3,10.0.0.4 \

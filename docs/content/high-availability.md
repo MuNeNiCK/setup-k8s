@@ -24,7 +24,7 @@ For remote `deploy`, `--ha-vip` enables HA mode.
 ## Initialize the first control-plane node
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
   init \
   --ha \
   --ha-vip 192.168.1.100 \
@@ -34,7 +34,7 @@ curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh
 ## Join additional control-plane nodes
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
   join \
   --control-plane \
   --certificate-key <certificate-key> \
@@ -47,7 +47,7 @@ curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh
 ## Join workers
 
 ```bash
-curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
   join \
   --join-token <token> \
   --join-address 192.168.1.100:6443 \
