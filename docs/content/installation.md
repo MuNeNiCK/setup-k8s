@@ -112,7 +112,7 @@ curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh
 
 ## Certificate Renewal
 
-Renew kubeadm-managed certificates before they expire (default: 1 year). See [Configuration - Certificate Renewal](configuration.md#certificate-renewal) for detailed usage.
+Renew kubeadm-managed certificates before they expire (default: 1 year). See [Certificates](certificates.md) for detailed usage.
 
 ```bash
 # Check certificate expiration
@@ -126,7 +126,7 @@ curl -fsSL https://github.com/MuNeNICK/setup-k8s/raw/main/setup-k8s.sh | sudo sh
 ## Prerequisites
 
 ### System Requirements
-- One of the [supported distributions](../README.md#distribution-test-results)
+- One of the [supported distributions](supported-distros.md)
 - 2 CPUs or more
 - 2GB of RAM per machine
 - Full network connectivity between cluster machines

@@ -1,0 +1,61 @@
+site_name: setup-k8s
+site_description: Set up, operate, and tear down kubeadm Kubernetes clusters with one script.
+site_url: https://munenick.github.io/setup-k8s/
+repo_url: https://github.com/MuNeNICK/setup-k8s
+repo_name: MuNeNICK/setup-k8s
+docs_dir: content
+site_dir: ../site
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Overview: index.md
+  - Quick Start: quick-start.md
+  - Installation: installation.md
+  - Remote Deploy: remote-deploy.md
+  - Configuration: configuration.md
+  - High Availability: high-availability.md
+  - Networking: networking.md
+  - Operations: operations.md
+  - Upgrades: upgrades.md
+  - Backup and Restore: backup-restore.md
+  - Certificates: certificates.md
+  - Cleanup: cleanup.md
+  - Supported Distros: supported-distros.md
+  - Troubleshooting: troubleshooting.md
+  - Reference: reference.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
