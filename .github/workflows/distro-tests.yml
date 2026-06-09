@@ -1,4 +1,4 @@
-name: Distro Tests
+name: Setup Distro Tests
 
 on:
   push:

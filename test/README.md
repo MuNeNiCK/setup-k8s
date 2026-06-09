@@ -42,6 +42,15 @@ Subcommand scenarios:
 ./scenarios/ha.sh --failover --distro ubuntu-24.04-cloud-amd64
 ```
 
+## GitHub Actions Coverage
+
+| Workflow | Coverage |
+| --- | --- |
+| `ShellCheck & Unit Tests` | Runs shellcheck and unit tests for local scripts. |
+| `Setup Option Tests` | Runs the setup/remove lifecycle across the setup option matrix. |
+| `Setup Distro Tests` | Runs the setup/remove lifecycle across the distro matrix. |
+| `Scenario Tests` | Runs operational checks across the scenario matrix. |
+
 ## Configuration
 
 | Variable | Default |

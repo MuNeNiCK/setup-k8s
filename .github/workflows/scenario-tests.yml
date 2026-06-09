@@ -1,0 +1,63 @@
+name: Scenario Tests
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scenario-tests
+  cancel-in-progress: false
+
+jobs:
+  scenario-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: deploy-remove
+            command: ./scenarios/deploy-remove.sh --distro ubuntu-24.04-cloud-amd64
+          - name: backup-restore
+            command: ./scenarios/backup-restore.sh --distro ubuntu-24.04-cloud-amd64
+          - name: cert-renew
+            command: ./scenarios/cert-renew.sh --distro ubuntu-24.04-cloud-amd64
+          - name: upgrade
+            command: ./scenarios/upgrade.sh --distro ubuntu-24.04-cloud-amd64
+          - name: generic
+            command: ./scenarios/generic.sh --host-distro ubuntu-24.04-cloud-amd64 --memory 4096 --cpus 2
+          - name: ha-init
+            command: ./scenarios/ha.sh --distro ubuntu-24.04-cloud-amd64 --memory 4096 --cpus 2
+          - name: ha-failover
+            command: ./scenarios/ha.sh --failover --distro ubuntu-24.04-cloud-amd64 --memory 3072 --cpus 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Run scenario test
+        working-directory: test
+        env:
+          BASH_DEBUG: '0'
+        run: |
+          set -euo pipefail
+          ${{ matrix.command }}
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: logs-${{ matrix.name }}
+          path: |
+            test/results/logs
+            test/results/test-result.json
+          if-no-files-found: ignore
+
+      - name: Cleanup workspace artifacts
+        if: always()
+        run: |
+          sudo rm -rf test/data
+          sudo rm -rf test/results
