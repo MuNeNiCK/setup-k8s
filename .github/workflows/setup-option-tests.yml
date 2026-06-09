@@ -72,6 +72,26 @@ jobs:
             distro: ubuntu-24.04-cloud-amd64
             k8s_version: ""
             setup_args: "--install-helm true --completion-shells bash"
+          - name: ubuntu2404-kustomize-no-completion
+            distro: ubuntu-24.04-cloud-amd64
+            k8s_version: ""
+            setup_args: "--verbose --log-dir /tmp/setup-k8s-logs --audit-syslog --install-kustomize true --enable-completion false"
+          - name: ubuntu2404-completion-shells
+            distro: ubuntu-24.04-cloud-amd64
+            k8s_version: ""
+            setup_args: "--completion-shells bash,zsh,fish"
+          - name: ubuntu2404-network-config
+            distro: ubuntu-24.04-cloud-amd64
+            k8s_version: ""
+            setup_args: "--pod-network-cidr 10.244.0.0/16 --service-cidr 10.96.0.0/12 --apiserver-advertise-address __VM_IP__ --control-plane-endpoint __VM_IP__:6443 --api-server-extra-sans setup-k8s.local,__VM_IP__ --kubelet-node-ip __VM_IP__"
+          - name: ubuntu2404-kubeadm-patch
+            distro: ubuntu-24.04-cloud-amd64
+            k8s_version: ""
+            setup_args: "--kubeadm-config-patch __KUBEADM_PATCH__"
+          - name: ubuntu2404-swap-enabled
+            distro: ubuntu-24.04-cloud-amd64
+            k8s_version: "1.32"
+            setup_args: "--swap-enabled"
           - name: ubuntu2204-custom-k8s
             distro: ubuntu-22.04-cloud-amd64
             k8s_version: "1.31"

@@ -146,6 +146,65 @@ test_pipefail_safety() {
 }
 
 # ============================================================
+# Test: setup dry-run output covers parsed setup options
+# ============================================================
+test_setup_dry_run_output() {
+    echo "=== Test: setup dry-run output ==="
+    (
+        source "$PROJECT_ROOT/lib/variables.sh"
+        source "$PROJECT_ROOT/lib/logging.sh"
+        source "$PROJECT_ROOT/lib/runners.sh"
+
+        export ACTION="init"
+        export CRI="crio"
+        export PROXY_MODE="nftables"
+        export K8S_VERSION="1.32"
+        export DISTRO_NAME="ubuntu"
+        export DISTRO_FAMILY="debian"
+        export SWAP_ENABLED=true
+        export INSTALL_HELM=true
+        export INSTALL_KUSTOMIZE=true
+        export ENABLE_COMPLETION=false
+        export COMPLETION_SHELLS="bash,zsh,fish"
+        export KUBEADM_POD_CIDR="10.244.0.0/16"
+        export KUBEADM_SERVICE_CIDR="10.96.0.0/12"
+        export KUBEADM_API_ADDR="10.0.2.15"
+        export KUBEADM_CP_ENDPOINT="10.0.2.15:6443"
+
+        local output
+        output=$(_setup_dry_run 2>&1)
+
+        local has_action=false has_cri=false has_proxy=false has_swap=false
+        local has_helm=false has_kustomize=false has_completion=false
+        local has_pod_cidr=false has_service_cidr=false has_api=false has_endpoint=false
+
+        echo "$output" | grep -q "Action: init" && has_action=true
+        echo "$output" | grep -q "Container Runtime: crio" && has_cri=true
+        echo "$output" | grep -q "Proxy mode: nftables" && has_proxy=true
+        echo "$output" | grep -q "Swap enabled: true" && has_swap=true
+        echo "$output" | grep -q "Install Helm: true" && has_helm=true
+        echo "$output" | grep -q "Install Kustomize: true" && has_kustomize=true
+        echo "$output" | grep -q "Shell Completion: false (shells: bash,zsh,fish)" && has_completion=true
+        echo "$output" | grep -q "Pod network CIDR: 10.244.0.0/16" && has_pod_cidr=true
+        echo "$output" | grep -q "Service CIDR: 10.96.0.0/12" && has_service_cidr=true
+        echo "$output" | grep -q "API server address: 10.0.2.15" && has_api=true
+        echo "$output" | grep -q "Control plane endpoint: 10.0.2.15:6443" && has_endpoint=true
+
+        _assert_eq "dry-run action" "true" "$has_action"
+        _assert_eq "dry-run cri" "true" "$has_cri"
+        _assert_eq "dry-run proxy" "true" "$has_proxy"
+        _assert_eq "dry-run swap" "true" "$has_swap"
+        _assert_eq "dry-run helm" "true" "$has_helm"
+        _assert_eq "dry-run kustomize" "true" "$has_kustomize"
+        _assert_eq "dry-run completion" "true" "$has_completion"
+        _assert_eq "dry-run pod cidr" "true" "$has_pod_cidr"
+        _assert_eq "dry-run service cidr" "true" "$has_service_cidr"
+        _assert_eq "dry-run api address" "true" "$has_api"
+        _assert_eq "dry-run endpoint" "true" "$has_endpoint"
+    )
+}
+
+# ============================================================
 # Test: --swap-enabled in help text
 # ============================================================
 test_help_contains_swap() {

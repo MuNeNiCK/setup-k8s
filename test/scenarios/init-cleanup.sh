@@ -231,7 +231,29 @@ CIEOF
     log_info "Starting Kubernetes setup (init)..."
     local setup_args="init"
     [ -n "$k8s_version_flag" ] && setup_args+=" $(printf '%q' "$k8s_version_flag") $(printf '%q' "$k8s_version_val")"
-    [ -n "$setup_extra_args_str" ] && setup_args+=" $setup_extra_args_str"
+    if [ -n "$setup_extra_args_str" ]; then
+        if [[ "$setup_extra_args_str" == *"__VM_IP__"* ]]; then
+            local vm_ip
+            vm_ip=$(vm_ssh "ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if (\$i==\"src\") {print \$(i+1); exit}}' || hostname -I | awk '{print \$1}'" | tr -d '[:space:]')
+            if [ -z "$vm_ip" ]; then
+                log_error "Failed to resolve VM IP for setup args"
+                _e2e_cleanup_vm_container
+                cleanup_ssh_key
+                return 1
+            fi
+            setup_extra_args_str="${setup_extra_args_str//__VM_IP__/$vm_ip}"
+        fi
+        if [[ "$setup_extra_args_str" == *"__KUBEADM_PATCH__"* ]]; then
+            local kubeadm_patch_path="/tmp/setup-k8s-kubeadm-patch.yaml"
+            vm_ssh "cat > '$kubeadm_patch_path' <<'PATCH'
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+shutdownGracePeriod: 30s
+PATCH"
+            setup_extra_args_str="${setup_extra_args_str//__KUBEADM_PATCH__/$kubeadm_patch_path}"
+        fi
+        setup_args+=" $setup_extra_args_str"
+    fi
 
     local setup_cmd
     if [ "$TEST_MODE" = "online" ]; then

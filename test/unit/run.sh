@@ -87,6 +87,7 @@ test_unknown_option_exit_code
 test_help_early_exit
 test_validate_proxy_mode
 test_pipefail_safety
+test_setup_dry_run_output
 
 # --- swap ---
 test_swap_enabled_default
