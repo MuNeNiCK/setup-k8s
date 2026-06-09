@@ -14,8 +14,13 @@ cleanup_debian() {
     log_info "Purging Kubernetes and CRI packages..."
     apt-get purge -y kubeadm kubectl kubelet kubernetes-cni cri-tools ||
         log_warn "Package purge had errors (some packages may not be installed)"
-    apt-get purge -y cri-o cri-o-runc ||
+    apt-get purge -y cri-o ||
         log_warn "CRI-O removal had errors (may not be installed)"
+    for pkg in cri-o-runc crun conmon; do
+        if dpkg -s "$pkg" >/dev/null 2>&1; then
+            apt-get purge -y "$pkg" || log_warn "Failed to remove $pkg"
+        fi
+    done
     apt-get autoremove -y || true
 
     # Remove repository files
