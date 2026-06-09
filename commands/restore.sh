@@ -7,13 +7,81 @@
 
 # Cleanup handler for etcd manifest restore (uses fixed paths, not local variables)
 _ETCD_MANIFEST_PATH="/etc/kubernetes/manifests/etcd.yaml"
-_ETCD_MANIFEST_TMP="/tmp/etcd.yaml"
+_ETCD_MANIFEST_TMP_DIR="/tmp/setup-k8s-restore-manifests"
+_ETCD_CONTAINER_RESTORE_NAME="setup-k8s-restore-data"
+_ETCD_CONTAINER_SNAPSHOT_NAME="setup-k8s-restore-snapshot.db"
+_ETCD_PREPARED_RESTORE_DIR=""
 
-_restore_etcd_manifest() {
-    if [ -f "$_ETCD_MANIFEST_TMP" ] && [ ! -f "$_ETCD_MANIFEST_PATH" ]; then
-        log_warn "Restoring etcd manifest from backup..."
-        mv "$_ETCD_MANIFEST_TMP" "$_ETCD_MANIFEST_PATH"
+_restore_control_plane_manifests() {
+    local name src dst
+    for name in etcd kube-apiserver kube-controller-manager kube-scheduler; do
+        src="${_ETCD_MANIFEST_TMP_DIR}/${name}.yaml"
+        dst="/etc/kubernetes/manifests/${name}.yaml"
+        if [ -f "$src" ] && [ ! -f "$dst" ]; then
+            log_warn "Restoring ${name} manifest from backup..."
+            mv "$src" "$dst"
+        fi
+    done
+    rmdir "$_ETCD_MANIFEST_TMP_DIR" 2>/dev/null || true
+}
+
+_move_control_plane_manifest() {
+    local name="$1"
+    local src="/etc/kubernetes/manifests/${name}.yaml"
+    local dst="${_ETCD_MANIFEST_TMP_DIR}/${name}.yaml"
+    if [ -f "$src" ]; then
+        mv "$src" "$dst"
     fi
+}
+
+_wait_static_pod_container_stopped() {
+    local name="$1" timeout="${2:-60}" elapsed=0
+    while [ "$elapsed" -lt "$timeout" ]; do
+        if ! crictl ps --name="$name" --state=running -q 2>/dev/null | grep -q .; then
+            return 0
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+    return 1
+}
+
+_prepare_etcd_restore_with_container_binary() {
+    local cid="$1" snapshot_path="$2" etcd_data_dir="$3"
+    local container_snapshot="${etcd_data_dir}/${_ETCD_CONTAINER_SNAPSHOT_NAME}"
+    local container_restore_dir="${etcd_data_dir}/${_ETCD_CONTAINER_RESTORE_NAME}"
+
+    _ETCD_PREPARED_RESTORE_DIR=""
+    rm -rf "$container_restore_dir" "$container_snapshot"
+    if ! cp "$snapshot_path" "$container_snapshot"; then
+        log_error "Failed to stage snapshot for container-based restore"
+        return 1
+    fi
+
+    local restore_ok=false
+    log_info "Trying etcdutl inside the running etcd container"
+    if crictl exec "$cid" etcdutl snapshot restore "$container_snapshot" \
+        --data-dir "$container_restore_dir"; then
+        restore_ok=true
+    fi
+
+    if [ "$restore_ok" = false ]; then
+        log_info "Trying etcdctl inside the running etcd container"
+        if crictl exec "$cid" etcdctl snapshot restore "$container_snapshot" \
+            --data-dir "$container_restore_dir"; then
+            restore_ok=true
+        fi
+    fi
+
+    rm -f "$container_snapshot"
+    if [ "$restore_ok" = false ] || [ ! -d "$container_restore_dir" ]; then
+        log_error "Container-based snapshot restore preparation failed"
+        rm -rf "$container_restore_dir"
+        return 1
+    fi
+
+    _ETCD_PREPARED_RESTORE_DIR="$container_restore_dir"
+    return 0
 }
 
 restore_etcd_local() {
@@ -27,7 +95,10 @@ restore_etcd_local() {
         return 1
     fi
 
-    # Find etcd container and extract binaries before stopping
+    local etcd_data_dir="/var/lib/etcd"
+    local use_prepared_restore=false
+
+    # Find etcd container and prepare restore tooling before stopping
     local cid
     local etcd_bin_dir
     etcd_bin_dir=$(mktemp -d /tmp/etcd-restore-bin-XXXXXX)
@@ -36,28 +107,48 @@ restore_etcd_local() {
         rm -rf "$etcd_bin_dir"; return 1
     fi
     if ! _extract_etcd_binaries "$cid" "$etcd_bin_dir"; then
-        _audit_log "restore" "failed" "reason=binary_extraction_failed"
-        rm -rf "$etcd_bin_dir"; return 1
+        log_warn "Falling back to container-based snapshot restore preparation"
+        if _prepare_etcd_restore_with_container_binary "$cid" "$ETCD_SNAPSHOT_PATH" "$etcd_data_dir"; then
+            use_prepared_restore=true
+        else
+            _audit_log "restore" "failed" "reason=binary_extraction_failed"
+            rm -rf "$etcd_bin_dir"; return 1
+        fi
     fi
 
-    # Move etcd static pod manifest to stop the etcd container
+    # Move static pod manifests to stop API writers and etcd before restoring data.
     if [ ! -f "$_ETCD_MANIFEST_PATH" ]; then
         log_error "etcd manifest not found: $_ETCD_MANIFEST_PATH"
         _audit_log "restore" "failed" "reason=etcd_manifest_not_found"
         return 1
     fi
 
-    log_info "Moving etcd manifest to stop etcd container..."
-    mv "$_ETCD_MANIFEST_PATH" "$_ETCD_MANIFEST_TMP"
+    rm -rf "$_ETCD_MANIFEST_TMP_DIR"
+    mkdir -p "$_ETCD_MANIFEST_TMP_DIR"
+    _push_cleanup _restore_control_plane_manifests
 
-    # Register cleanup handler to restore manifest on failure
-    _push_cleanup _restore_etcd_manifest
+    log_info "Stopping Kubernetes control-plane static pods..."
+    _move_control_plane_manifest kube-apiserver
+    _move_control_plane_manifest kube-controller-manager
+    _move_control_plane_manifest kube-scheduler
+
+    local component
+    for component in kube-apiserver kube-controller-manager kube-scheduler; do
+        if ! _wait_static_pod_container_stopped "$component" 60; then
+            log_error "Timeout waiting for ${component} container to stop"
+            _audit_log "restore" "failed" "reason=${component}_stop_timeout"
+            return 1
+        fi
+    done
+
+    log_info "Moving etcd manifest to stop etcd container..."
+    _move_control_plane_manifest etcd
 
     # Wait for etcd container to stop
     log_info "Waiting for etcd container to stop..."
     local wait_elapsed=0 wait_timeout=60
     while [ $wait_elapsed -lt $wait_timeout ]; do
-        if ! crictl ps --name=etcd --state=running -q 2>/dev/null | grep -q .; then
+        if ! _find_etcd_container >/dev/null 2>&1; then
             break
         fi
         sleep 2
@@ -71,7 +162,6 @@ restore_etcd_local() {
     log_info "etcd container stopped"
 
     # Backup existing data directory
-    local etcd_data_dir="/var/lib/etcd"
     if [ -d "$etcd_data_dir" ]; then
         local backup_dir
         backup_dir="${etcd_data_dir}.bak.$(date +%Y%m%d-%H%M%S)"
@@ -82,7 +172,16 @@ restore_etcd_local() {
     # Restore snapshot — use etcdutl for etcd 3.6+ (etcdctl snapshot restore was removed)
     log_info "Restoring etcd snapshot..."
     local restore_ok=false
-    if [ -x "$etcd_bin_dir/etcdutl" ]; then
+    if [ "$use_prepared_restore" = true ]; then
+        local prepared_restore_dir="$_ETCD_PREPARED_RESTORE_DIR"
+        if [ -n "${backup_dir:-}" ]; then
+            prepared_restore_dir="${backup_dir}/${_ETCD_CONTAINER_RESTORE_NAME}"
+        fi
+        if [ -d "$prepared_restore_dir" ]; then
+            mv "$prepared_restore_dir" "$etcd_data_dir"
+            restore_ok=true
+        fi
+    elif [ -x "$etcd_bin_dir/etcdutl" ]; then
         log_info "Using etcdutl for snapshot restore"
         if "$etcd_bin_dir/etcdutl" snapshot restore "$ETCD_SNAPSHOT_PATH" \
             --data-dir "$etcd_data_dir"; then
@@ -113,17 +212,16 @@ restore_etcd_local() {
     fi
     log_info "Snapshot restored to $etcd_data_dir"
 
-    # Restore etcd manifest
+    # Restore etcd manifest first so storage is healthy before API components start.
     log_info "Restoring etcd manifest to start etcd..."
-    mv "$_ETCD_MANIFEST_TMP" "$_ETCD_MANIFEST_PATH"
-    _pop_cleanup
+    mv "${_ETCD_MANIFEST_TMP_DIR}/etcd.yaml" "$_ETCD_MANIFEST_PATH"
 
     # Wait for etcd to start and become healthy
     log_info "Waiting for etcd to start..."
     local start_elapsed=0 start_timeout=120
     while [ $start_elapsed -lt $start_timeout ]; do
         local new_cid
-        new_cid=$(crictl ps --name=etcd --state=running -q 2>/dev/null | head -1) || true
+        new_cid=$(_find_etcd_container 2>/dev/null) || true
         if [ -n "$new_cid" ]; then
             # Health check
             if _etcdctl_exec "$new_cid" endpoint health >/dev/null 2>&1; then
@@ -141,6 +239,10 @@ restore_etcd_local() {
         rm -rf "$etcd_bin_dir"
         return 1
     fi
+
+    log_info "Restoring Kubernetes control-plane manifests..."
+    _restore_control_plane_manifests
+    _pop_cleanup
 
     # Clean up
     rm -rf "$etcd_bin_dir"

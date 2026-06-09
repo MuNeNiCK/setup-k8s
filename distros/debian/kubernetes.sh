@@ -49,8 +49,9 @@ setup_kubernetes_debian() {
     }
     
     # Install Kubernetes components
-    apt-get install -y --allow-change-held-packages kubelet="${VERSION_STRING}" kubeadm="${VERSION_STRING}" kubectl="${VERSION_STRING}"
-    apt-mark hold kubelet kubeadm kubectl
+    apt-get install -y --allow-change-held-packages \
+        kubelet="${VERSION_STRING}" kubeadm="${VERSION_STRING}" kubectl="${VERSION_STRING}" cri-tools
+    apt-mark hold kubelet kubeadm kubectl cri-tools
 
     # Enable and start kubelet (consistent with other distros)
     _enable_and_start_kubelet
@@ -87,7 +88,7 @@ upgrade_kubelet_kubectl_debian() {
         return 1
     }
 
-    apt-mark unhold kubelet kubectl
-    apt-get install -y --allow-change-held-packages kubelet="${VERSION_STRING}" kubectl="${VERSION_STRING}"
-    apt-mark hold kubelet kubectl
+    apt-mark unhold kubelet kubectl cri-tools
+    apt-get install -y --allow-change-held-packages kubelet="${VERSION_STRING}" kubectl="${VERSION_STRING}" cri-tools
+    apt-mark hold kubelet kubectl cri-tools
 }

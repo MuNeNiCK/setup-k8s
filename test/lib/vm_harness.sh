@@ -117,6 +117,38 @@ cleanup_orphaned_containers() {
     done
 }
 
+_docker_subnet_prefix() {
+    local subnet_addr="${1%/*}"
+    printf '%s\n' "${subnet_addr%.*}"
+}
+
+_rebase_test_ip() {
+    local ip="$1" old_prefix="$2" new_prefix="$3"
+    if [[ "$ip" == "$old_prefix".* ]]; then
+        printf '%s.%s\n' "$new_prefix" "${ip##*.}"
+    else
+        printf '%s\n' "$ip"
+    fi
+}
+
+_rebase_docker_network_config() {
+    local old_subnet="$1" new_subnet="$2"
+    local old_prefix new_prefix
+    old_prefix=$(_docker_subnet_prefix "$old_subnet")
+    new_prefix=$(_docker_subnet_prefix "$new_subnet")
+
+    [ -n "${CP_DOCKER_IP:-}" ] && CP_DOCKER_IP=$(_rebase_test_ip "$CP_DOCKER_IP" "$old_prefix" "$new_prefix")
+    [ -n "${WORKER_DOCKER_IP:-}" ] && WORKER_DOCKER_IP=$(_rebase_test_ip "$WORKER_DOCKER_IP" "$old_prefix" "$new_prefix")
+
+    if declare -p _FO_DOCKER_IPS >/dev/null 2>&1; then
+        local i
+        for i in "${!_FO_DOCKER_IPS[@]}"; do
+            _FO_DOCKER_IPS[$i]=$(_rebase_test_ip "${_FO_DOCKER_IPS[$i]}" "$old_prefix" "$new_prefix")
+        done
+    fi
+    [ -n "${_FO_HA_VIP:-}" ] && _FO_HA_VIP=$(_rebase_test_ip "$_FO_HA_VIP" "$old_prefix" "$new_prefix")
+}
+
 # Generate a self-contained bundle script for bundled test execution.
 # Usage: _generate_bundle <entry_script> <bundle_path> [include_mode]
 #   entry_script:  path to the entry script (setup-k8s.sh)
@@ -333,8 +365,29 @@ vm_scp() {
 setup_docker_network() {
     log_info "Creating Docker network: $DOCKER_NETWORK ($DOCKER_SUBNET)"
     docker network rm "$DOCKER_NETWORK" >/dev/null 2>&1 || true
-    docker network create --subnet "$DOCKER_SUBNET" "$DOCKER_NETWORK" >/dev/null
-    log_success "Docker network created"
+    local requested_subnet="$DOCKER_SUBNET"
+    local create_err
+    if create_err=$(docker network create --subnet "$DOCKER_SUBNET" "$DOCKER_NETWORK" 2>&1 >/dev/null); then
+        log_success "Docker network created"
+        return 0
+    fi
+
+    log_warn "Docker subnet $DOCKER_SUBNET is unavailable: $create_err"
+    local n candidate
+    for n in $(seq 0 99); do
+        candidate="10.201.${n}.0/24"
+        docker network rm "$DOCKER_NETWORK" >/dev/null 2>&1 || true
+        if docker network create --subnet "$candidate" "$DOCKER_NETWORK" >/dev/null 2>&1; then
+            DOCKER_SUBNET="$candidate"
+            _rebase_docker_network_config "$requested_subnet" "$DOCKER_SUBNET"
+            log_warn "Using fallback Docker network: $DOCKER_NETWORK ($DOCKER_SUBNET)"
+            log_success "Docker network created"
+            return 0
+        fi
+    done
+
+    log_error "Failed to create Docker network $DOCKER_NETWORK"
+    return 1
 }
 
 # Remove Docker network if it exists
@@ -359,7 +412,7 @@ start_vm() {
     mkdir -p "$vm_data_dir"
 
     log_info "Starting VM: $container_name (IP: $static_ip, SSH port: $host_ssh_port)"
-    docker run -d --rm \
+    if ! docker run -d --rm \
         --name "$container_name" \
         --label "$label" \
         --network "$DOCKER_NETWORK" --ip "$static_ip" \
@@ -374,7 +427,10 @@ start_vm() {
         -e "MEMORY=$VM_MEMORY" \
         -e "CPUS=$VM_CPUS" \
         -e "DISK_SIZE=$VM_DISK_SIZE" \
-        "$DOCKER_VM_RUNNER_IMAGE" >/dev/null
+        "$DOCKER_VM_RUNNER_IMAGE" >/dev/null; then
+        log_error "Failed to start container $container_name"
+        return 1
+    fi
     log_success "Container $container_name started"
 }
 
@@ -431,18 +487,19 @@ vm_ssh_root() {
 create_single_cp_env() {
     local container_name=$1 data_subdir=$2 managed_by_label=$3 orphan_label=$4
 
-    cleanup_orphaned_containers "$orphan_label"
-    setup_docker_network
-    setup_ssh_key
+    cleanup_orphaned_containers "$orphan_label" || true
+    setup_docker_network || return 1
+    setup_ssh_key || return 1
 
-    _CP_SSH_PORT=$(find_free_port)
+    _CP_SSH_PORT=$(find_free_port) || return 1
 
-    start_vm "$container_name" "$CP_DOCKER_IP" "$_CP_SSH_PORT" "$data_subdir" "managed-by=$managed_by_label"
+    start_vm "$container_name" "$CP_DOCKER_IP" "$_CP_SSH_PORT" "$data_subdir" "managed-by=$managed_by_label" || return 1
     _CP_CONTAINER_NAME="$container_name"
     _CP_WATCHDOG_PID=$(_start_vm_container_watchdog "$$" "$container_name")
 
-    wait_for_vm_ready "$container_name" "$_CP_SSH_PORT" "CP"
-    setup_root_ssh "$_CP_SSH_PORT" "CP"
+    wait_for_vm_ready "$container_name" "$_CP_SSH_PORT" "CP" || return 1
+    setup_root_ssh "$_CP_SSH_PORT" "CP" || return 1
+    return 0
 }
 
 # Create a control-plane + worker VM environment.
@@ -451,26 +508,27 @@ create_single_cp_env() {
 create_cp_worker_env() {
     local cp_name=$1 worker_name=$2 cp_data=$3 worker_data=$4 managed_by=$5 orphan_label=$6
 
-    cleanup_orphaned_containers "$orphan_label"
-    setup_docker_network
-    setup_ssh_key
+    cleanup_orphaned_containers "$orphan_label" || true
+    setup_docker_network || return 1
+    setup_ssh_key || return 1
 
-    _CP_SSH_PORT=$(find_free_port)
-    _WORKER_SSH_PORT=$(find_free_port)
+    _CP_SSH_PORT=$(find_free_port) || return 1
+    _WORKER_SSH_PORT=$(find_free_port) || return 1
 
-    start_vm "$cp_name" "$CP_DOCKER_IP" "$_CP_SSH_PORT" "$cp_data" "managed-by=$managed_by"
+    start_vm "$cp_name" "$CP_DOCKER_IP" "$_CP_SSH_PORT" "$cp_data" "managed-by=$managed_by" || return 1
     _CP_CONTAINER_NAME="$cp_name"
     _CP_WATCHDOG_PID=$(_start_vm_container_watchdog "$$" "$cp_name")
 
-    start_vm "$worker_name" "$WORKER_DOCKER_IP" "$_WORKER_SSH_PORT" "$worker_data" "managed-by=$managed_by"
+    start_vm "$worker_name" "$WORKER_DOCKER_IP" "$_WORKER_SSH_PORT" "$worker_data" "managed-by=$managed_by" || return 1
     _WORKER_CONTAINER_NAME="$worker_name"
     _WORKER_WATCHDOG_PID=$(_start_vm_container_watchdog "$$" "$worker_name")
 
-    wait_for_vm_ready "$cp_name" "$_CP_SSH_PORT" "CP"
-    wait_for_vm_ready "$worker_name" "$_WORKER_SSH_PORT" "Worker"
+    wait_for_vm_ready "$cp_name" "$_CP_SSH_PORT" "CP" || return 1
+    wait_for_vm_ready "$worker_name" "$_WORKER_SSH_PORT" "Worker" || return 1
 
-    setup_root_ssh "$_CP_SSH_PORT" "CP"
-    setup_root_ssh "$_WORKER_SSH_PORT" "Worker"
+    setup_root_ssh "$_CP_SSH_PORT" "CP" || return 1
+    setup_root_ssh "$_WORKER_SSH_PORT" "Worker" || return 1
+    return 0
 }
 
 # Common arg parser for --distro, --k8s-version, --memory, --cpus, --disk-size

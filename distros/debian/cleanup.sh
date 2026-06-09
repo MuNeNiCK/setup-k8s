@@ -6,13 +6,13 @@ cleanup_debian() {
     
     # Remove package holds
     log_info "Removing package holds..."
-    for pkg in kubeadm kubectl kubelet kubernetes-cni; do
+    for pkg in kubeadm kubectl kubelet kubernetes-cni cri-tools; do
         apt-mark unhold "$pkg" 2>&1 || true
     done
 
     # Purge packages and clean up dependencies
     log_info "Purging Kubernetes and CRI packages..."
-    apt-get purge -y kubeadm kubectl kubelet kubernetes-cni ||
+    apt-get purge -y kubeadm kubectl kubelet kubernetes-cni cri-tools ||
         log_warn "Package purge had errors (some packages may not be installed)"
     apt-get purge -y cri-o cri-o-runc ||
         log_warn "CRI-O removal had errors (may not be installed)"
@@ -29,7 +29,7 @@ cleanup_debian() {
     
     # Verify cleanup
     local remaining
-    remaining=$(_verify_packages_removed "dpkg -s" kubeadm kubelet kubectl kubernetes-cni cri-o)
+    remaining=$(_verify_packages_removed "dpkg -s" kubeadm kubelet kubectl kubernetes-cni cri-tools cri-o)
     _verify_cleanup $remaining \
         "/etc/apt/sources.list.d/kubernetes.list" \
         "/etc/apt/keyrings/kubernetes-apt-keyring.gpg" \

@@ -275,3 +275,113 @@ test_find_etcd_container_error() {
         _assert_eq "error message mentions etcd container" "true" "$has_msg"
     )
 }
+
+# ============================================================
+# Test: _find_etcd_container falls back to inspecting running containers
+# ============================================================
+test_find_etcd_container_inspect_fallback() {
+    echo "=== Test: _find_etcd_container inspect fallback ==="
+    (
+        . "$PROJECT_ROOT/lib/variables.sh"
+        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
+        _audit_log() { :; }
+        _require_value() { :; }
+        _parse_common_ssh_args() { :; }
+        _SSH_SHIFT=0
+        . "$PROJECT_ROOT/lib/etcd_helpers.sh"
+
+        crictl() {
+            case "$*" in
+                "ps --name=etcd --state=running -q")
+                    return 0
+                    ;;
+                "ps --state=running -q")
+                    printf '%s\n' "cid-apiserver" "cid-etcd"
+                    ;;
+                "inspect cid-apiserver")
+                    printf '%s\n' '{"info":{"config":{"metadata":{"name":"kube-apiserver"}}}}'
+                    ;;
+                "inspect cid-etcd")
+                    printf '%s\n' '{"status":{"labels":{"io.kubernetes.container.name":"etcd"}}}'
+                    ;;
+                *)
+                    return 1
+                    ;;
+            esac
+        }
+
+        local cid
+        cid=$(_find_etcd_container)
+        _assert_eq "find_etcd_container inspect fallback" "cid-etcd" "$cid"
+    )
+}
+
+# ============================================================
+# Test: _resolve_etcd_image_ref prefers exportable image names over digests
+# ============================================================
+test_resolve_etcd_image_ref_prefers_name() {
+    echo "=== Test: _resolve_etcd_image_ref prefers image name ==="
+    (
+        . "$PROJECT_ROOT/lib/variables.sh"
+        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
+        _audit_log() { :; }
+        _require_value() { :; }
+        _parse_common_ssh_args() { :; }
+        _SSH_SHIFT=0
+        . "$PROJECT_ROOT/lib/etcd_helpers.sh"
+
+        crictl() {
+            case "$*" in
+                "inspect cid-etcd")
+                    printf '%s\n' '{"status":{"imageRef":"sha256:abc","image":{"image":"registry.k8s.io/etcd:3.6.6-0"}}}'
+                    ;;
+                *)
+                    return 1
+                    ;;
+            esac
+        }
+        ctr() { return 1; }
+
+        local image_ref
+        image_ref=$(_resolve_etcd_image_ref cid-etcd)
+        _assert_eq "resolve_etcd_image_ref prefers image name" "registry.k8s.io/etcd:3.6.6-0" "$image_ref"
+    )
+}
+
+test_resolve_etcd_image_ref_ctr_fallback() {
+    echo "=== Test: _resolve_etcd_image_ref ctr fallback ==="
+    (
+        . "$PROJECT_ROOT/lib/variables.sh"
+        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
+        _audit_log() { :; }
+        _require_value() { :; }
+        _parse_common_ssh_args() { :; }
+        _SSH_SHIFT=0
+        . "$PROJECT_ROOT/lib/etcd_helpers.sh"
+
+        crictl() {
+            case "$*" in
+                "inspect cid-etcd")
+                    printf '%s\n' '{"status":{"imageRef":"sha256:abc","image":"sha256:def"}}'
+                    ;;
+                *)
+                    return 1
+                    ;;
+            esac
+        }
+        ctr() {
+            case "$*" in
+                "-n k8s.io containers info cid-etcd")
+                    printf '%s\n' '{"image":"registry.k8s.io/etcd:3.6.6-0"}'
+                    ;;
+                *)
+                    return 1
+                    ;;
+            esac
+        }
+
+        local image_ref
+        image_ref=$(_resolve_etcd_image_ref cid-etcd)
+        _assert_eq "resolve_etcd_image_ref ctr fallback" "registry.k8s.io/etcd:3.6.6-0" "$image_ref"
+    )
+}

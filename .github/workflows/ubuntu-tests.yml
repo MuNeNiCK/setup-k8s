@@ -12,10 +12,9 @@ permissions:
 
 jobs:
   # PR smoke test: single Ubuntu 24.04 offline test for fast merge-time feedback
-  # Only run on PRs from the same repo (not forks) to prevent RCE on self-hosted runners
   pr-smoke-test:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, linux, kvm]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -46,7 +45,7 @@ jobs:
   # Full option matrix: runs on push and manual dispatch only
   ubuntu-option-tests:
     if: github.event_name != 'pull_request'
-    runs-on: [self-hosted, linux, kvm]
+    runs-on: ubuntu-latest
     timeout-minutes: 240
     strategy:
       fail-fast: false

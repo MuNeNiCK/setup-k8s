@@ -9,16 +9,83 @@ _ETCD_CERT="/etc/kubernetes/pki/etcd/server.crt"
 _ETCD_KEY="/etc/kubernetes/pki/etcd/server.key"
 _ETCD_CACERT="/etc/kubernetes/pki/etcd/ca.crt"
 
+# Check whether a crictl container inspect output is the etcd static pod container.
+_is_etcd_container_id() {
+    local cid="$1"
+    local inspect_out
+    inspect_out=$(crictl inspect "$cid" 2>/dev/null) || return 1
+
+    echo "$inspect_out" | grep -Eq \
+        '"io.kubernetes.container.name"[[:space:]]*:[[:space:]]*"etcd"|"name"[[:space:]]*:[[:space:]]*"etcd"'
+}
+
 # Find etcd container ID via crictl
 # Returns: container ID on stdout, non-zero on failure
 _find_etcd_container() {
     local cid
     cid=$(crictl ps --name=etcd --state=running -q 2>/dev/null | head -1)
-    if [ -z "$cid" ]; then
-        log_error "etcd container not found (is this a control-plane node?)"
-        return 1
+    if [ -n "$cid" ] && _is_etcd_container_id "$cid"; then
+        echo "$cid"
+        return 0
     fi
-    echo "$cid"
+
+    local running_ids
+    running_ids=$(crictl ps --state=running -q 2>/dev/null) || true
+    for cid in $running_ids; do
+        if _is_etcd_container_id "$cid"; then
+            echo "$cid"
+            return 0
+        fi
+    done
+
+    log_error "etcd container not found (is this a control-plane node?)"
+    return 1
+}
+
+_resolve_etcd_image_ref() {
+    local cid="$1"
+    local image_ref=""
+
+    image_ref=$(
+        crictl inspect "$cid" 2>/dev/null |
+            grep -Eo '"(image|imageRef)"[[:space:]]*:[[:space:]]*"[^"]+"' |
+            sed 's/^[^:]*:[[:space:]]*"//; s/"$//' |
+            awk '$0 !~ /^sha256:/ { print; exit }'
+    ) || true
+
+    if [ -z "$image_ref" ]; then
+        image_ref=$(
+            ctr -n k8s.io containers info "$cid" 2>/dev/null |
+                grep -Eo '"image"[[:space:]]*:[[:space:]]*"[^"]+"' |
+                sed 's/^[^:]*:[[:space:]]*"//; s/"$//' |
+                head -1
+        ) || true
+    fi
+
+    if [ -z "$image_ref" ]; then
+        image_ref=$(
+            crictl inspect "$cid" 2>/dev/null |
+                grep -Eo '"(image|imageRef)"[[:space:]]*:[[:space:]]*"[^"]+"' |
+                sed 's/^[^:]*:[[:space:]]*"//; s/"$//' |
+                head -1
+        ) || true
+    fi
+
+    [ -n "$image_ref" ] && printf '%s\n' "$image_ref"
+}
+
+_containerd_platform() {
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64|amd64) printf '%s\n' "linux/amd64" ;;
+        aarch64|arm64) printf '%s\n' "linux/arm64" ;;
+        armv7l|armv7*) printf '%s\n' "linux/arm/v7" ;;
+        armv6l|armv6*) printf '%s\n' "linux/arm/v6" ;;
+        ppc64le) printf '%s\n' "linux/ppc64le" ;;
+        s390x) printf '%s\n' "linux/s390x" ;;
+        *) printf '%s\n' "linux/$arch" ;;
+    esac
 }
 
 # Run etcdctl inside the etcd container with TLS args
@@ -43,14 +110,8 @@ _extract_etcd_binaries() {
     local cid="$1" output_dir="$2"
     log_info "Extracting etcd binaries from container image..."
 
-    # Get the image ref from container inspect
     local image_ref
-    image_ref=$(crictl inspect --output json "$cid" 2>/dev/null | grep -o '"image":\s*"[^"]*"' | head -1 | sed 's/.*"image":\s*"\([^"]*\)".*/\1/') || true
-
-    if [ -z "$image_ref" ]; then
-        image_ref=$(crictl inspect "$cid" 2>/dev/null | grep -o '"imageRef":\s*"[^"]*"' | head -1 | sed 's/.*"imageRef":\s*"\([^"]*\)".*/\1/') || true
-    fi
-
+    image_ref=$(_resolve_etcd_image_ref "$cid") || true
     if [ -z "$image_ref" ]; then
         log_error "Failed to determine etcd container image ref"
         return 1
@@ -61,7 +122,20 @@ _extract_etcd_binaries() {
     export_dir=$(mktemp -d /tmp/etcd-export-XXXXXX)
 
     local image_tar="${export_dir}/image.tar"
-    if ! ctr -n k8s.io images export "$image_tar" "$image_ref" >/dev/null 2>&1; then
+    local platform export_err
+    platform=$(_containerd_platform)
+    if ! export_err=$(ctr -n k8s.io images export --platform "$platform" "$image_tar" "$image_ref" 2>&1 >/dev/null); then
+        log_debug "Platform-scoped etcd image export failed ($platform): $export_err"
+        rm -f "$image_tar"
+        if ! export_err=$(ctr -n k8s.io images export "$image_tar" "$image_ref" 2>&1 >/dev/null); then
+            log_error "Failed to export etcd image: $image_ref"
+            [ -n "$export_err" ] && log_error "ctr export error: $export_err"
+            rm -rf "$export_dir"
+            return 1
+        fi
+    fi
+
+    if [ ! -s "$image_tar" ]; then
         log_error "Failed to export etcd image: $image_ref"
         rm -rf "$export_dir"
         return 1

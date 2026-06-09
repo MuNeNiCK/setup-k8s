@@ -106,7 +106,7 @@ _run_dual_mode() {
 
 _run_deploy() {
     _run_simple_remote \
-        "variables logging validation helpers ssh_args ssh ssh_credentials ssh_session bundle health diagnostics state deploy" \
+        "variables logging validation helpers join_token ssh_args ssh ssh_credentials ssh_session bundle health diagnostics state deploy" \
         parse_deploy_args validate_deploy_args deploy_dry_run deploy_cluster
 }
 
@@ -120,7 +120,7 @@ _run_upgrade() {
         _ensure_distro_detected
     }
     _run_dual_mode \
-        "variables logging validation helpers ssh_args ssh ssh_credentials ssh_session bundle health diagnostics state deploy upgrade upgrade_orchestration" \
+        "variables logging validation helpers ssh_args ssh ssh_credentials ssh_session bundle health diagnostics state deploy upgrade_helpers upgrade upgrade_orchestration" \
         parse_upgrade_deploy_args validate_upgrade_deploy_args upgrade_dry_run upgrade_cluster \
         show_upgrade_help "Local upgrade" _load_upgrade_local \
         parse_upgrade_local_args upgrade_dry_run upgrade_node_local

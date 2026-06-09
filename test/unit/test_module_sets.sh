@@ -104,6 +104,22 @@ test_module_set_upgrade_local() {
 }
 
 # ============================================================
+# Test: upgrade remote module set covers upgrade orchestration functions
+# ============================================================
+test_module_set_upgrade_remote() {
+    echo "=== Test: module set completeness - upgrade remote ==="
+
+    _check_module_set "upgrade remote module set" \
+        "variables logging validation helpers ssh_args ssh ssh_credentials ssh_session bundle health diagnostics state deploy upgrade_helpers upgrade_orchestration" \
+        "upgrade" \
+        parse_upgrade_deploy_args validate_upgrade_deploy_args upgrade_dry_run upgrade_cluster \
+        _validate_upgrade_version _get_current_k8s_version _k8s_minor_version \
+        _init_remote_session _generate_and_transfer_bundle _deploy_exec_remote \
+        _health_check_cluster _record_pre_upgrade_versions _rollback_node \
+        log_info log_error
+}
+
+# ============================================================
 # Test: _ETCD_LOCAL module set covers _run_etcd local functions
 # ============================================================
 test_module_set_etcd_local() {
@@ -120,4 +136,23 @@ test_module_set_etcd_local() {
             _audit_log detect_distribution \
             log_info log_warn log_error
     )
+}
+
+# ============================================================
+# Test: deploy remote module set covers deploy orchestration functions
+# ============================================================
+test_module_set_deploy_remote() {
+    echo "=== Test: module set completeness - deploy remote ==="
+
+    _check_module_set "deploy remote module set" \
+        "variables logging validation helpers join_token ssh_args ssh ssh_credentials ssh_session bundle health diagnostics state" \
+        "deploy" \
+        parse_deploy_args validate_deploy_args deploy_dry_run deploy_cluster \
+        _extract_join_info _build_join_cmd \
+        _init_remote_session _generate_and_transfer_bundle \
+        _deploy_exec_remote _deploy_ssh _deploy_scp \
+        _state_is_step_done _state_mark_step \
+        _append_passthrough_to_cmd _append_passthrough_filtered \
+        _posix_shell_quote _csv_count _csv_get \
+        log_info log_error
 }

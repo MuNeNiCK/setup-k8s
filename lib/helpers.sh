@@ -177,7 +177,11 @@ cleanup_pre_common() {
 
 # Build sudo prefix for non-root remote execution.
 # Usage: local pfx; pfx=$(_sudo_prefix "$user")
-_sudo_prefix() { [ "$1" != "root" ] && printf 'sudo -n ' ; }
+_sudo_prefix() {
+    if [ "$1" != "root" ]; then
+        printf 'sudo -n '
+    fi
+}
 
 # Extract MAJOR.MINOR from a version string (e.g., "1.32.5" → "1.32").
 _k8s_minor_version() { echo "$1" | cut -d. -f1,2; }

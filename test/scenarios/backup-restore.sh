@@ -64,6 +64,36 @@ EOF
 
 # --- Main test logic ---
 
+wait_for_configmap_present() {
+    local name="$1" timeout="${2:-60}" interval="${3:-3}"
+    local elapsed=0
+    while [ "$elapsed" -lt "$timeout" ]; do
+        if vm_ssh_root "$_CP_SSH_PORT" \
+            "kubectl get configmap '$name' --kubeconfig=/etc/kubernetes/admin.conf" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep "$interval"
+        elapsed=$((elapsed + interval))
+    done
+    return 1
+}
+
+wait_for_configmap_absent() {
+    local name="$1" timeout="${2:-60}" interval="${3:-3}"
+    local elapsed=0
+    while [ "$elapsed" -lt "$timeout" ]; do
+        if ! vm_ssh_root "$_CP_SSH_PORT" \
+            "kubectl get configmap '$name' --kubeconfig=/etc/kubernetes/admin.conf" >/dev/null 2>&1 && \
+           ! vm_ssh_root "$_CP_SSH_PORT" \
+            "kubectl get configmaps --no-headers --kubeconfig=/etc/kubernetes/admin.conf | awk -v n='$name' '\$1 == n {found=1} END {exit found ? 0 : 1}'" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep "$interval"
+        elapsed=$((elapsed + interval))
+    done
+    return 1
+}
+
 run_backup_test() {
     _test_preamble "backup" "$DISTRO"
     local cp_container="k8s-backup-cp-${DISTRO}-${_TEST_TS}"
@@ -238,8 +268,7 @@ run_backup_test() {
 
     # Check 5: pre-backup configmap exists after restore
     if [ "$restore_api_ready" = true ]; then
-        if vm_ssh_root "$_CP_SSH_PORT" \
-            "kubectl get configmap pre-backup-data --kubeconfig=/etc/kubernetes/admin.conf" >/dev/null 2>&1; then
+        if wait_for_configmap_present "pre-backup-data" 60 3; then
             log_success "CHECK 5: pre-backup configmap exists after restore"
         else
             log_error "CHECK 5: pre-backup configmap NOT found after restore"
@@ -252,12 +281,11 @@ run_backup_test() {
 
     # Check 6: post-backup configmap is gone after restore
     if [ "$restore_api_ready" = true ]; then
-        if vm_ssh_root "$_CP_SSH_PORT" \
-            "kubectl get configmap post-backup-data --kubeconfig=/etc/kubernetes/admin.conf" >/dev/null 2>&1; then
+        if wait_for_configmap_absent "post-backup-data" 60 3; then
+            log_success "CHECK 6: post-backup configmap correctly absent after restore"
+        else
             log_error "CHECK 6: post-backup configmap still exists (should be gone after restore)"
             all_pass=false
-        else
-            log_success "CHECK 6: post-backup configmap correctly absent after restore"
         fi
     else
         log_error "CHECK 6: API server not ready, cannot verify post-backup data"
