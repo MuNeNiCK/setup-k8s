@@ -117,38 +117,6 @@ cleanup_orphaned_containers() {
     done
 }
 
-_docker_subnet_prefix() {
-    local subnet_addr="${1%/*}"
-    printf '%s\n' "${subnet_addr%.*}"
-}
-
-_rebase_test_ip() {
-    local ip="$1" old_prefix="$2" new_prefix="$3"
-    if [[ "$ip" == "$old_prefix".* ]]; then
-        printf '%s.%s\n' "$new_prefix" "${ip##*.}"
-    else
-        printf '%s\n' "$ip"
-    fi
-}
-
-_rebase_docker_network_config() {
-    local old_subnet="$1" new_subnet="$2"
-    local old_prefix new_prefix
-    old_prefix=$(_docker_subnet_prefix "$old_subnet")
-    new_prefix=$(_docker_subnet_prefix "$new_subnet")
-
-    [ -n "${CP_DOCKER_IP:-}" ] && CP_DOCKER_IP=$(_rebase_test_ip "$CP_DOCKER_IP" "$old_prefix" "$new_prefix")
-    [ -n "${WORKER_DOCKER_IP:-}" ] && WORKER_DOCKER_IP=$(_rebase_test_ip "$WORKER_DOCKER_IP" "$old_prefix" "$new_prefix")
-
-    if declare -p _FO_DOCKER_IPS >/dev/null 2>&1; then
-        local i
-        for i in "${!_FO_DOCKER_IPS[@]}"; do
-            _FO_DOCKER_IPS[$i]=$(_rebase_test_ip "${_FO_DOCKER_IPS[$i]}" "$old_prefix" "$new_prefix")
-        done
-    fi
-    [ -n "${_FO_HA_VIP:-}" ] && _FO_HA_VIP=$(_rebase_test_ip "$_FO_HA_VIP" "$old_prefix" "$new_prefix")
-}
-
 # Generate a self-contained bundle script for bundled test execution.
 # Usage: _generate_bundle <entry_script> <bundle_path> [include_mode]
 #   entry_script:  path to the entry script (setup-k8s.sh)
@@ -365,29 +333,12 @@ vm_scp() {
 setup_docker_network() {
     log_info "Creating Docker network: $DOCKER_NETWORK ($DOCKER_SUBNET)"
     docker network rm "$DOCKER_NETWORK" >/dev/null 2>&1 || true
-    local requested_subnet="$DOCKER_SUBNET"
     local create_err
-    if create_err=$(docker network create --subnet "$DOCKER_SUBNET" "$DOCKER_NETWORK" 2>&1 >/dev/null); then
-        log_success "Docker network created"
-        return 0
+    if ! create_err=$(docker network create --subnet "$DOCKER_SUBNET" "$DOCKER_NETWORK" 2>&1 >/dev/null); then
+        log_error "Failed to create Docker network $DOCKER_NETWORK ($DOCKER_SUBNET): $create_err"
+        return 1
     fi
-
-    log_warn "Docker subnet $DOCKER_SUBNET is unavailable: $create_err"
-    local n candidate
-    for n in $(seq 0 99); do
-        candidate="10.201.${n}.0/24"
-        docker network rm "$DOCKER_NETWORK" >/dev/null 2>&1 || true
-        if docker network create --subnet "$candidate" "$DOCKER_NETWORK" >/dev/null 2>&1; then
-            DOCKER_SUBNET="$candidate"
-            _rebase_docker_network_config "$requested_subnet" "$DOCKER_SUBNET"
-            log_warn "Using fallback Docker network: $DOCKER_NETWORK ($DOCKER_SUBNET)"
-            log_success "Docker network created"
-            return 0
-        fi
-    done
-
-    log_error "Failed to create Docker network $DOCKER_NETWORK"
-    return 1
+    log_success "Docker network created"
 }
 
 # Remove Docker network if it exists
