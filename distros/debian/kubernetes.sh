@@ -26,9 +26,27 @@ _get_debian_package_version() {
 # Usage: _configure_k8s_apt_repo <version>
 _configure_k8s_apt_repo() {
     local ver="$1"
+    local key_url key_tmp gpg_status
+    key_url="https://pkgs.k8s.io/core:/stable:/v${ver}/deb/Release.key"
+    key_tmp=$(mktemp)
+
     mkdir -p /etc/apt/keyrings
-    curl -fsSL --retry 3 --retry-delay 2 "https://pkgs.k8s.io/core:/stable:/v${ver}/deb/Release.key" \
-        | gpg --batch --yes --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+    if ! curl -fsSL --retry 8 --retry-delay 5 --retry-all-errors --connect-timeout 10 --max-time 60 \
+        -o "$key_tmp" "$key_url"; then
+        rm -f "$key_tmp"
+        return 1
+    fi
+    if [ ! -s "$key_tmp" ]; then
+        rm -f "$key_tmp"
+        return 1
+    fi
+
+    gpg --batch --yes --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg "$key_tmp"
+    gpg_status=$?
+    rm -f "$key_tmp"
+    [ "$gpg_status" -eq 0 ] || return "$gpg_status"
+
     chmod 0644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
     echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${ver}/deb/ /" \
         | tee /etc/apt/sources.list.d/kubernetes.list

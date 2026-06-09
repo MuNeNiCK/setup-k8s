@@ -177,6 +177,8 @@ run_vm_container() {
 #cloud-config
 packages:
   - bash
+  - ca-certificates
+  - curl
   - sudo
   - openssh
 runcmd:
@@ -233,7 +235,7 @@ CIEOF
 
     local setup_cmd
     if [ "$TEST_MODE" = "online" ]; then
-        setup_cmd="curl -fsSL ${GITHUB_BASE_URL}/setup-k8s.sh | bash -s -- ${setup_args}"
+        setup_cmd="set -o pipefail; curl -fsSL ${GITHUB_BASE_URL}/setup-k8s.sh | bash -s -- ${setup_args}"
     else
         setup_cmd="bash /tmp/setup-k8s.sh ${setup_args}"
     fi
@@ -260,7 +262,7 @@ CIEOF
     log_info "Running setup-k8s status..."
     local status_cmd
     if [ "$TEST_MODE" = "online" ]; then
-        status_cmd="curl -fsSL ${GITHUB_BASE_URL}/setup-k8s.sh | KUBECONFIG=/etc/kubernetes/admin.conf bash -s -- status --output wide"
+        status_cmd="bash -o pipefail -c \"curl -fsSL ${GITHUB_BASE_URL}/setup-k8s.sh | KUBECONFIG=/etc/kubernetes/admin.conf bash -s -- status --output wide\""
     else
         status_cmd="KUBECONFIG=/etc/kubernetes/admin.conf bash /tmp/setup-k8s.sh status --output wide"
     fi
@@ -320,7 +322,7 @@ CIEOF
         log_info "Starting Kubernetes cleanup..."
         local cleanup_cmd
         if [ "$TEST_MODE" = "online" ]; then
-            cleanup_cmd="curl -fsSL ${GITHUB_BASE_URL}/setup-k8s.sh | bash -s -- cleanup --force"
+            cleanup_cmd="set -o pipefail; curl -fsSL ${GITHUB_BASE_URL}/setup-k8s.sh | bash -s -- cleanup --force"
         else
             cleanup_cmd="bash /tmp/setup-k8s.sh cleanup --force"
         fi
