@@ -126,6 +126,11 @@ _generate_bundle() {
     local entry_script="$1" bundle_path="$2" include_mode="${3:-all}"
     local project_root
     project_root="$(cd "$(dirname "$entry_script")" && pwd)"
+    local _had_k8s_version=0 _saved_k8s_version=""
+    if [ "${K8S_VERSION+x}" ]; then
+        _had_k8s_version=1
+        _saved_k8s_version="$K8S_VERSION"
+    fi
 
     # Source bootstrap (provides _COMMON_MODULES), variables (provides
     # BUNDLE_COMMON_MODULES), and bundle (provides _generate_bundle_core)
@@ -142,6 +147,11 @@ _generate_bundle() {
         else
             trap - EXIT
         fi
+    fi
+    if [ "$_had_k8s_version" -eq 1 ]; then
+        K8S_VERSION="$_saved_k8s_version"
+    else
+        unset K8S_VERSION
     fi
 
     _generate_bundle_core "$bundle_path" "$entry_script" "$include_mode" "$project_root"

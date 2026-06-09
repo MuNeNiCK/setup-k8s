@@ -84,6 +84,15 @@ jobs:
             distro: ubuntu-24.04-cloud-amd64
             k8s_version: ""
             setup_args: "--pod-network-cidr 10.244.0.0/16 --service-cidr 10.96.0.0/12 --apiserver-advertise-address __VM_IP__ --control-plane-endpoint __VM_IP__:6443 --api-server-extra-sans setup-k8s.local,__VM_IP__ --kubelet-node-ip __VM_IP__"
+          - name: ubuntu2404-dualstack-cidrs
+            distro: ubuntu-24.04-cloud-amd64
+            k8s_version: ""
+            setup_args: "--pod-network-cidr 10.244.0.0/16,fd00:10:244::/48 --service-cidr 10.96.0.0/12,fd00:20::/108"
+          - name: ubuntu2404-ipv6-single-stack
+            distro: ubuntu-24.04-cloud-amd64
+            k8s_version: ""
+            guest_ip6: "fd00:10:2::15/64"
+            setup_args: "--pod-network-cidr fd00:10:244::/48 --service-cidr fd00:20::/108 --apiserver-advertise-address __VM_IP6__ --control-plane-endpoint [__VM_IP6__]:6443 --api-server-extra-sans setup-k8s.local,__VM_IP6__ --kubelet-node-ip __VM_IP6__"
           - name: ubuntu2404-kubeadm-patch
             distro: ubuntu-24.04-cloud-amd64
             k8s_version: ""
@@ -115,6 +124,7 @@ jobs:
           K8S_VERSION: ${{ matrix.k8s_version }}
           DISTRO: ${{ matrix.distro }}
           TEST_MODE: ${{ matrix.test_mode || 'offline' }}
+          VM_GUEST_IP6: ${{ matrix.guest_ip6 || '' }}
         run: |
           set -euo pipefail
           # Use test_mode from matrix (defaults to offline)

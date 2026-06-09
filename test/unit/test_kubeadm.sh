@@ -46,6 +46,47 @@ test_generate_kubeadm_config_extra_sans() {
 }
 
 # ============================================================
+# Test: generate_kubeadm_config quotes IPv6 literals
+# ============================================================
+test_generate_kubeadm_config_ipv6_literals() {
+    echo "=== Test: generate_kubeadm_config quotes IPv6 literals ==="
+    (
+        . "$PROJECT_ROOT/lib/variables.sh"
+        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
+        _kubeadm_api_version() { echo "kubeadm.k8s.io/v1beta4"; }
+        _kubeproxy_api_version() { echo "kubeproxy.config.k8s.io/v1alpha1"; }
+        _kubelet_api_version() { echo "kubelet.config.k8s.io/v1beta1"; }
+        get_cri_socket() { echo "unix:///run/containerd/containerd.sock"; }
+        . "$PROJECT_ROOT/lib/bootstrap.sh"
+        . "$PROJECT_ROOT/lib/helpers.sh"
+        . "$PROJECT_ROOT/lib/kubeadm.sh"
+        . "$PROJECT_ROOT/commands/init.sh"
+
+        KUBEADM_POD_CIDR="fd00:10:244::/48"
+        KUBEADM_SERVICE_CIDR="fd00:20::/108"
+        KUBEADM_API_ADDR="fd00:10:2::15"
+        KUBEADM_CP_ENDPOINT="[fd00:10:2::15]:6443"
+        API_SERVER_EXTRA_SANS="setup-k8s.local,fd00:10:2::15"
+        KUBEADM_CONFIG_PATCH=""
+
+        local config_file
+        config_file=$(generate_kubeadm_config)
+        local content
+        content=$(cat "$config_file")
+        rm -f "$config_file"
+
+        echo "$content" | grep -q "advertiseAddress: 'fd00:10:2::15'"
+        _assert_eq "IPv6 advertiseAddress quoted" "0" "$?"
+
+        echo "$content" | grep -q "controlPlaneEndpoint: '\\[fd00:10:2::15\\]:6443'"
+        _assert_eq "IPv6 controlPlaneEndpoint quoted" "0" "$?"
+
+        echo "$content" | grep -q "  - 'fd00:10:2::15'"
+        _assert_eq "IPv6 SAN quoted" "0" "$?"
+    )
+}
+
+# ============================================================
 # Test: generate_kubeadm_config with config patch
 # ============================================================
 test_generate_kubeadm_config_patch() {

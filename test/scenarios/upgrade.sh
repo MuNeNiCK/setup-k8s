@@ -32,6 +32,7 @@ VM_DATA_DIR="${VM_DATA_DIR:-$SCRIPT_DIR/data}"
 DISTRO="${DISTRO:-ubuntu-24.04-cloud-amd64}"
 FROM_VERSION=""  # MAJOR.MINOR for deploy (e.g., 1.32)
 TO_VERSION=""    # MAJOR.MINOR.PATCH for upgrade (e.g., 1.33.2)
+UPGRADE_EXTRA_ARGS=()
 # Common defaults from vm_harness.sh: VM_MEMORY, VM_CPUS, VM_DISK_SIZE, TIMEOUT_TOTAL, SSH_READY_TIMEOUT
 
 # Docker network
@@ -57,6 +58,7 @@ Options:
   --distro <name>         Distribution to test (default: $DISTRO)
   --from-version <ver>    Initial K8s version MAJOR.MINOR (e.g., 1.32)
   --to-version <ver>      Target K8s version MAJOR.MINOR.PATCH (e.g., 1.33.2)
+  --upgrade-args ARGS     Extra args for setup-k8s.sh upgrade
   --memory <MB>           VM memory (default: $VM_MEMORY)
   --cpus <count>          VM CPUs (default: $VM_CPUS)
   --disk-size <size>      VM disk size (default: $VM_DISK_SIZE)
@@ -179,6 +181,9 @@ run_upgrade_test() {
         --ssh-host-key-check accept-new
         --kubernetes-version "$TO_VERSION"
     )
+    if [ ${#UPGRADE_EXTRA_ARGS[@]} -gt 0 ]; then
+        upgrade_cmd+=("${UPGRADE_EXTRA_ARGS[@]}")
+    fi
     log_info "Upgrade command: ${upgrade_cmd[*]}"
 
     local upgrade_exit_code=0
@@ -276,6 +281,12 @@ while [[ $# -gt 0 ]]; do
         --help|-h) show_help; exit 0 ;;
         --from-version) _require_arg $# "$1"; FROM_VERSION="$2"; shift 2 ;;
         --to-version) _require_arg $# "$1"; TO_VERSION="$2"; shift 2 ;;
+        --upgrade-args)
+            _require_arg $# "$1"
+            read -r -a _upgrade_args_tmp <<< "$2"
+            UPGRADE_EXTRA_ARGS+=("${_upgrade_args_tmp[@]}")
+            shift 2
+            ;;
         *) log_error "Unknown option: $1"; show_help; exit 1 ;;
     esac
 done

@@ -22,6 +22,7 @@ VM_DATA_DIR="${VM_DATA_DIR:-$TEST_DIR/data}"
 VM_MEMORY="${VM_MEMORY:-8192}"
 VM_CPUS="${VM_CPUS:-4}"
 VM_DISK_SIZE="${VM_DISK_SIZE:-40G}"
+VM_GUEST_IP6="${VM_GUEST_IP6:-}"
 
 # K8s version (can be overridden by command line option)
 K8S_VERSION=""
@@ -72,6 +73,7 @@ Options:
   --memory <MB>             VM memory in MB (default: $VM_MEMORY)
   --cpus <count>            VM CPU count (default: $VM_CPUS)
   --disk-size <size>        VM disk size (default: $VM_DISK_SIZE)
+  --guest-ip6 <IP[/PREFIX]> Set docker-vm-runner NETWORK_GUEST_IP6
   --                        Treat the rest as setup-args
   --help, -h                Show this help message
 
@@ -132,6 +134,9 @@ run_vm_container() {
 
     log_info "Starting docker-vm-runner for: $distro"
     log_info "VM resources: memory=${VM_MEMORY}MB cpus=${VM_CPUS} disk=${VM_DISK_SIZE}"
+    if [ -n "$VM_GUEST_IP6" ]; then
+        log_info "VM guest IPv6: $VM_GUEST_IP6"
+    fi
     mkdir -p results/logs
     rm -f results/test-result.json
 
@@ -191,6 +196,10 @@ CIEOF
             ;;
     esac
 
+    if [ -n "$VM_GUEST_IP6" ]; then
+        _docker_run_args+=(-e "NETWORK_GUEST_IP6=$VM_GUEST_IP6")
+    fi
+
     _docker_run_args+=("$DOCKER_VM_RUNNER_IMAGE")
     "${_docker_run_args[@]}" >/dev/null
     _VM_CONTAINER_NAME="$container_name"
@@ -242,6 +251,19 @@ CIEOF
                 return 1
             fi
             setup_extra_args_str="${setup_extra_args_str//__VM_IP__/$vm_ip}"
+        fi
+        if [[ "$setup_extra_args_str" == *"__VM_IP6__"* ]]; then
+            local vm_ip6="${VM_GUEST_IP6%%/*}"
+            if [ -z "$vm_ip6" ]; then
+                vm_ip6=$(vm_ssh "ip -6 route get 2001:4860:4860::8888 2>/dev/null | awk '{for (i=1;i<=NF;i++) if (\$i==\"src\") {print \$(i+1); exit}}'" | tr -d '[:space:]')
+            fi
+            if [ -z "$vm_ip6" ]; then
+                log_error "Failed to resolve VM IPv6 address for setup args"
+                _e2e_cleanup_vm_container
+                cleanup_ssh_key
+                return 1
+            fi
+            setup_extra_args_str="${setup_extra_args_str//__VM_IP6__/$vm_ip6}"
         fi
         if [[ "$setup_extra_args_str" == *"__KUBEADM_PATCH__"* ]]; then
             local kubeadm_patch_path="/tmp/setup-k8s-kubeadm-patch.yaml"
@@ -695,6 +717,11 @@ main() {
             --disk-size)
                 _require_arg $# "$1"
                 VM_DISK_SIZE="$2"
+                shift 2
+                ;;
+            --guest-ip6)
+                _require_arg $# "$1"
+                VM_GUEST_IP6="$2"
                 shift 2
                 ;;
             --setup-args)

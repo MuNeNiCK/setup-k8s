@@ -42,6 +42,10 @@ _kubelet_api_version() {
     echo "$api_ver"
 }
 
+_yaml_quote() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
+}
+
 # Helper: Generate kubeadm configuration
 generate_kubeadm_config() {
     local config_file
@@ -71,7 +75,7 @@ EOF
     if [ -n "$API_ADDR" ]; then
         cat >> "$config_file" <<EOF
 localAPIEndpoint:
-  advertiseAddress: $API_ADDR
+  advertiseAddress: $(_yaml_quote "$API_ADDR")
 EOF
     fi
 
@@ -94,19 +98,19 @@ EOF
 
     if [ -n "$POD_CIDR" ] || [ -n "$SERVICE_CIDR" ]; then
         echo "networking:" >> "$config_file"
-        [ -n "$POD_CIDR" ]     && echo "  podSubnet: $POD_CIDR" >> "$config_file"
-        [ -n "$SERVICE_CIDR" ] && echo "  serviceSubnet: $SERVICE_CIDR" >> "$config_file"
+        [ -n "$POD_CIDR" ]     && echo "  podSubnet: $(_yaml_quote "$POD_CIDR")" >> "$config_file"
+        [ -n "$SERVICE_CIDR" ] && echo "  serviceSubnet: $(_yaml_quote "$SERVICE_CIDR")" >> "$config_file"
     fi
 
     if [ -n "$CP_ENDPOINT" ]; then
-        echo "controlPlaneEndpoint: $CP_ENDPOINT" >> "$config_file"
+        echo "controlPlaneEndpoint: $(_yaml_quote "$CP_ENDPOINT")" >> "$config_file"
     fi
 
     # Add extra SANs for API server certificate (must be in same ClusterConfiguration document)
     if [ -n "${API_SERVER_EXTRA_SANS:-}" ]; then
         echo "apiServer:" >> "$config_file"
         echo "  certSANs:" >> "$config_file"
-        _emit_san() { echo "  - $1" >> "$config_file"; }
+        _emit_san() { echo "  - $(_yaml_quote "$1")" >> "$config_file"; }
         _csv_for_each "$API_SERVER_EXTRA_SANS" _emit_san
     fi
 

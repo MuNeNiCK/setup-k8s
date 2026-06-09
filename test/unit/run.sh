@@ -209,6 +209,7 @@ test_rollback_functions
 test_network_options_defaults
 test_parse_network_options
 test_generate_kubeadm_config_extra_sans
+test_generate_kubeadm_config_ipv6_literals
 test_generate_kubeadm_config_patch
 
 # --- preflight (strict, new checks) ---

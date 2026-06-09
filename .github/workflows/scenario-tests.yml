@@ -22,12 +22,18 @@ jobs:
         include:
           - name: deploy-remove
             command: ./scenarios/deploy-remove.sh --distro ubuntu-24.04-cloud-amd64
+          - name: join
+            command: ./scenarios/join.sh --distro ubuntu-24.04-cloud-amd64
+          - name: preflight
+            command: ./scenarios/preflight.sh --distro ubuntu-24.04-cloud-amd64
           - name: backup-restore
             command: ./scenarios/backup-restore.sh --distro ubuntu-24.04-cloud-amd64
           - name: cert-renew
             command: ./scenarios/cert-renew.sh --distro ubuntu-24.04-cloud-amd64
           - name: upgrade
             command: ./scenarios/upgrade.sh --distro ubuntu-24.04-cloud-amd64
+          - name: upgrade-skip-drain
+            command: ./scenarios/upgrade.sh --distro ubuntu-24.04-cloud-amd64 --upgrade-args "--skip-drain --no-rollback"
           - name: generic
             command: ./scenarios/generic.sh --host-distro ubuntu-24.04-cloud-amd64 --memory 4096 --cpus 2
           - name: ha-init
