@@ -216,30 +216,35 @@ poll_vm_command() {
     fi
 }
 
-# Wait for cloud-init to complete inside a docker-vm-runner container.
+# Wait for the docker-vm-runner guest to become ready.
 # Usage: wait_for_cloud_init <container_name> <timeout> <label>
 wait_for_cloud_init() {
     local container_name=$1 timeout=$2 label=$3
 
-    log_info "[$label] Waiting for cloud-init (timeout: ${timeout}s)..."
+    log_info "[$label] Waiting for guest readiness (timeout: ${timeout}s)..."
     local elapsed=0
     while [ $elapsed -lt "$timeout" ]; do
         if ! docker inspect "$container_name" >/dev/null 2>&1; then
-            log_error "[$label] Container exited before cloud-init completed"
+            log_error "[$label] Container exited before guest became ready"
             return 1
         fi
-        if docker logs --tail 50 "$container_name" 2>&1 | grep -qE "Cloud-init (complete|finished|disabled|did not finish)|Could not query cloud-init|Guest agent did not respond"; then
-            break
-        fi
+
+        local health
+        health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_name" 2>/dev/null || true)
+        case "$health" in
+            healthy|none) break ;;
+            unhealthy) ;;
+        esac
+
         sleep 5
         elapsed=$((elapsed + 5))
         (( elapsed % 30 == 0 )) && log_info "[$label] Still waiting... (${elapsed}s)"
     done
     if [ $elapsed -ge "$timeout" ]; then
-        log_error "[$label] Cloud-init timeout after ${timeout}s"
+        log_error "[$label] Guest readiness timeout after ${timeout}s"
         return 1
     fi
-    log_success "[$label] Cloud-init complete"
+    log_success "[$label] Guest is ready"
 }
 
 # Wait for SSH to become available.
@@ -261,6 +266,38 @@ wait_for_ssh() {
         return 1
     fi
     log_success "[$label] SSH is ready"
+}
+
+wait_for_guest_bootstrap() {
+    local port=$1 user=$2 timeout=$3 label=$4
+
+    log_info "[$label] Waiting for guest bootstrap tasks..."
+    local remote_script
+    remote_script=$(cat <<REMOTE_SCRIPT
+set -eu
+if command -v cloud-init >/dev/null 2>&1; then
+    cloud-init status --wait >/dev/null 2>&1 || true
+fi
+if command -v apt-get >/dev/null 2>&1; then
+    end=\$(( \$(date +%s) + $timeout ))
+    while fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock >/dev/null 2>&1; do
+        if [ "\$(date +%s)" -ge "\$end" ]; then
+            exit 124
+        fi
+        sleep 3
+    done
+fi
+REMOTE_SCRIPT
+)
+    local quoted_script
+    quoted_script=$(printf '%q' "$remote_script")
+    if ssh "${SSH_OPTS[@]}" -p "$port" "$user@localhost" \
+        "if command -v sudo >/dev/null 2>&1; then sudo sh -c $quoted_script; elif command -v doas >/dev/null 2>&1; then doas sh -c $quoted_script; else sh -c $quoted_script; fi" >/dev/null 2>&1; then
+        log_success "[$label] Guest bootstrap tasks are complete"
+        return 0
+    fi
+    log_error "[$label] Guest bootstrap tasks did not complete within ${timeout}s"
+    return 1
 }
 
 # Detect privilege escalation command (sudo or doas) on the remote VM.
@@ -314,6 +351,10 @@ start_vm() {
     local container_name=$1 static_ip=$2 host_ssh_port=$3 data_subdir=$4
     local label="${5:-managed-by=k8s-test}"
 
+    if type -t test_validate_runner_distro >/dev/null; then
+        test_validate_runner_distro "$DISTRO" || return 1
+    fi
+
     local vm_data_dir="$VM_DATA_DIR/$data_subdir"
     mkdir -p "$vm_data_dir"
 
@@ -343,6 +384,7 @@ wait_for_vm_ready() {
     local container_name=$1 host_ssh_port=$2 label=$3
     wait_for_cloud_init "$container_name" "$SSH_READY_TIMEOUT" "$label" || return 1
     wait_for_ssh "$host_ssh_port" "$LOGIN_USER" "$SSH_READY_TIMEOUT" "$label" || return 1
+    wait_for_guest_bootstrap "$host_ssh_port" "$LOGIN_USER" "$SSH_READY_TIMEOUT" "$label" || return 1
 }
 
 # Setup root SSH access on a VM (copy user's authorized_keys to root)
@@ -452,7 +494,7 @@ _parse_common_test_args() {
 
 # Initialize common test defaults (called at file top level of each test).
 _init_test_defaults() {
-    SSH_BASE_OPTS=(-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null \
+    SSH_BASE_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null \
                    -o LogLevel=ERROR -o ConnectTimeout=5)
     SSH_OPTS=("${SSH_BASE_OPTS[@]}")
     LOGIN_USER="user"

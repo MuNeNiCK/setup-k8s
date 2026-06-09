@@ -29,7 +29,7 @@ jobs:
       - name: Run ShellCheck on distro modules
         run: shellcheck -s sh -S warning distros/**/*.sh
       - name: Run ShellCheck on test runners
-        run: shellcheck -s bash -S warning test/run-e2e-tests.sh test/run-ha-test.sh test/run-ha-init-test.sh test/run-ha-failover-test.sh test/run-deploy-test.sh test/run-backup-test.sh test/run-renew-test.sh test/run-upgrade-test.sh test/run-unit-tests.sh test/run-generic-test.sh test/lib/vm_harness.sh
+        run: shellcheck -s bash -S warning test/scenarios/*.sh test/unit/run.sh test/lib/*.sh
       - name: Run ShellCheck on unit test modules
         run: shellcheck -s bash -S warning test/unit/*.sh
 
@@ -38,4 +38,4 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Run unit tests
-        run: bash test/run-unit-tests.sh
+        run: bash test/unit/run.sh

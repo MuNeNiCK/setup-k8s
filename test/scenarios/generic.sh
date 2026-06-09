@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Generic Distro (Binary Download) E2E Test via docker-vm-runner
-# Usage: ./test/run-generic-test.sh [OPTIONS]
+# Usage: ./test/scenarios/generic.sh [OPTIONS]
 #
 # Tests the --distro generic path on a real VM:
 #   1. setup-k8s.sh init --distro generic completes successfully
@@ -14,17 +14,21 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=test/lib/vm_harness.sh
-source "$SCRIPT_DIR/lib/vm_harness.sh"
+SCENARIO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEST_DIR="$(cd "$SCENARIO_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$TEST_DIR/.." && pwd)"
+SCRIPT_DIR="$TEST_DIR"
+# shellcheck source=test/lib/runner.sh
+source "$TEST_DIR/lib/runner.sh"
+cd "$TEST_DIR"
 
-SETUP_K8S_SCRIPT="$SCRIPT_DIR/../setup-k8s.sh"
+SETUP_K8S_SCRIPT="$PROJECT_ROOT/setup-k8s.sh"
 # cleanup is now integrated into setup-k8s.sh as the 'cleanup' subcommand
 DOCKER_VM_RUNNER_IMAGE="${DOCKER_VM_RUNNER_IMAGE:-ghcr.io/munenick/docker-vm-runner:latest}"
 VM_DATA_DIR="${VM_DATA_DIR:-$SCRIPT_DIR/data}"
 
 # Defaults — use a well-known VM distro as host, but force generic path
-HOST_DISTRO="${HOST_DISTRO:-ubuntu-2404}"
+HOST_DISTRO="${HOST_DISTRO:-ubuntu-24.04-cloud-amd64}"
 K8S_VERSION=""
 SETUP_EXTRA_ARGS=()
 VM_MEMORY="${VM_MEMORY:-8192}"
@@ -38,7 +42,7 @@ LOGIN_USER="user"
 
 SSH_KEY_DIR=""
 SSH_PORT=""
-SSH_BASE_OPTS=(-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5)
+SSH_BASE_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5)
 # shellcheck disable=SC2034 # SSH_OPTS is used by vm_ssh/vm_scp in vm_harness.sh
 SSH_OPTS=("${SSH_BASE_OPTS[@]}")
 
@@ -73,10 +77,10 @@ Options:
   --help, -h              Show this help message
 
 Example:
-  $0                                           # Test generic on ubuntu-2404
-  $0 --host-distro debian-12                   # Test generic on debian-12
+  $0                                           # Test generic on ubuntu-24.04-cloud-amd64
+  $0 --host-distro debian-12-cloud-amd64                   # Test generic on debian-12-cloud-amd64
   $0 --k8s-version 1.32                        # Test with specific K8s version
-  $0 --host-distro alpine-3                    # Test on Alpine
+  $0 --host-distro alpine-3.23-cloud-amd64     # Test on Alpine
 EOF
 }
 
@@ -146,6 +150,7 @@ run_test() {
     log_info "Test path: --distro generic (binary download)"
     [ -n "$K8S_VERSION" ] && log_info "K8s version: $K8S_VERSION"
     log_info "VM resources: memory=${VM_MEMORY}MB cpus=${VM_CPUS} disk=${VM_DISK_SIZE}"
+    test_validate_runner_distro "$HOST_DISTRO" || return 1
 
     # Clean up orphaned containers
     cleanup_orphaned_containers "k8s-test-runner"
@@ -200,6 +205,7 @@ CIEOF
     # Wait for cloud-init and SSH
     wait_for_cloud_init "$container_name" "$SSH_READY_TIMEOUT" "$HOST_DISTRO" || return 1
     wait_for_ssh "$SSH_PORT" "$LOGIN_USER" "$SSH_READY_TIMEOUT" "$HOST_DISTRO" || return 1
+    wait_for_guest_bootstrap "$SSH_PORT" "$LOGIN_USER" "$SSH_READY_TIMEOUT" "$HOST_DISTRO" || return 1
 
     # Generate and transfer bundled scripts
     # Save K8S_VERSION: _generate_bundle sources variables.sh which resets it

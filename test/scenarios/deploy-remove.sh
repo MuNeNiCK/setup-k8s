@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Deploy Subcommand E2E Test via docker-vm-runner
-# Usage: ./test/run-deploy-test.sh [--distro <name>] [--k8s-version <ver>]
+# Usage: ./test/scenarios/deploy-remove.sh [--distro <name>] [--k8s-version <ver>]
 #
 # Scenario: Single CP + Single Worker (key-based SSH)
 #
@@ -20,25 +20,26 @@
 #  10. CP: kubelet is still active
 #
 # Test matrix (combine with --cri / --proxy-mode flags):
-#   ./run-deploy-test.sh                                    # default (containerd + iptables)
-#   ./run-deploy-test.sh --cri crio                         # CRI-O runtime
-#   ./run-deploy-test.sh --proxy-mode ipvs                  # IPVS proxy mode
-#   ./run-deploy-test.sh --proxy-mode nftables              # nftables proxy mode
-#   ./run-deploy-test.sh --cri crio --proxy-mode ipvs       # CRI-O + IPVS
+#   ./scenarios/deploy-remove.sh --cri crio
+#   ./scenarios/deploy-remove.sh --proxy-mode ipvs
+#   ./scenarios/deploy-remove.sh --proxy-mode nftables
 #
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=test/lib/vm_harness.sh
-source "$SCRIPT_DIR/lib/vm_harness.sh"
+SCENARIO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEST_DIR="$(cd "$SCENARIO_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$TEST_DIR/.." && pwd)"
+SCRIPT_DIR="$TEST_DIR"
+# shellcheck source=test/lib/runner.sh
+source "$TEST_DIR/lib/runner.sh"
+cd "$TEST_DIR"
 
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SETUP_K8S_SCRIPT="$PROJECT_ROOT/setup-k8s.sh"
 VM_DATA_DIR="${VM_DATA_DIR:-$SCRIPT_DIR/data}"
 
 # Defaults (common defaults from vm_harness.sh: VM_MEMORY, VM_CPUS, VM_DISK_SIZE, TIMEOUT_TOTAL, SSH_READY_TIMEOUT)
-DISTRO="${DISTRO:-ubuntu-2404}"
+DISTRO="${DISTRO:-ubuntu-24.04-cloud-amd64}"
 K8S_VERSION=""
 DEPLOY_CRI=""
 DEPLOY_PROXY_MODE=""

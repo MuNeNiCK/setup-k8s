@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Certificate Renewal Subcommand E2E Test via docker-vm-runner
-# Usage: ./test/run-renew-test.sh [--distro <name>] [--k8s-version <ver>]
+# Usage: ./test/scenarios/cert-renew.sh [--distro <name>] [--k8s-version <ver>]
 #
 # Scenario: Deploy single CP → check-only → renew all → verify API → renew specific → verify API
 #
@@ -16,17 +16,20 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=test/lib/vm_harness.sh
-source "$SCRIPT_DIR/lib/vm_harness.sh"
+SCENARIO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEST_DIR="$(cd "$SCENARIO_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$TEST_DIR/.." && pwd)"
+SCRIPT_DIR="$TEST_DIR"
+# shellcheck source=test/lib/runner.sh
+source "$TEST_DIR/lib/runner.sh"
+cd "$TEST_DIR"
 
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SETUP_K8S_SCRIPT="$PROJECT_ROOT/setup-k8s.sh"
 DOCKER_VM_RUNNER_IMAGE="${DOCKER_VM_RUNNER_IMAGE:-ghcr.io/munenick/docker-vm-runner:latest}"
 VM_DATA_DIR="${VM_DATA_DIR:-$SCRIPT_DIR/data}"
 
 # Defaults
-DISTRO="${DISTRO:-ubuntu-2404}"
+DISTRO="${DISTRO:-ubuntu-24.04-cloud-amd64}"
 K8S_VERSION=""
 # Common defaults from vm_harness.sh: VM_MEMORY, VM_CPUS, VM_DISK_SIZE, TIMEOUT_TOTAL, SSH_READY_TIMEOUT
 
@@ -55,7 +58,7 @@ Options:
 
 Examples:
   $0                                        # auto-detect version
-  $0 --distro debian-12 --k8s-version 1.32
+  $0 --distro debian-12-cloud-amd64 --k8s-version 1.32
 EOF
 }
 

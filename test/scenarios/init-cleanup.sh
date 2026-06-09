@@ -1,43 +1,22 @@
 #!/bin/bash
 #
-# K8s Multi-Distribution Test Runner
-# Usage: ./run-e2e-tests.sh <distro-name>
+# Single-node init + cleanup scenario.
 #
 
 set -euo pipefail
 
-# Constants
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=test/lib/vm_harness.sh
-source "$SCRIPT_DIR/lib/vm_harness.sh"
+SCENARIO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEST_DIR="$(cd "$SCENARIO_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$TEST_DIR/.." && pwd)"
+SCRIPT_DIR="$TEST_DIR"
+# shellcheck source=test/lib/runner.sh
+source "$TEST_DIR/lib/runner.sh"
+cd "$TEST_DIR"
 
-SETUP_K8S_SCRIPT="$SCRIPT_DIR/../setup-k8s.sh"
-# cleanup is now integrated into setup-k8s.sh as the 'cleanup' subcommand
+SETUP_K8S_SCRIPT="$PROJECT_ROOT/setup-k8s.sh"
 DOCKER_VM_RUNNER_IMAGE="${DOCKER_VM_RUNNER_IMAGE:-ghcr.io/munenick/docker-vm-runner:latest}"
 GITHUB_BASE_URL="${GITHUB_BASE_URL:-https://raw.githubusercontent.com/MuNeNiCK/setup-k8s/main}"
-VM_DATA_DIR="${VM_DATA_DIR:-$SCRIPT_DIR/data}"
-
-SUPPORTED_DISTROS=(
-    ubuntu-2404
-    ubuntu-2204
-    debian-13
-    debian-12
-    debian-11
-    centos-stream-10
-    centos-stream-9
-    fedora-43
-    opensuse-tumbleweed
-    opensuse-leap-160
-    rocky-linux-10
-    rocky-linux-9
-    rocky-linux-8
-    almalinux-10
-    almalinux-9
-    almalinux-8
-    oracle-linux-9
-    archlinux
-    alpine-3
-)
+VM_DATA_DIR="${VM_DATA_DIR:-$TEST_DIR/data}"
 
 # VM resource defaults
 VM_MEMORY="${VM_MEMORY:-8192}"
@@ -60,7 +39,7 @@ SSH_READY_TIMEOUT=300 # 5 minutes for SSH to become available
 # SSH settings
 SSH_KEY_DIR=""
 SSH_PORT=""
-SSH_BASE_OPTS=(-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5)
+SSH_BASE_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5)
 # shellcheck disable=SC2034 # SSH_OPTS is used by vm_ssh/vm_scp in vm_harness.sh
 SSH_OPTS=("${SSH_BASE_OPTS[@]}")
 
@@ -80,9 +59,9 @@ _e2e_cleanup_vm_container() {
 # Help message
 show_help() {
     cat <<EOF
-K8s Multi-Distribution Test Runner
+K8s Init/Cleanup VM Scenario
 
-Usage: $0 [OPTIONS] <distro-name>
+Usage: $0 [OPTIONS] <docker-vm-runner-image-id>
 
 Options:
   --all, -a                 Test all distributions sequentially
@@ -96,48 +75,34 @@ Options:
   --                        Treat the rest as setup-args
   --help, -h                Show this help message
 
-Supported distributions:
+Default matrix:
 EOF
-    for distro in "${SUPPORTED_DISTROS[@]}"; do
+    while IFS= read -r distro; do
         echo "  - $distro"
-    done
+    done < <(test_list_matrix_distros)
     echo
     echo "Examples:"
-    echo "  $0 ubuntu-2404                        # Test single distribution offline (bundled)"
-    echo "  $0 --online ubuntu-2404               # Test single distribution via curl | bash from GitHub"
-    echo "  $0 --k8s-version 1.31 ubuntu-2404     # Test with specific k8s version"
+    echo "  $0 ubuntu-24.04-cloud-amd64"
+    echo "  $0 --online ubuntu-24.04-cloud-amd64"
+    echo "  $0 --k8s-version 1.31 ubuntu-24.04-cloud-amd64"
     echo "  $0 --all                              # Test all distributions offline"
     echo "  $0 --all --online                     # Test all distributions via curl | bash"
     echo "  $0 --all --k8s-version 1.30           # Test all distributions with k8s v1.30"
-    echo "  $0 --memory 16384 --cpus 8 ubuntu-2404  # Test with custom VM resources"
-    echo "  $0 archlinux"
-    echo "  $0 --k8s-version 1.32 rocky-linux-8"
+    echo "  $0 --memory 16384 --cpus 8 ubuntu-24.04-cloud-amd64"
+    echo "  $0 archlinux-cloud-amd64"
+    echo "  $0 --k8s-version 1.32 rocky-9-cloud-amd64"
     echo
     echo "Test Modes:"
     echo "  Online:  Runs curl | bash from GitHub inside VM (tests production flow; requires push)"
     echo "  Offline: Uses pre-bundled script with local code (default; no push required)"
 }
 
-# Prepare data directory for docker-vm-runner (mounted as /data in container)
-prepare_runner_directories() {
-    mkdir -p "$VM_DATA_DIR"
-}
-
 # Load configuration function
 load_config() {
     local distro=$1
-    local found=false
-    for d in "${SUPPORTED_DISTROS[@]}"; do
-        if [ "$d" = "$distro" ]; then found=true; break; fi
-    done
-    if [ "$found" = false ]; then
-        log_error "Unknown distribution: $distro"
-        echo "Available distributions:"
-        printf '  %s\n' "${SUPPORTED_DISTROS[@]}"
-        return 1
-    fi
+    test_validate_runner_distro "$distro" || return 1
     log_info "Configuration loaded:"
-    log_info "  Distribution: $distro"
+    log_info "  docker-vm-runner image ID: $distro"
     log_info "  Login user: $LOGIN_USER"
     return 0
 }
@@ -241,6 +206,11 @@ CIEOF
         cleanup_ssh_key
         return 1
     }
+    wait_for_guest_bootstrap "$SSH_PORT" "$LOGIN_USER" "$SSH_READY_TIMEOUT" "$distro" || {
+        _e2e_cleanup_vm_container
+        cleanup_ssh_key
+        return 1
+    }
 
     # --- Deploy scripts ---
     if [ "$TEST_MODE" = "online" ]; then
@@ -286,6 +256,23 @@ CIEOF
         log_error "=== SETUP ERROR LOG END ==="
     fi
 
+    # --- Phase 2: Run setup-k8s status ---
+    log_info "Running setup-k8s status..."
+    local status_cmd
+    if [ "$TEST_MODE" = "online" ]; then
+        status_cmd="curl -fsSL ${GITHUB_BASE_URL}/setup-k8s.sh | KUBECONFIG=/etc/kubernetes/admin.conf bash -s -- status --output wide"
+    else
+        status_cmd="KUBECONFIG=/etc/kubernetes/admin.conf bash /tmp/setup-k8s.sh status --output wide"
+    fi
+    local status_exit_code=0
+    vm_ssh "$status_cmd > /tmp/status-k8s.log 2>&1" || status_exit_code=$?
+    if [ "$status_exit_code" -eq 0 ]; then
+        log_success "setup-k8s status completed"
+    else
+        log_error "setup-k8s status failed with exit code: $status_exit_code"
+        vm_ssh "cat /tmp/status-k8s.log" 2>/dev/null || true
+    fi
+
     # --- Phase 2: Verify setup ---
     log_info "Verifying Kubernetes components..."
     local kubelet_status
@@ -317,7 +304,8 @@ CIEOF
     fi
 
     local setup_test_status="failed"
-    if [ "$setup_exit_code" -eq 0 ] && [ "$kubelet_status" = "active" ] && [ "$api_responsive" = "true" ]; then
+    if [ "$setup_exit_code" -eq 0 ] && [ "$status_exit_code" -eq 0 ] && \
+       [ "$kubelet_status" = "active" ] && [ "$api_responsive" = "true" ]; then
         setup_test_status="success"
         log_success "Setup test: SUCCESS"
     else
@@ -404,6 +392,7 @@ CIEOF
 
     # --- Retrieve logs ---
     vm_ssh "cat /tmp/setup-k8s.log" > "$log_file" 2>/dev/null || true
+    vm_ssh "cat /tmp/status-k8s.log" >> "$log_file" 2>/dev/null || true
     vm_ssh "cat /tmp/cleanup-k8s.log" >> "$log_file" 2>/dev/null || true
 
     # --- Write test-result.json (on host) ---
@@ -418,6 +407,7 @@ CIEOF
   "setup_test": {
     "status": "$setup_test_status",
     "exit_code": $setup_exit_code,
+    "status_exit_code": $status_exit_code,
     "kubelet_status": "$kubelet_status",
     "kubeconfig_exists": $kubeconfig_exists,
     "api_responsive": $api_responsive
@@ -518,8 +508,11 @@ test_all() {
         log_info "Script source: Bundled (all modules included)"
     fi
 
-    # Get all distributions
-    local distros=("${SUPPORTED_DISTROS[@]}")
+    local distros=()
+    local distro
+    while IFS= read -r distro; do
+        distros+=("$distro")
+    done < <(test_list_matrix_distros)
     local total=${#distros[@]}
     local passed=0
     local failed=0
@@ -625,7 +618,7 @@ run_single_test() {
 
     # Execute each step
     load_config "$distro" || return 1
-    prepare_runner_directories || return 1
+    test_prepare_runner_dirs || return 1
     run_vm_container "$distro" "$k8s_version_flag" "$k8s_version_val" "$setup_extra_args_str" || return 1
 
     # Display results and return status
@@ -702,7 +695,7 @@ main() {
                 exit 1
                 ;;
             *)
-                # This should be the distribution name
+                # docker-vm-runner catalog image ID
                 distro=$1
                 shift
                 ;;
@@ -717,7 +710,7 @@ main() {
 
     # Check arguments for single test
     if [ -z "$distro" ]; then
-        log_error "Distribution name required"
+        log_error "docker-vm-runner image ID required"
         show_help
         exit 1
     fi

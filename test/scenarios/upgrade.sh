@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Upgrade Subcommand E2E Test via docker-vm-runner
-# Usage: ./test/run-upgrade-test.sh [--distro <name>] [--from-version <ver>] [--to-version <ver>]
+# Usage: ./test/scenarios/upgrade.sh [--distro <name>] [--from-version <ver>] [--to-version <ver>]
 #
 # Scenario: Deploy cluster with --from-version, then upgrade to --to-version
 #
@@ -16,17 +16,20 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=test/lib/vm_harness.sh
-source "$SCRIPT_DIR/lib/vm_harness.sh"
+SCENARIO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEST_DIR="$(cd "$SCENARIO_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$TEST_DIR/.." && pwd)"
+SCRIPT_DIR="$TEST_DIR"
+# shellcheck source=test/lib/runner.sh
+source "$TEST_DIR/lib/runner.sh"
+cd "$TEST_DIR"
 
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SETUP_K8S_SCRIPT="$PROJECT_ROOT/setup-k8s.sh"
 DOCKER_VM_RUNNER_IMAGE="${DOCKER_VM_RUNNER_IMAGE:-ghcr.io/munenick/docker-vm-runner:latest}"
 VM_DATA_DIR="${VM_DATA_DIR:-$SCRIPT_DIR/data}"
 
 # Defaults
-DISTRO="${DISTRO:-ubuntu-2404}"
+DISTRO="${DISTRO:-ubuntu-24.04-cloud-amd64}"
 FROM_VERSION=""  # MAJOR.MINOR for deploy (e.g., 1.32)
 TO_VERSION=""    # MAJOR.MINOR.PATCH for upgrade (e.g., 1.33.2)
 # Common defaults from vm_harness.sh: VM_MEMORY, VM_CPUS, VM_DISK_SIZE, TIMEOUT_TOTAL, SSH_READY_TIMEOUT
@@ -65,7 +68,7 @@ latest stable version and upgrades from the previous minor version's latest patc
 Examples:
   $0                                                  # auto-detect versions
   $0 --from-version 1.32 --to-version 1.33.2          # explicit versions
-  $0 --distro debian-12 --from-version 1.32 --to-version 1.33.2
+  $0 --distro debian-12-cloud-amd64 --from-version 1.32 --to-version 1.33.2
 EOF
 }
 

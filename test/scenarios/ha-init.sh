@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # HA (kube-vip) Integration Test — Init mode (single VM)
-# Usage: ./test/run-ha-init-test.sh [--distro <name>] [--k8s-version <ver>]
+# Usage: ./test/scenarios/ha-init.sh [--distro <name>] [--k8s-version <ver>]
 #
 # Verifications:
 #   1. setup-k8s.sh init --ha --ha-vip <VIP> completes successfully
@@ -14,17 +14,20 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=test/lib/vm_harness.sh
-source "$SCRIPT_DIR/lib/vm_harness.sh"
+SCENARIO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEST_DIR="$(cd "$SCENARIO_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$TEST_DIR/.." && pwd)"
+SCRIPT_DIR="$TEST_DIR"
+# shellcheck source=test/lib/runner.sh
+source "$TEST_DIR/lib/runner.sh"
+cd "$TEST_DIR"
 
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SETUP_K8S_SCRIPT="$PROJECT_ROOT/setup-k8s.sh"
 DOCKER_VM_RUNNER_IMAGE="${DOCKER_VM_RUNNER_IMAGE:-ghcr.io/munenick/docker-vm-runner:latest}"
 VM_DATA_DIR="${VM_DATA_DIR:-$SCRIPT_DIR/data}"
 
 # Defaults
-DISTRO="${DISTRO:-ubuntu-2404}"
+DISTRO="${DISTRO:-ubuntu-24.04-cloud-amd64}"
 K8S_VERSION=""
 VM_MEMORY="${VM_MEMORY:-8192}"
 VM_CPUS="${VM_CPUS:-4}"
@@ -37,7 +40,7 @@ SSH_READY_TIMEOUT=300
 # SSH settings
 SSH_KEY_DIR=""
 SSH_PORT=""
-SSH_BASE_OPTS=(-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5)
+SSH_BASE_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5)
 # shellcheck disable=SC2034 # SSH_OPTS is used by sourced vm_harness.sh
 SSH_OPTS=("${SSH_BASE_OPTS[@]}")
 
@@ -53,7 +56,7 @@ HA (kube-vip) Integration Test — Init mode
 Usage: $0 [OPTIONS]
 
 Options:
-  --distro <name>         Distribution to test (default: ubuntu-2404)
+  --distro <name>         Distribution to test (default: ubuntu-24.04-cloud-amd64)
   --k8s-version <ver>     Kubernetes version (e.g., 1.32)
   --ha-vip <addr>         VIP address (default: $HA_VIP)
   --memory <MB>           VM memory (default: $VM_MEMORY)
@@ -80,6 +83,7 @@ run_ha_test() {
     log_info "VIP: $HA_VIP"
     log_info "VM resources: memory=${VM_MEMORY}MB cpus=${VM_CPUS} disk=${VM_DISK_SIZE}"
     mkdir -p results/logs "$VM_DATA_DIR"
+    test_validate_runner_distro "$DISTRO" || return 1
 
     # Clean up stale containers
     _ha_cleanup_vm_container
@@ -114,6 +118,7 @@ run_ha_test() {
     # --- Wait for cloud-init and SSH ---
     wait_for_cloud_init "$container_name" "$SSH_READY_TIMEOUT" "HA" || return 1
     wait_for_ssh "$SSH_PORT" "$LOGIN_USER" "$SSH_READY_TIMEOUT" "HA" || return 1
+    wait_for_guest_bootstrap "$SSH_PORT" "$LOGIN_USER" "$SSH_READY_TIMEOUT" "HA" || return 1
 
     # --- Discover VM network ---
     local vm_ip vm_iface

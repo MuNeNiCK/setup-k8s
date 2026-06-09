@@ -1,14 +1,15 @@
 #!/bin/bash
 #
 # Simple unit test framework for setup-k8s
-# Run: bash test/run-unit-tests.sh
+# Run: bash test/unit/run.sh
 #
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+UNIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEST_DIR="$(cd "$UNIT_DIR/.." && pwd)"
 # shellcheck disable=SC2034 # used by test/unit/*.sh via source
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$TEST_DIR/.." && pwd)"
 
 # Temporary file for collecting assertion results across subshells
 _RESULTS_FILE=$(mktemp -t unit-test-results-XXXXXX)
@@ -56,7 +57,8 @@ _assert_exit_code() {
 # ============================================================
 # Source all topic-based test files
 # ============================================================
-for f in "$SCRIPT_DIR/unit/"*.sh; do
+for f in "$UNIT_DIR/"*.sh; do
+    [ "$(basename "$f")" = "run.sh" ] && continue
     . "$f"
 done
 
