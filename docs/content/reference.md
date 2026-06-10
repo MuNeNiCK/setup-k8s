@@ -43,7 +43,7 @@ These options apply to all subcommands and are parsed before subcommand-specific
 | Option | Description | Default | Example |
 |--------|-------------|---------|---------|
 | `--cri RUNTIME` | Container runtime (containerd or crio) | `containerd` | `--cri crio` |
-| `--proxy-mode MODE` | Kube-proxy mode (iptables, ipvs, or nftables) | `iptables` | `--proxy-mode nftables` |
+| `--proxy-mode MODE` | Kube-proxy mode (iptables, ipvs, or nftables; ipvs is deprecated in Kubernetes 1.35+) | `iptables` | `--proxy-mode nftables` |
 | `--pod-network-cidr CIDR` | Pod network CIDR (IPv4, IPv6, or dual-stack comma-separated) | — | `--pod-network-cidr 10.244.0.0/16,fd00:10:244::/48` |
 | `--apiserver-advertise-address ADDR` | API server advertise address | — | `--apiserver-advertise-address 192.168.1.10` |
 | `--control-plane-endpoint ENDPOINT` | Control plane endpoint | — | `--control-plane-endpoint cluster.example.com` |
@@ -202,9 +202,10 @@ Options for the `preflight` subcommand. Runs locally with root privileges to ver
 | `--mode MODE` | Check mode (`init` or `join`) | `init` | `--mode join` |
 | `--cri RUNTIME` | Container runtime to check (`containerd` or `crio`) | `containerd` | `--cri crio` |
 | `--proxy-mode MODE` | Proxy mode to check (`iptables`, `ipvs`, or `nftables`) | `iptables` | `--proxy-mode ipvs` |
+| `--kubernetes-version VER` | Target Kubernetes minor version for compatibility checks | — | `--kubernetes-version 1.36` |
 | `--preflight-strict` | Treat warnings as failures (exit non-zero on any warning) | — | `--preflight-strict` |
 
-Checks performed: CPU count (>= 2), memory (>= 1700 MB), disk space, required port availability, kernel modules, IPv4 forwarding, CRI installation, swap state, cgroups v2, SELinux state, AppArmor state, unattended upgrades detection, existing cluster detection (init only), and network connectivity.
+Checks performed: CPU count (>= 2), memory (>= 1700 MB), disk space, required port availability, kernel modules, IPv4 forwarding, CRI installation, containerd v2 readiness for Kubernetes 1.36+, swap state, cgroups v2, SELinux state, AppArmor state, unattended upgrades detection, existing cluster detection (init only), and network connectivity.
 
 ### Cleanup Options
 

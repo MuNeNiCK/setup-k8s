@@ -64,8 +64,8 @@ _has_cgroupv2() {
     return 1
 }
 
-# Kubernetes 1.34+ requires cgroups v2 (cgroupv1 support was removed)
-_K8S_MIN_CGROUPV2="1.34"
+# Kubernetes 1.35+ makes cgroups v1 fail by default.
+_K8S_MIN_CGROUPV2="1.35"
 
 # Determine the latest stable Kubernetes version
 determine_k8s_version() {

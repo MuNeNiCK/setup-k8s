@@ -22,6 +22,7 @@ Options:
   --mode MODE           Check mode: init or join (default: init)
   --cri RUNTIME         Container runtime to check (containerd or crio). Default: containerd
   --proxy-mode MODE     Proxy mode to check (iptables, ipvs, or nftables). Default: iptables
+  --kubernetes-version VER Target Kubernetes minor version (e.g., 1.36)
   --preflight-strict    Treat warnings as failures
   --dry-run             Show what checks would be performed
   --help, -h            Display this help message
@@ -34,6 +35,7 @@ Checks performed:
   - Kernel modules (overlay, br_netfilter, proxy-mode specific)
   - IP forwarding
   - Container runtime installation (info only)
+  - containerd v2 readiness for Kubernetes 1.36+ (warning only)
   - Swap state (warning only)
   - cgroups v2
   - SELinux state (warning only)
@@ -70,6 +72,15 @@ parse_preflight_args() {
             --proxy-mode)
                 _require_value $# "$1" "${2:-}"
                 PREFLIGHT_PROXY_MODE="$2"
+                shift 2
+                ;;
+            --kubernetes-version)
+                _require_value $# "$1" "${2:-}"
+                PREFLIGHT_K8S_VERSION="$2"
+                if ! echo "$PREFLIGHT_K8S_VERSION" | grep -qE '^[0-9]+\.[0-9]+$'; then
+                    log_error "--kubernetes-version for preflight must be MAJOR.MINOR (e.g., 1.36)"
+                    exit 1
+                fi
                 shift 2
                 ;;
             --preflight-strict)
@@ -229,6 +240,7 @@ _preflight_check_cri() {
         containerd)
             if command -v containerd >/dev/null 2>&1; then
                 _preflight_record_pass "containerd is installed"
+                _preflight_check_containerd_v2_readiness
             else
                 log_info "  [INFO] containerd is not installed (will be installed during setup)"
             fi
@@ -241,6 +253,35 @@ _preflight_check_cri() {
             fi
             ;;
     esac
+}
+
+_preflight_check_containerd_v2_readiness() {
+    local version major
+    version=$(containerd --version 2>/dev/null | awk '{print $3}' | sed 's/^v//') || version=""
+    if [ -z "$version" ]; then
+        _preflight_record_warn "Cannot determine containerd version; Kubernetes 1.36+ requires containerd 2.0+"
+        return
+    fi
+
+    major=$(echo "$version" | cut -d. -f1)
+    if ! echo "$major" | grep -qE '^[0-9]+$'; then
+        _preflight_record_warn "Cannot parse containerd version '$version'; Kubernetes 1.36+ requires containerd 2.0+"
+        return
+    fi
+
+    if [ "$major" -lt 2 ]; then
+        if [ -n "$PREFLIGHT_K8S_VERSION" ]; then
+            local k8s_minor
+            k8s_minor=$(echo "$PREFLIGHT_K8S_VERSION" | cut -d. -f2)
+            if [ "$k8s_minor" -ge 36 ]; then
+                _preflight_record_warn "containerd ${version} detected; upgrade to containerd 2.0+ before Kubernetes ${PREFLIGHT_K8S_VERSION}"
+            fi
+        else
+            _preflight_record_warn "containerd ${version} detected; Kubernetes 1.36+ requires containerd 2.0+"
+        fi
+    else
+        _preflight_record_pass "containerd ${version} is ready for Kubernetes 1.36+"
+    fi
 }
 
 _preflight_check_swap() {
@@ -258,12 +299,12 @@ _preflight_check_cgroups() {
         if _has_cgroupv2; then
             _preflight_record_pass "cgroups v2 is available"
         else
-            _preflight_record_warn "cgroups v1 detected (v2 recommended, required for K8s >= 1.31)"
+            _preflight_record_warn "cgroups v1 detected (v2 recommended, required by default for K8s >= 1.35)"
         fi
     elif [ -f /sys/fs/cgroup/cgroup.controllers ]; then
         _preflight_record_pass "cgroups v2 is available"
     else
-        _preflight_record_warn "cgroups v1 detected (v2 recommended, required for K8s >= 1.31)"
+        _preflight_record_warn "cgroups v1 detected (v2 recommended, required by default for K8s >= 1.35)"
     fi
 }
 
@@ -359,6 +400,7 @@ _preflight_check_connectivity() {
 preflight_local() {
     log_info "=== Preflight Checks ==="
     log_info "Mode: $PREFLIGHT_MODE | CRI: $PREFLIGHT_CRI | Proxy mode: $PREFLIGHT_PROXY_MODE"
+    [ -n "$PREFLIGHT_K8S_VERSION" ] && log_info "Target Kubernetes version: $PREFLIGHT_K8S_VERSION"
     log_info ""
 
     _PREFLIGHT_PASS=0
@@ -408,6 +450,7 @@ preflight_local() {
 preflight_dry_run() {
     log_info "=== Dry-run: Preflight Checks ==="
     log_info "Mode: $PREFLIGHT_MODE | CRI: $PREFLIGHT_CRI | Proxy mode: $PREFLIGHT_PROXY_MODE"
+    [ -n "$PREFLIGHT_K8S_VERSION" ] && log_info "Target Kubernetes version: $PREFLIGHT_K8S_VERSION"
     log_info "Checks to perform:"
     log_info "  1. CPU count (>= 2 cores)"
     log_info "  2. Memory (>= 1700 MB)"
@@ -421,6 +464,9 @@ preflight_dry_run() {
     log_info "  5. Kernel modules (overlay, br_netfilter + proxy-mode specific)"
     log_info "  6. IPv4 forwarding"
     log_info "  7. Container runtime ($PREFLIGHT_CRI) installation status"
+    if [ "$PREFLIGHT_CRI" = "containerd" ]; then
+        log_info "     containerd v2 readiness for Kubernetes 1.36+"
+    fi
     log_info "  8. Swap state"
     log_info "  9. cgroups v2"
     log_info "  10. SELinux state"

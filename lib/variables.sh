@@ -91,6 +91,7 @@ STATUS_OUTPUT_FORMAT="text"   # output format: text or wide
 PREFLIGHT_MODE="init"
 PREFLIGHT_CRI="containerd"
 PREFLIGHT_PROXY_MODE="iptables"
+PREFLIGHT_K8S_VERSION=""
 PREFLIGHT_STRICT=false  # Treat WARN as FAIL in preflight checks
 
 # Renew subcommand
@@ -113,7 +114,7 @@ PAUSE_IMAGE_VERSION="${PAUSE_IMAGE_VERSION:-3.10}"
 CONTAINERD_VERSION="${CONTAINERD_VERSION:-2.0.4}"
 RUNC_VERSION="${RUNC_VERSION:-1.2.5}"
 CNI_PLUGINS_VERSION="${CNI_PLUGINS_VERSION:-1.6.2}"
-CRIO_VERSION="${CRIO_VERSION:-1.32.0}"
+CRIO_VERSION="${CRIO_VERSION:-}"
 # Timeout for remote operations (seconds)
 DEPLOY_REMOTE_TIMEOUT="${DEPLOY_REMOTE_TIMEOUT:-600}"
 # Polling interval for remote operations (seconds)

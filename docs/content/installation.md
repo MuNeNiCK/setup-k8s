@@ -40,13 +40,15 @@ curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh
   --service-cidr 10.96.0.0/12
 ```
 
-Setup with IPVS mode for better performance:
+Setup with IPVS mode for existing IPVS-based environments:
 ```bash
 curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
   init \
   --proxy-mode ipvs \
   --pod-network-cidr 192.168.0.0/16
 ```
+
+Kubernetes 1.35+ deprecates kube-proxy IPVS mode. Prefer nftables for new clusters.
 
 Setup with nftables mode (requires K8s 1.29+):
 ```bash

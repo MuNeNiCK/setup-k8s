@@ -33,8 +33,8 @@ curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh
 | Mode | Use when | Notes |
 |---|---|---|
 | `iptables` | Default, broad compatibility | Good for small and medium clusters |
-| `ipvs` | Many services or high service traffic | Requires IPVS kernel modules and `ipvsadm`/`ipset` |
-| `nftables` | Large clusters on Kubernetes 1.29+ | Alpha in 1.29-1.30, beta in 1.31+ |
+| `ipvs` | Existing clusters already using IPVS | Deprecated in Kubernetes 1.35+; requires IPVS kernel modules and `ipvsadm`/`ipset` |
+| `nftables` | Large clusters on Kubernetes 1.29+ | Recommended replacement for IPVS; alpha in 1.29-1.30, beta in 1.31+ |
 
 IPVS:
 
@@ -42,6 +42,8 @@ IPVS:
 curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
   init --proxy-mode ipvs
 ```
+
+IPVS remains supported by this script for compatibility, but Kubernetes 1.35+ deprecates kube-proxy IPVS mode. Prefer nftables for new clusters when your kernel and Kubernetes version support it.
 
 nftables:
 

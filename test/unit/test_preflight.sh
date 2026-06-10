@@ -26,6 +26,7 @@ test_preflight_variables_defaults() {
         _assert_eq "PREFLIGHT_MODE default" "init" "$PREFLIGHT_MODE"
         _assert_eq "PREFLIGHT_CRI default" "containerd" "$PREFLIGHT_CRI"
         _assert_eq "PREFLIGHT_PROXY_MODE default" "iptables" "$PREFLIGHT_PROXY_MODE"
+        _assert_eq "PREFLIGHT_K8S_VERSION default" "" "$PREFLIGHT_K8S_VERSION"
     )
 }
 
@@ -40,10 +41,11 @@ test_parse_preflight_args() {
         source "$PROJECT_ROOT/lib/validation.sh"
         source "$PROJECT_ROOT/commands/preflight.sh"
 
-        parse_preflight_args --mode join --cri crio --proxy-mode ipvs
+        parse_preflight_args --mode join --cri crio --proxy-mode ipvs --kubernetes-version 1.36
         _assert_eq "PREFLIGHT_MODE parsed" "join" "$PREFLIGHT_MODE"
         _assert_eq "PREFLIGHT_CRI parsed" "crio" "$PREFLIGHT_CRI"
         _assert_eq "PREFLIGHT_PROXY_MODE parsed" "ipvs" "$PREFLIGHT_PROXY_MODE"
+        _assert_eq "PREFLIGHT_K8S_VERSION parsed" "1.36" "$PREFLIGHT_K8S_VERSION"
     )
 }
 

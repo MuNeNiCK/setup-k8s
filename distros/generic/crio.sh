@@ -58,6 +58,31 @@ _install_crio_generic() {
     rm -rf "$extract_dir"
 }
 
+_crio_artifact_available() {
+    local version="$1" arch url
+    arch=$(_detect_arch)
+    url="https://storage.googleapis.com/cri-o/artifacts/cri-o.${arch}.v${version}.tar.gz.sha256sum"
+    curl -fsI --retry 2 --connect-timeout 5 --max-time 10 "$url" >/dev/null 2>&1
+}
+
+_resolve_crio_version_generic() {
+    local patch_version fallback_version
+    patch_version=$(_resolve_k8s_patch_version "$K8S_VERSION")
+    if [ -n "$patch_version" ] && _crio_artifact_available "$patch_version"; then
+        echo "$patch_version"
+        return 0
+    fi
+
+    fallback_version="${K8S_VERSION}.0"
+    if _crio_artifact_available "$fallback_version"; then
+        [ -n "$patch_version" ] && log_warn "CRI-O artifact v${patch_version} not found; using v${fallback_version}"
+        echo "$fallback_version"
+        return 0
+    fi
+
+    return 1
+}
+
 _install_crio_service_generic() {
     case "$(_detect_init_system)" in
         systemd)
@@ -103,6 +128,14 @@ INITD
 }
 
 setup_crio_generic() {
+    if [ -z "$CRIO_VERSION" ]; then
+        CRIO_VERSION=$(_resolve_crio_version_generic)
+    fi
+    if [ -z "$CRIO_VERSION" ]; then
+        log_error "Failed to resolve CRI-O version for Kubernetes ${K8S_VERSION}"
+        return 1
+    fi
+
     log_info "Installing CRI-O ${CRIO_VERSION} (tarball download)..."
 
     _install_crio_generic

@@ -119,6 +119,15 @@ validate_proxy_mode() {
         exit 1
     fi
 
+    if [ "$PROXY_MODE" = "ipvs" ]; then
+        local k8s_major k8s_minor
+        k8s_major=$(echo "$K8S_VERSION" | cut -d. -f1)
+        k8s_minor=$(echo "$K8S_VERSION" | cut -d. -f2)
+        if [ "$k8s_major" -gt 1 ] || [ "$k8s_major" -eq 1 ] && [ "$k8s_minor" -ge 35 ]; then
+            log_warn "ipvs proxy mode is deprecated in Kubernetes 1.35+; migrate to nftables when possible"
+        fi
+    fi
+
     if [ "$PROXY_MODE" = "nftables" ]; then
         local k8s_major k8s_minor
         k8s_major=$(echo "$K8S_VERSION" | cut -d. -f1)

@@ -158,6 +158,7 @@ Options (preflight):
   --mode MODE             Check mode: init or join (default: init)
   --cri RUNTIME           Container runtime to check (default: containerd)
   --proxy-mode MODE       Proxy mode to check (default: iptables)
+  --kubernetes-version VER Target Kubernetes minor version (e.g., 1.36)
   --preflight-strict      Treat warnings as failures
 
   Run 'setup-k8s.sh preflight --help' for details.

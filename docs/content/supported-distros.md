@@ -15,10 +15,10 @@ Latest full validation: 2026-06-09 with Kubernetes v1.36.1.
 | CentOS Stream | 9 | 2026-06-09 | Tested | |
 | Rocky Linux | 10 | 2026-06-09 | Tested | |
 | Rocky Linux | 9 | 2026-06-09 | Tested | |
-| Rocky Linux | 8 | 2026-06-09 | Partial | cgroups v1 only; use Kubernetes 1.33 or earlier |
+| Rocky Linux | 8 | 2026-06-09 | Partial | cgroups v1 only; use Kubernetes 1.34 or earlier |
 | AlmaLinux | 10 | 2026-06-09 | Tested | |
 | AlmaLinux | 9 | 2026-06-09 | Tested | |
-| AlmaLinux | 8 | 2026-06-09 | Partial | cgroups v1 only; use Kubernetes 1.33 or earlier |
+| AlmaLinux | 8 | 2026-06-09 | Partial | cgroups v1 only; use Kubernetes 1.34 or earlier |
 | Oracle Linux | 9 | 2026-06-09 | Tested | |
 | Fedora | 44 | 2026-06-09 | Tested | |
 | Fedora | 43 | 2026-06-09 | Tested | |
@@ -38,4 +38,4 @@ Latest full validation: 2026-06-09 with Kubernetes v1.36.1.
 
 ## Notes
 
-Kubernetes 1.34+ requires cgroups v2 because cgroups v1 support was removed. Use `--kubernetes-version 1.33` or earlier on distributions limited to cgroups v1.
+Kubernetes 1.35+ fails on cgroups v1 by default. Use `--kubernetes-version 1.34` or earlier on distributions limited to cgroups v1, or migrate the node to cgroups v2.
