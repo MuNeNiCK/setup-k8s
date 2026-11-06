@@ -2,45 +2,53 @@ name: Setup Distro Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  # Weekly run against the current distribution images (the code on main)
+  schedule:
+    - cron: '0 18 * * 0'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: distro-tests
-  cancel-in-progress: false
+  # One run per branch; a newer push to develop replaces the running one,
+  # runs for main are never cancelled.
+  group: distro-tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # The distribution list lives in test/matrices/distro-cloud-images.txt,
+  # shared with ./scenarios/init-cleanup.sh --all.
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      distros: ${{ steps.read.outputs.distros }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read distro matrix
+        id: read
+        run: |
+          # Same rules as test_list_matrix_distros: strip comments and blank lines
+          distros=$(sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' test/matrices/distro-cloud-images.txt \
+            | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "distros=${distros}" >> "$GITHUB_OUTPUT"
+
   distro-tests:
+    needs: matrix
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
-        distro:
-          - ubuntu-24.04-cloud-amd64
-          - ubuntu-22.04-cloud-amd64
-          - debian-13-cloud-amd64
-          - debian-12-cloud-amd64
-          - debian-11-cloud-amd64
-          - centos-stream-10-cloud-amd64
-          - centos-stream-9-cloud-amd64
-          - fedora-44-cloud-amd64
-          - fedora-43-cloud-amd64
-          - opensuse-tumbleweed-cloud-amd64
-          - opensuse-leap-16.0-cloud-amd64
-          - rocky-10-cloud-amd64
-          - rocky-9-cloud-amd64
-          - alma-10-cloud-amd64
-          - alma-9-cloud-amd64
-          - oracle-9-cloud-amd64
-          - archlinux-cloud-amd64
-          - alpine-3.23-cloud-amd64
+        distro: ${{ fromJSON(needs.matrix.outputs.distros) }}
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run setup-k8s test
         working-directory: test
@@ -52,7 +60,7 @@ jobs:
 
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: logs-${{ matrix.distro }}
           path: |

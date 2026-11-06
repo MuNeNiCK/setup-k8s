@@ -5,11 +5,12 @@ Rows dated 2026-11-06 were re-verified with Kubernetes v1.37.2 (Alpine: v1.34.2,
 
 | Distribution | Version | Test Date | Status | Notes |
 |---|---|---|---|---|
+| Ubuntu | 26.04 LTS | 2026-11-07 | Tested | |
 | Ubuntu | 24.04 LTS | 2026-11-06 | Tested | |
 | Ubuntu | 22.04 LTS | 2026-06-09 | Tested | |
 | Debian | 13 (Trixie) | 2026-11-06 | Tested | |
 | Debian | 12 (Bookworm) | 2026-06-09 | Tested | |
-| Debian | 11 (Bullseye) | 2026-06-09 | Tested | |
+| Debian | 11 (Bullseye) | 2026-06-09 | Partial | Regular support ended 2026-08-31 (LTS only); no longer tested in CI |
 | RHEL | 9 | - | Untested | Subscription required |
 | RHEL | 8 | - | Untested | Subscription required |
 | CentOS Stream | 10 | 2026-06-09 | Tested | |

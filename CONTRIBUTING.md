@@ -98,6 +98,17 @@ shellcheck -s bash -S warning test/scenarios/*.sh test/lib/*.sh test/unit/helper
 shellcheck -S warning test/unit/*/*.bats
 ```
 
+### Workflows
+
+If you changed anything under `.github/workflows/`, run
+[actionlint](https://github.com/rhysd/actionlint) 1.7 (CI runs it too):
+
+```sh
+actionlint
+```
+
+Actions are pinned by commit SHA with the release tag as a comment.
+
 ### Unit tests
 
 Unit tests use [bats-core](https://github.com/bats-core/bats-core) 1.14:
@@ -121,11 +132,15 @@ Docker and KVM (`/dev/kvm`). See [test/README.md](test/README.md) for details.
 ```sh
 cd test
 ./scenarios/init-cleanup.sh ubuntu-24.04-cloud-amd64
-./scenarios/init-cleanup.sh --setup-args "--proxy-mode nftables" debian-13-cloud-amd64
+./scenarios/init-cleanup.sh --setup-args "--proxy-mode iptables" debian-13-cloud-amd64
 ```
 
 When a change affects a specific distribution family or subcommand, run the
 matching scenario on that distribution.
+
+On GitHub, pull requests run ShellCheck, actionlint, the unit tests, and an
+Ubuntu 24.04 smoke test. The full VM matrices run after merging into
+`develop` (and again for `main`); see [test/README.md](test/README.md).
 
 ### Documentation
 
