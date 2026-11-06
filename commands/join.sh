@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # === Cluster Join (join subcommand) ===
-# Depends on: lib/helpers.sh (deploy_kube_vip, _verify_kube_vip_kubeconfig, _configure_kubectl)
+# Depends on: lib/components/kube_vip.sh (deploy_kube_vip, _verify_kube_vip_kubeconfig, _configure_kubectl)
 
 # Join node to cluster
 join_cluster() {

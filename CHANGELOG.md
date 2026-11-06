@@ -40,6 +40,11 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
   `setup-k8s.sh <subcommand> --help` shows subcommand options, including a new
   help page for `init` and `join`.
 
+- Source layout: `lib/` is split into `core/`, `components/`, `node/`,
+  `remote/`, and `cluster/`; `backup` and `restore` share `commands/etcd.sh`.
+- Unit tests run on bats-core (`bats -r test/unit`) and mirror the source
+  layout.
+
 ### Fixed
 
 - `--resume` is no longer reset to false when running from a source checkout.

@@ -279,7 +279,7 @@ renew_cluster() {
     return 0
 }
 
-# === Renew argument parsing (moved from lib/validation.sh) ===
+# === Renew argument parsing ===
 
 # Help message for renew
 show_renew_help() {
@@ -404,4 +404,13 @@ validate_renew_deploy_args() {
     fi
 
     _validate_remote_node_args
+}
+
+# === Runner ===
+
+_run_renew() {
+    _run_dual_mode renew \
+        parse_renew_deploy_args validate_renew_deploy_args renew_dry_run renew_cluster \
+        "Local certificate renewal" parse_renew_local_args renew_dry_run renew_certs_local \
+        "$@"
 }

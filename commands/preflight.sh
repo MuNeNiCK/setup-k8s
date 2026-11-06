@@ -481,3 +481,13 @@ preflight_dry_run() {
     fi
     log_info "=== End of dry-run (no changes made) ==="
 }
+
+# === Runner ===
+
+_run_preflight() {
+    _require_root "Preflight checks"
+    parse_preflight_args "$@"
+    _dry_run_guard preflight_dry_run
+    preflight_local
+    exit $?
+}

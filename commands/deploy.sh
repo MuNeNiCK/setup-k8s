@@ -1,14 +1,14 @@
 #!/bin/sh
 
 # Deploy module: orchestrate remote Kubernetes cluster installation via SSH
-# SSH infrastructure is provided by lib/ssh.sh (loaded before this module).
+# SSH infrastructure is provided by lib/remote/ssh.sh (loaded before this module).
 #
 # === Sections ===
 # 1. Dry-run display                        (~line 11)
 # 2. Remote orchestration (deploy_cluster)   (~line 73)
 # 3. CLI parsing & help                     (~line 337)
 #
-# Token extraction -> lib/join_token.sh
+# Token extraction -> lib/node/kubeadm.sh
 
 # --- Main Orchestration ---
 
@@ -345,7 +345,7 @@ deploy_cluster() {
     return 0
 }
 
-# === Deploy argument parsing (moved from lib/validation.sh) ===
+# === Deploy argument parsing ===
 show_deploy_help() {
     echo "Usage: $0 deploy [options]"
     echo ""
@@ -459,4 +459,10 @@ validate_deploy_args() {
         log_error "--ha-vip requires multiple control-plane nodes (got 1)"
         exit 1
     fi
+}
+
+# === Runner ===
+
+_run_deploy() {
+    _run_remote deploy parse_deploy_args validate_deploy_args deploy_dry_run deploy_cluster "$@"
 }

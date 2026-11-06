@@ -1,8 +1,8 @@
 #!/bin/sh
 
 # Upgrade module: local upgrade logic, dry-run display, and CLI parsing.
-# Remote orchestration -> lib/upgrade_orchestration.sh
-# Version helpers, node role detection, rollback -> lib/upgrade_helpers.sh
+# Remote orchestration -> lib/cluster/upgrade.sh
+# Version helpers, node role detection, rollback -> lib/cluster/upgrade.sh
 #
 # === Sections ===
 # 1. Local upgrade logic    (~line 12)
@@ -142,7 +142,7 @@ upgrade_dry_run() {
     log_info "=== End of dry-run (no changes made) ==="
 }
 
-# === Upgrade argument parsing (moved from lib/validation.sh) ===
+# === Upgrade argument parsing ===
 # Help message for upgrade
 show_upgrade_help() {
     echo "Usage: $0 upgrade [options]"
@@ -302,4 +302,18 @@ validate_upgrade_deploy_args() {
     fi
 
     _validate_remote_node_args
+}
+
+# === Runner ===
+
+_upgrade_node_local_main() {
+    _ensure_distro_detected
+    upgrade_node_local
+}
+
+_run_upgrade() {
+    _run_dual_mode upgrade \
+        parse_upgrade_deploy_args validate_upgrade_deploy_args upgrade_dry_run upgrade_cluster \
+        "Local upgrade" parse_upgrade_local_args upgrade_dry_run _upgrade_node_local_main \
+        "$@"
 }

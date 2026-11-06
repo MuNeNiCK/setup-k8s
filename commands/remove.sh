@@ -179,7 +179,7 @@ remove_cluster() {
     return 0
 }
 
-# === Remove argument parsing (moved from lib/validation.sh) ===
+# === Remove argument parsing ===
 
 # Help message for remove
 show_remove_help() {
@@ -220,7 +220,7 @@ parse_remove_args() {
                 shift 2
                 ;;
             --force)
-                # shellcheck disable=SC2034 # used by lib/validation.sh
+                # shellcheck disable=SC2034 # used by lib/core/validate.sh
                 FORCE=true
                 shift
                 ;;
@@ -274,4 +274,10 @@ validate_remove_args() {
         fi
     }
     _csv_for_each "$REMOVE_NODES" _check_not_cp_self
+}
+
+# === Runner ===
+
+_run_remove() {
+    _run_remote remove parse_remove_args validate_remove_args remove_dry_run remove_cluster "$@"
 }

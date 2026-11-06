@@ -18,10 +18,8 @@ case "$VERSION" in
     *"'"*) echo "Error: version must not contain a single quote" >&2; exit 1 ;;
 esac
 
-# shellcheck source=lib/bootstrap.sh
-. "$ROOT/lib/bootstrap.sh"
-# shellcheck source=lib/bundle.sh
-. "$ROOT/lib/bundle.sh"
+# shellcheck source=lib/core/bootstrap.sh
+. "$ROOT/lib/core/bootstrap.sh"
 
 mkdir -p "$(dirname "$OUT")"
 _generate_bundle_core "$OUT" "$ROOT" "$VERSION"

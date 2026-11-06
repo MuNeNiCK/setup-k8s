@@ -47,23 +47,28 @@ repository:
 
 | Path | Contents |
 |---|---|
-| `setup-k8s.sh` | Entry point: global flag parsing and subcommand dispatch |
-| `lib/` | Shared modules (validation, logging, SSH, bundling, kubeadm config, ...) |
-| `commands/` | Subcommand implementations (`init`, `join`, `deploy`, `upgrade`, ...) |
+| `setup-k8s.sh` | Entry point: global flags and subcommand dispatch |
+| `scripts/build.sh` | Builds the single-file release bundle `dist/setup-k8s.sh` |
+| `lib/core/` | Module loading, defaults, logging, validation, distribution detection, Kubernetes versions |
+| `lib/components/` | Installed components (Kubernetes packages, container runtimes, kube-vip, Helm/Kustomize, completion) |
+| `lib/node/` | Node configuration (kernel modules and sysctl, swap, kubeadm config) |
+| `lib/remote/` | SSH transport, sessions, and script transfer for remote subcommands |
+| `lib/cluster/` | Cluster operations (upgrade orchestration, etcd, health, state, diagnostics) |
+| `commands/` | Subcommands: argument parsing, help, dry-run, and execution |
 | `distros/<family>/` | Per-distribution logic for `debian`, `rhel`, `suse`, `arch`, `alpine`, `generic` |
-| `test/unit/` | Unit tests (`run.sh` is the runner) |
+| `test/unit/` | bats-core unit tests, mirroring `lib/` and `commands/` |
 | `test/scenarios/` | VM-based end-to-end scenarios |
 | `docs/` | MkDocs documentation site |
 
 ## Coding guidelines
 
-- Runtime scripts (`setup-k8s.sh`, `lib/`, `commands/`, `distros/`) must be POSIX
+- Runtime scripts (`setup-k8s.sh`, `scripts/`, `lib/`, `commands/`, `distros/`) must be POSIX
   `sh`. They run under dash, ash, and busybox sh, so avoid bashisms
   (`[[ ]]`, arrays, `${var//}`, `source`, `pipefail`, ...). `local` is allowed;
   see `.shellcheckrc`.
-- Test code under `test/` is bash.
+- Test code under `test/` is bash (bats for unit tests).
 - New `lib/` or `commands/` modules must be added to `_MODULES` in
-  `lib/bootstrap.sh`. The list defines the source order for both a local
+  `lib/core/bootstrap.sh`. The list defines the source order for both a local
   checkout and the single-file bundle built by `scripts/build.sh`.
 - Each distribution family implements the same entry points, which are called
   via `_dispatch`:
@@ -82,18 +87,24 @@ repository:
 CI uses ShellCheck 0.11.0 and fails on warnings:
 
 ```sh
-shellcheck -s sh -S warning setup-k8s.sh lib/*.sh commands/*.sh distros/*/*.sh
-shellcheck -s bash -S warning test/scenarios/*.sh test/unit/*.sh test/lib/*.sh
+shellcheck -s sh -S warning setup-k8s.sh scripts/*.sh lib/*/*.sh commands/*.sh distros/*/*.sh
+shellcheck -s bash -S warning test/scenarios/*.sh test/lib/*.sh test/unit/helpers/*.bash
+shellcheck -S warning test/unit/*/*.bats
 ```
 
 ### Unit tests
 
+Unit tests use [bats-core](https://github.com/bats-core/bats-core) 1.14:
+
 ```sh
-bash test/unit/run.sh
+bats -r test/unit
 ```
 
-Every `test/unit/*.sh` file is sourced automatically, but each test function
-must also be called from `test/unit/run.sh`.
+Each test file loads `test/unit/helpers/common.bash`, which provides
+`load_modules` (sources every module, as the entry point does) and
+`fake_cmd` (puts a fake external command on `PATH` and records its calls in
+`fake_calls`). Prefer asserting on the commands a module runs over testing
+internal helper functions.
 
 ### VM scenario tests (recommended for behavior changes)
 

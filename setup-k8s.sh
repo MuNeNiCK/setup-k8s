@@ -28,14 +28,14 @@ if [ "${BUNDLED_MODE:-false}" = true ]; then
     fi
 else
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-    if [ ! -f "$SCRIPT_DIR/lib/bootstrap.sh" ]; then
+    if [ ! -f "$SCRIPT_DIR/lib/core/bootstrap.sh" ]; then
         echo "Error: lib/ not found next to $0." >&2
         echo "Use the release bundle:" >&2
         echo "  curl -fsSL $SETUP_K8S_RELEASE_URL | sh -s -- <subcommand> [options]" >&2
         exit 1
     fi
-    # shellcheck source=lib/bootstrap.sh
-    . "$SCRIPT_DIR/lib/bootstrap.sh"
+    # shellcheck source=lib/core/bootstrap.sh
+    . "$SCRIPT_DIR/lib/core/bootstrap.sh"
     _source_all_modules
 fi
 

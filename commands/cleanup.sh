@@ -146,9 +146,8 @@ cleanup_dry_run() {
     log_info "=== End of dry-run (no changes made) ==="
 }
 
-# confirm_cleanup and check_docker_warning are defined in lib/validation.sh
 
-# === Cleanup argument parsing (moved from lib/validation.sh) ===
+# === Cleanup argument parsing ===
 
 # Help message for cleanup
 show_cleanup_help() {
@@ -171,7 +170,7 @@ parse_cleanup_args() {
     while [ $# -gt 0 ]; do
         case $1 in
             --force)
-                # shellcheck disable=SC2034 # used by lib/validation.sh
+                # shellcheck disable=SC2034 # used by lib/core/validate.sh
                 FORCE=true
                 shift
                 ;;
@@ -204,7 +203,7 @@ parse_cleanup_args() {
     done
 }
 
-# === Cleanup confirmation (moved from lib/validation.sh) ===
+# === Cleanup confirmation ===
 
 # Confirmation prompt for cleanup
 confirm_cleanup() {
@@ -219,4 +218,46 @@ check_docker_warning() {
         log_warn "This cleanup script will reset containerd configuration but will NOT remove containerd."
         log_warn "Docker should continue to work normally after cleanup."
     fi
+}
+
+# === Runner ===
+
+_run_cleanup() {
+    _require_root "Cleanup"
+    parse_cleanup_args "$@"
+    _ensure_distro_detected
+    _dry_run_guard cleanup_dry_run
+    confirm_cleanup
+
+    CLEANUP_ERRORS=0
+    log_info "Starting Kubernetes cleanup..."
+    check_docker_warning
+    stop_kubernetes_services || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    stop_cri_services || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    reset_kubernetes_cluster || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    remove_kubernetes_configs || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    restore_fstab_swap || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    restore_zram_swap || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_cni_conditionally || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_network_configs || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_kube_configs || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_crictl_config || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    reset_iptables || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    reset_containerd_config || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    _service_reload || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    _dispatch "cleanup_${DISTRO_FAMILY}" || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_kubernetes_completions || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    if [ "${REMOVE_HELM:-false}" = true ]; then
+        cleanup_helm || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    fi
+    if [ "${REMOVE_KUSTOMIZE:-false}" = true ]; then
+        cleanup_kustomize || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    fi
+
+    if [ "$CLEANUP_ERRORS" -gt 0 ]; then
+        log_error "Cleanup finished with $CLEANUP_ERRORS error(s). Check the output above for details."
+        exit 1
+    fi
+    log_info "Cleanup complete! Please reboot the system for all changes to take effect."
+    exit 0
 }

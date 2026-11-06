@@ -204,7 +204,7 @@ parse_setup_args() {
 }
 
 # === Cluster Initialization (init subcommand) ===
-# Kubeadm config generation helpers → lib/kubeadm.sh
+# Kubeadm config generation helpers → lib/node/kubeadm.sh
 
 # Initialize Kubernetes cluster
 initialize_cluster() {
@@ -295,4 +295,317 @@ initialize_cluster() {
     log_info "1. Install a CNI plugin"
     log_info "2. For single-node clusters, remove the taint with:"
     log_info "   kubectl taint nodes --all node-role.kubernetes.io/control-plane-"
+}
+
+# === Setup runner (init/join) ===
+
+# Show dry-run configuration summary for init/join
+_setup_dry_run() {
+    log_info "=== Dry-run Configuration Summary ==="
+    log_info "Action: ${ACTION}"
+    log_info "Container Runtime: ${CRI}"
+    log_info "Proxy mode: ${PROXY_MODE}"
+    log_info "Kubernetes Version (minor): ${K8S_VERSION}"
+    log_info "Distribution: ${DISTRO_NAME:-unknown} (family: ${DISTRO_FAMILY:-unknown})"
+    log_info "Swap enabled: ${SWAP_ENABLED}"
+    log_info "Install Helm: ${INSTALL_HELM}"
+    log_info "Install Kustomize: ${INSTALL_KUSTOMIZE}"
+    log_info "Shell Completion: ${ENABLE_COMPLETION} (shells: ${COMPLETION_SHELLS})"
+    [ -n "$KUBEADM_POD_CIDR" ] && log_info "Pod network CIDR: $KUBEADM_POD_CIDR"
+    [ -n "$KUBEADM_SERVICE_CIDR" ] && log_info "Service CIDR: $KUBEADM_SERVICE_CIDR"
+    [ -n "$KUBEADM_API_ADDR" ] && log_info "API server address: $KUBEADM_API_ADDR"
+    [ -n "$KUBEADM_CP_ENDPOINT" ] && log_info "Control plane endpoint: $KUBEADM_CP_ENDPOINT"
+    if [ "$JOIN_AS_CONTROL_PLANE" = true ]; then
+        log_info "HA Mode: joining as control-plane"
+    fi
+    if [ "$HA_ENABLED" = true ]; then
+        log_info "HA Mode: kube-vip enabled"
+        log_info "HA VIP: ${HA_VIP_ADDRESS}"
+        log_info "HA Interface: ${HA_VIP_INTERFACE}"
+    fi
+    log_info "=== End of dry-run (no changes made) ==="
+}
+
+# Common pre-cleanup steps shared by all distributions
+cleanup_pre_common() {
+    log_info "Resetting cluster state..."
+    kubeadm reset -f || true
+    cleanup_cni
+}
+
+_run_setup() {
+    _require_root "This script"
+
+    parse_setup_args "$@"
+    validate_join_args
+    validate_cri
+    validate_completion_options
+
+    if [ -z "${DISTRO_FAMILY:-}" ]; then
+        detect_distribution
+    fi
+
+    log_info "Installing dependencies..."
+    _dispatch "install_dependencies_${DISTRO_FAMILY}"
+    determine_k8s_version
+    validate_proxy_mode
+    validate_swap_enabled
+    validate_ha_args
+
+    if [ "$DRY_RUN" = true ]; then
+        _setup_dry_run
+        exit 0
+    fi
+
+    log_info "Starting Kubernetes initialization script..."
+    log_info "Action: ${ACTION}"
+    log_info "Container Runtime: ${CRI}"
+    log_info "Proxy mode: ${PROXY_MODE}"
+    log_info "Swap enabled: ${SWAP_ENABLED}"
+    log_info "Kubernetes Version (minor): ${K8S_VERSION}"
+
+    if [ "$SWAP_ENABLED" != true ]; then
+        disable_swap
+        disable_zram_swap
+    fi
+
+    enable_kernel_modules
+    configure_network_settings
+
+    if [ "$PROXY_MODE" = "ipvs" ]; then
+        check_ipvs_availability
+    fi
+    if [ "$PROXY_MODE" = "nftables" ]; then
+        check_nftables_availability
+    fi
+
+    log_info "Setting up container runtime: ${CRI}..."
+    if [ "$CRI" = "containerd" ]; then
+        _dispatch "setup_containerd_${DISTRO_FAMILY}"
+    else
+        _dispatch "setup_crio_${DISTRO_FAMILY}"
+    fi
+
+    log_info "Setting up Kubernetes..."
+    _dispatch "setup_kubernetes_${DISTRO_FAMILY}"
+
+    log_info "Performing pre-installation cleanup..."
+    cleanup_pre_common
+    cleanup_kube_configs
+    reset_iptables
+
+    if [ "$ACTION" = "init" ]; then
+        initialize_cluster
+    else
+        join_cluster
+    fi
+
+    show_versions
+    setup_helm
+    setup_kustomize
+    setup_k8s_shell_completion
+    log_info "Setup completed successfully!"
+}
+
+# Check required arguments for join
+validate_join_args() {
+    if [ "$ACTION" = "join" ]; then
+        if [ -z "$JOIN_TOKEN" ] || [ -z "$JOIN_ADDRESS" ] || [ -z "$DISCOVERY_TOKEN_HASH" ]; then
+            log_error "join requires --join-token, --join-address, and --discovery-token-hash"
+            exit 1
+        fi
+        if ! _validate_join_token_format "$JOIN_TOKEN" "--join-token"; then
+            exit 1
+        fi
+        if ! _validate_discovery_hash_format "$DISCOVERY_TOKEN_HASH" "--discovery-token-hash"; then
+            exit 1
+        fi
+        # Validate join address format: host:port (host part must be non-empty)
+        if ! echo "$JOIN_ADDRESS" | grep -qE '^.+:[0-9]+$'; then
+            log_error "--join-address should include a port (e.g., 192.168.1.10:6443 or [::1]:6443, got: $JOIN_ADDRESS)"
+            exit 1
+        fi
+        local _join_port="${JOIN_ADDRESS##*:}"
+        if [ "$_join_port" -lt 1 ] || [ "$_join_port" -gt 65535 ]; then
+            log_error "--join-address port out of range (1-65535, got: $_join_port)"
+            exit 1
+        fi
+        # Validate HA control-plane join args
+        if [ "$JOIN_AS_CONTROL_PLANE" = true ] && [ -z "$CERTIFICATE_KEY" ]; then
+            log_error "--control-plane requires --certificate-key"
+            exit 1
+        fi
+    fi
+}
+
+# Validate CRI selection
+validate_cri() {
+    case "$CRI" in
+        containerd|crio) ;;
+        *) log_error "Unsupported CRI '$CRI'. Supported options are: containerd, crio"; exit 1 ;;
+    esac
+}
+
+# Validate shell completion options
+validate_completion_options() {
+    if [ "$ENABLE_COMPLETION" != "true" ] && [ "$ENABLE_COMPLETION" != "false" ]; then
+        log_error "--enable-completion must be 'true' or 'false'"
+        exit 1
+    fi
+
+    if [ "$INSTALL_HELM" != "true" ] && [ "$INSTALL_HELM" != "false" ]; then
+        log_error "--install-helm must be 'true' or 'false'"
+        exit 1
+    fi
+
+    if [ "$INSTALL_KUSTOMIZE" != "true" ] && [ "$INSTALL_KUSTOMIZE" != "false" ]; then
+        log_error "--install-kustomize must be 'true' or 'false'"
+        exit 1
+    fi
+
+    if [ "$COMPLETION_SHELLS" != "auto" ]; then
+        _validate_single_shell() {
+            local shell_name
+            shell_name=$(echo "$1" | tr -d ' ')
+            case "$shell_name" in
+                bash|zsh|fish) ;;
+                *)
+                    log_error "Invalid shell '$shell_name' in --completion-shells. Valid options are: bash, zsh, fish, or 'auto'"
+                    exit 1
+                    ;;
+            esac
+        }
+        _csv_for_each "$COMPLETION_SHELLS" _validate_single_shell
+    fi
+}
+
+# Validate proxy mode selection
+validate_proxy_mode() {
+    if [ "$PROXY_MODE" != "iptables" ] && [ "$PROXY_MODE" != "ipvs" ] && [ "$PROXY_MODE" != "nftables" ]; then
+        log_error "Proxy mode must be 'iptables', 'ipvs', or 'nftables'"
+        exit 1
+    fi
+
+    if [ "$PROXY_MODE" = "ipvs" ]; then
+        local k8s_major k8s_minor
+        k8s_major=$(echo "$K8S_VERSION" | cut -d. -f1)
+        k8s_minor=$(echo "$K8S_VERSION" | cut -d. -f2)
+        if [ "$k8s_major" -gt 1 ] || [ "$k8s_major" -eq 1 ] && [ "$k8s_minor" -ge 35 ]; then
+            log_warn "ipvs proxy mode is deprecated in Kubernetes 1.35+; migrate to nftables when possible"
+        fi
+    fi
+
+    if [ "$PROXY_MODE" = "nftables" ]; then
+        local k8s_major k8s_minor
+        k8s_major=$(echo "$K8S_VERSION" | cut -d. -f1)
+        k8s_minor=$(echo "$K8S_VERSION" | cut -d. -f2)
+
+        if [ "$k8s_major" -lt 1 ] || [ "$k8s_major" -eq 1 ] && [ "$k8s_minor" -lt 29 ]; then
+            log_error "nftables proxy mode requires Kubernetes 1.29 or higher"
+            log_error "Current version: $K8S_VERSION"
+            log_error "Please use --kubernetes-version 1.29 or higher, or choose a different proxy mode"
+            exit 1
+        fi
+
+        if [ "$k8s_major" -eq 1 ] && [ "$k8s_minor" -lt 31 ]; then
+            log_warn "nftables is in alpha status in Kubernetes $K8S_VERSION (beta from 1.31+)"
+        fi
+    fi
+}
+
+# Validate swap enabled option (requires K8s 1.28+)
+validate_swap_enabled() {
+    if [ "$SWAP_ENABLED" = true ] && [ -n "$K8S_VERSION" ]; then
+        local k8s_minor
+        k8s_minor=$(echo "$K8S_VERSION" | cut -d. -f2)
+        if [ -n "$k8s_minor" ] && [ "$k8s_minor" -lt 28 ]; then
+            log_error "--swap-enabled requires Kubernetes 1.28+ (got: $K8S_VERSION)"
+            exit 1
+        fi
+    fi
+}
+
+# Validate HA arguments
+validate_ha_args() {
+    if [ "$HA_ENABLED" = true ]; then
+        if [ "$ACTION" != "init" ]; then
+            log_error "--ha is only valid with the 'init' subcommand"
+            exit 1
+        fi
+        if [ -z "$HA_VIP_ADDRESS" ]; then
+            log_error "--ha requires --ha-vip ADDRESS"
+            exit 1
+        fi
+    fi
+
+    # On init, --ha-vip requires --ha (otherwise kube-vip is not deployed)
+    if [ -n "$HA_VIP_ADDRESS" ] && [ "$ACTION" = "init" ] && [ "$HA_ENABLED" = false ]; then
+        log_error "--ha-vip with init requires --ha flag"
+        exit 1
+    fi
+
+    # VIP address applies to both init --ha and join --control-plane
+    if [ -n "$HA_VIP_ADDRESS" ]; then
+        if _is_ipv6 "$HA_VIP_ADDRESS"; then
+            # Validate IPv6 VIP address
+            _validate_ipv6_addr "$HA_VIP_ADDRESS" "--ha-vip"
+        else
+            # Validate IPv4 VIP address
+            if ! echo "$HA_VIP_ADDRESS" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+                log_error "--ha-vip must be a valid IPv4 address (got: $HA_VIP_ADDRESS)"
+                exit 1
+            fi
+            local _vo1 _vo2 _vo3 _vo4
+            IFS='.' read -r _vo1 _vo2 _vo3 _vo4 <<EOF
+$HA_VIP_ADDRESS
+EOF
+            if [ "$_vo1" -gt 255 ] || [ "$_vo2" -gt 255 ] || [ "$_vo3" -gt 255 ] || [ "$_vo4" -gt 255 ]; then
+                log_error "--ha-vip octets out of range (got: $HA_VIP_ADDRESS)"
+                exit 1
+            fi
+        fi
+        # On join, --ha-vip requires --control-plane
+        if [ "$ACTION" = "join" ] && [ "$JOIN_AS_CONTROL_PLANE" != true ]; then
+            log_error "--ha-vip on join requires --control-plane"
+            exit 1
+        fi
+        # Auto-detect interface if not specified
+        if [ -z "$HA_VIP_INTERFACE" ]; then
+            local _iproute_out
+            if _is_ipv6 "$HA_VIP_ADDRESS"; then
+                # IPv6: use ip -6 route get
+                if ! _iproute_out=$(ip -6 route get ::1 2>&1); then
+                    log_error "Could not auto-detect network interface. Please specify --ha-interface"
+                    [ -n "$_iproute_out" ] && log_error "  ip route error: $_iproute_out"
+                    exit 1
+                fi
+                HA_VIP_INTERFACE=$(echo "$_iproute_out" | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1); exit}')
+            else
+                # IPv4: use ip route get
+                if ! _iproute_out=$(ip route get 1 2>&1); then
+                    log_error "Could not auto-detect network interface. Please specify --ha-interface"
+                    [ -n "$_iproute_out" ] && log_error "  ip route error: $_iproute_out"
+                    exit 1
+                fi
+                HA_VIP_INTERFACE=$(echo "$_iproute_out" | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1); exit}')
+            fi
+            if [ -z "$HA_VIP_INTERFACE" ]; then
+                log_error "Could not auto-detect network interface. Please specify --ha-interface"
+                exit 1
+            fi
+        fi
+        # Validate interface name (alphanumeric, hyphens, dots; typical Linux interface names)
+        if ! echo "$HA_VIP_INTERFACE" | grep -qE '^[a-zA-Z0-9._-]+$'; then
+            log_error "--ha-interface contains invalid characters (got: $HA_VIP_INTERFACE)"
+            exit 1
+        fi
+        # Auto-set --control-plane-endpoint for init
+        if [ "$ACTION" = "init" ] && [ -z "$KUBEADM_CP_ENDPOINT" ]; then
+            if _is_ipv6 "$HA_VIP_ADDRESS"; then
+                KUBEADM_CP_ENDPOINT="[${HA_VIP_ADDRESS}]:6443"
+            else
+                KUBEADM_CP_ENDPOINT="${HA_VIP_ADDRESS}:6443"
+            fi
+        fi
+    fi
 }

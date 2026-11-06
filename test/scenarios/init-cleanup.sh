@@ -35,7 +35,7 @@ LOGIN_USER="user"
 
 # Timeout settings (seconds)
 TIMEOUT_TOTAL=1200    # 20 minutes
-SSH_READY_TIMEOUT=300 # 5 minutes for SSH to become available
+SSH_READY_TIMEOUT="${SSH_READY_TIMEOUT:-300}" # seconds for SSH to become available
 
 # SSH settings
 SSH_KEY_DIR=""
