@@ -103,7 +103,17 @@ Override component versions with environment variables:
 
 ```bash
 curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | \
-  sudo CONTAINERD_VERSION=2.0.4 RUNC_VERSION=1.2.5 sh -s -- init --distro generic
+  sudo CONTAINERD_VERSION=2.4.2 RUNC_VERSION=1.5.2 sh -s -- init --distro generic
+```
+
+Downloads are verified against the published sha256 checksums; an install stops if the checksum cannot be verified.
+
+## Pause image
+
+The container runtime is configured with the pause image of the installed kubeadm (`kubeadm config images list`). Set `PAUSE_IMAGE_VERSION` to override the tag:
+
+```bash
+sudo PAUSE_IMAGE_VERSION=3.10.2 sh setup-k8s.sh init
 ```
 
 Supported generic architectures are `amd64` and `arm64`.

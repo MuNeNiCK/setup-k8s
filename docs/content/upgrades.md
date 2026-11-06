@@ -48,7 +48,7 @@ sh setup-k8s.sh \
 
 Remote flow:
 
-1. Generate and transfer a self-contained bundle to all nodes.
+1. Transfer setup-k8s.sh to all nodes.
 2. Check current cluster version and validate upgrade constraints.
 3. Run `kubeadm upgrade plan`.
 4. Drain, upgrade, and uncordon each control-plane node.
@@ -57,7 +57,13 @@ Remote flow:
 
 ## Automatic rollback
 
-Remote upgrade records pre-upgrade package versions. If a node upgrade fails, the script downgrades kubeadm, kubelet, and kubectl to their recorded versions, restarts kubelet, and uncordons the node.
+Remote upgrade records the kubeadm version of each node before upgrading it. If a node upgrade fails, the node runs `setup-k8s.sh upgrade --rollback-to <previous version>`, which reinstalls kubeadm, kubelet, and kubectl at that version and restarts kubelet; the node is then uncordoned. kubeadm restores its own control-plane manifests when `kubeadm upgrade` fails.
+
+The same command can be run manually on a node:
+
+```bash
+sudo sh setup-k8s.sh upgrade --rollback-to 1.36.6
+```
 
 Disable rollback for debugging:
 

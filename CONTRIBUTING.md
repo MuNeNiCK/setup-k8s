@@ -79,6 +79,9 @@ repository:
 - Package operations go through `lib/pkg/pkg.sh` (`pkg_install`,
   `pkg_repo_add`, ...). Package-manager specifics, including differences
   between versions of the tool, belong in `lib/pkg/<manager>.sh`.
+- Behavior that depends on the Kubernetes version uses `k8s_supports <feature>`
+  with the minimum versions listed in `lib/core/k8s_version.sh`; do not
+  compare version numbers elsewhere.
 - Never log secrets such as join tokens, certificate keys, or SSH passwords.
 - When adding or changing an option, update the subcommand `--help` text, the
   global help in `setup-k8s.sh`, and `docs/content/reference.md`.

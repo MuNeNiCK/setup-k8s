@@ -1,12 +1,13 @@
 # Supported Distros
 
 Latest full validation: 2026-06-09 with Kubernetes v1.36.1.
+Rows dated 2026-11-06 were re-verified with Kubernetes v1.37.2 (Alpine: v1.34.2, the version Alpine 3.23 ships) after the package-source changes.
 
 | Distribution | Version | Test Date | Status | Notes |
 |---|---|---|---|---|
-| Ubuntu | 24.04 LTS | 2026-06-09 | Tested | |
+| Ubuntu | 24.04 LTS | 2026-11-06 | Tested | |
 | Ubuntu | 22.04 LTS | 2026-06-09 | Tested | |
-| Debian | 13 (Trixie) | 2026-06-09 | Tested | |
+| Debian | 13 (Trixie) | 2026-11-06 | Tested | |
 | Debian | 12 (Bookworm) | 2026-06-09 | Tested | |
 | Debian | 11 (Bullseye) | 2026-06-09 | Tested | |
 | RHEL | 9 | - | Untested | Subscription required |
@@ -14,20 +15,35 @@ Latest full validation: 2026-06-09 with Kubernetes v1.36.1.
 | CentOS Stream | 10 | 2026-06-09 | Tested | |
 | CentOS Stream | 9 | 2026-06-09 | Tested | |
 | Rocky Linux | 10 | 2026-06-09 | Tested | |
-| Rocky Linux | 9 | 2026-06-09 | Tested | |
-| Rocky Linux | 8 | 2026-06-09 | Partial | cgroups v1 only; use Kubernetes 1.34 or earlier |
+| Rocky Linux | 9 | 2026-11-06 | Tested | Verified with CRI-O |
+| Rocky Linux | 8 | 2026-06-09 | Partial | cgroups v1 only; requires Kubernetes 1.34 or earlier (no longer supported upstream) |
 | AlmaLinux | 10 | 2026-06-09 | Tested | |
 | AlmaLinux | 9 | 2026-06-09 | Tested | |
-| AlmaLinux | 8 | 2026-06-09 | Partial | cgroups v1 only; use Kubernetes 1.34 or earlier |
+| AlmaLinux | 8 | 2026-06-09 | Partial | cgroups v1 only; requires Kubernetes 1.34 or earlier (no longer supported upstream) |
 | Oracle Linux | 9 | 2026-06-09 | Tested | |
-| Fedora | 44 | 2026-06-09 | Tested | |
+| Fedora | 44 | 2026-11-06 | Tested | |
 | Fedora | 43 | 2026-06-09 | Tested | |
 | openSUSE | Tumbleweed | 2026-06-09 | Tested | |
-| openSUSE | Leap 16.0 | 2026-06-09 | Tested | |
+| openSUSE | Leap 16.0 | 2026-11-06 | Tested | containerd from Virtualization:containers |
 | SLES | 15 SP5 | - | Untested | Subscription required |
-| Alpine Linux | 3.23 | 2026-06-09 | Tested | OpenRC, cgroupfs |
-| Arch Linux | Rolling | 2026-06-09 | Tested | |
+| Alpine Linux | 3.23 | 2026-11-06 | Tested | OpenRC, cgroupfs; Kubernetes 1.34 (distribution package) |
+| Arch Linux | Rolling | 2026-11-06 | Tested | Official repositories (no AUR) |
 | Manjaro | Rolling | - | Untested | No cloud image |
+
+## Package sources
+
+| Distribution | Package manager | Kubernetes | containerd | CRI-O |
+|---|---|---|---|---|
+| Ubuntu, Debian | apt | pkgs.k8s.io | Docker repository | isv:cri-o |
+| Fedora, CentOS Stream | dnf | pkgs.k8s.io | Docker repository | isv:cri-o |
+| RHEL, Rocky Linux, AlmaLinux, Oracle Linux | dnf | pkgs.k8s.io | Docker repository (`rhel`) | isv:cri-o |
+| openSUSE Tumbleweed, SLES | zypper | pkgs.k8s.io | distribution package | isv:cri-o |
+| openSUSE Leap | zypper | pkgs.k8s.io | `Virtualization:containers` | isv:cri-o |
+| Alpine Linux | apk | distribution package | distribution package | distribution package |
+| Arch Linux, Manjaro | pacman | distribution package | distribution package | distribution package |
+| Other (`--distro generic`) | — | release binaries | release binaries | release tarball |
+
+On Alpine and Arch the Kubernetes version is the one the distribution ships; it is the default when `--kubernetes-version` is not given.
 
 ## Status legend
 

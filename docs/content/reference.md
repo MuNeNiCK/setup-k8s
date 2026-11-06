@@ -119,6 +119,7 @@ Options for the `upgrade` subcommand when orchestrating remotely via SSH.
 | `--kubernetes-version VER` | Target version in MAJOR.MINOR.PATCH format | — (required) | `--kubernetes-version 1.33.2` |
 | `--skip-drain` | Skip drain/uncordon for all nodes | — | `--skip-drain` |
 | `--no-rollback` | Disable automatic rollback on upgrade failure | — | `--no-rollback` |
+| `--rollback-to VER` | Local mode: reinstall kubeadm, kubelet, and kubectl at VER after a failed upgrade (instead of `--kubernetes-version`) | — | `--rollback-to 1.36.6` |
 | `--auto-step-upgrade` | Automatically step through intermediate minor versions (e.g., 1.31 → 1.32 → 1.33) | — | `--auto-step-upgrade` |
 
 ### Remove Options
