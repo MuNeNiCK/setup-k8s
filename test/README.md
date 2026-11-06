@@ -42,6 +42,7 @@ Subcommand scenarios:
 ./scenarios/preflight.sh --distro ubuntu-24.04-cloud-amd64
 ./scenarios/backup-restore.sh --distro ubuntu-24.04-cloud-amd64
 ./scenarios/cert-renew.sh --distro ubuntu-24.04-cloud-amd64
+./scenarios/swap-reboot.sh --distro ubuntu-24.04-cloud-amd64   # swap stays off across reboots
 ./scenarios/upgrade.sh --distro ubuntu-24.04-cloud-amd64
 ./scenarios/upgrade.sh --distro ubuntu-24.04-cloud-amd64 --upgrade-args "--skip-drain --no-rollback"
 ./scenarios/generic.sh --host-distro ubuntu-24.04-cloud-amd64

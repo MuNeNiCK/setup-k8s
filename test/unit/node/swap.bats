@@ -156,3 +156,78 @@ FSTAB
 @test "swap disable fstab sed pattern" {
     _case_swap_fstab_sed_pattern
 }
+
+# --- swap stays off across reboots ---
+
+# Fake systemctl: one swap unit outside fstab, one zram unit.
+_fake_systemd_with_swap_unit() {
+    cat > "$FAKE_BIN/systemctl" <<FAKE
+#!/bin/sh
+echo "systemctl \$*" >> "$FAKE_LOG"
+case "\$*" in
+    --version) echo "systemd 255" ;;
+    "list-units --type=swap --all --plain --no-legend")
+        printf '%s\n' 'swapfile\\x2dunit.swap loaded active active /swapfile-unit' 'dev-zram0.swap loaded active active /dev/zram0' ;;
+    "list-unit-files --type=swap --plain --no-legend")
+        printf '%s\n' 'swapfile\\x2dunit.swap enabled enabled' ;;
+    "is-enabled "*) echo enabled ;;
+esac
+exit 0
+FAKE
+    chmod +x "$FAKE_BIN/systemctl"
+    fake_cmd swapoff
+    fake_cmd swapon
+}
+
+@test "disable_swap comments fstab entries and blocks systemd swap units" {
+    load_modules; quiet_logs
+    _fake_systemd_with_swap_unit
+    _FSTAB_FILE="$BATS_TEST_TMPDIR/fstab"
+    _SWAP_UNITS_MARKER="$BATS_TEST_TMPDIR/swap-units"
+    _SYSTEMD_UNIT_DIR="$BATS_TEST_TMPDIR/systemd"
+    printf '%s\n' 'UUID=abc / ext4 defaults 0 1' '/swapfile none swap sw 0 0' > "$_FSTAB_FILE"
+
+    disable_swap
+
+    grep -qx '#/swapfile none swap sw 0 0' "$_FSTAB_FILE"
+    grep -qx 'UUID=abc / ext4 defaults 0 1' "$_FSTAB_FILE"
+    # A drop-in prevents the unit from starting at boot (zram is handled separately)
+    grep -q '^ConditionPathExists=/nonexistent/' "$_SYSTEMD_UNIT_DIR/swapfile\x2dunit.swap.d/$_SWAP_DROPIN_NAME"
+    [ ! -e "$_SYSTEMD_UNIT_DIR/dev-zram0.swap.d" ]
+    fake_calls | grep -qxF 'systemctl stop swapfile\x2dunit.swap'
+    [ "$(cat "$_SWAP_UNITS_MARKER")" = 'swapfile\x2dunit.swap' ]
+    fake_calls | grep -qx 'swapoff -a'
+}
+
+@test "restore_fstab_swap restores fstab entries and unblocks recorded units" {
+    load_modules; quiet_logs
+    _fake_systemd_with_swap_unit
+    _FSTAB_FILE="$BATS_TEST_TMPDIR/fstab"
+    _SWAP_UNITS_MARKER="$BATS_TEST_TMPDIR/swap-units"
+    _SYSTEMD_UNIT_DIR="$BATS_TEST_TMPDIR/systemd"
+    printf '%s\n' 'UUID=abc / ext4 defaults 0 1' '/swapfile none swap sw 0 0' > "$_FSTAB_FILE"
+    disable_swap
+    : > "$FAKE_LOG"
+
+    restore_fstab_swap
+
+    grep -qx '/swapfile none swap sw 0 0' "$_FSTAB_FILE"
+    if grep -q '^#/swapfile' "$_FSTAB_FILE"; then return 1; fi
+    [ ! -e "$_SYSTEMD_UNIT_DIR/swapfile\x2dunit.swap.d" ]
+    fake_calls | grep -qx 'systemctl start swap.target'
+    fake_calls | grep -qx 'swapon -a'
+    [ ! -e "$_SWAP_UNITS_MARKER" ]
+}
+
+@test "restore_fstab_swap leaves swap alone when setup-k8s changed nothing" {
+    load_modules; quiet_logs
+    _fake_systemd_with_swap_unit
+    _FSTAB_FILE="$BATS_TEST_TMPDIR/fstab"
+    _SWAP_UNITS_MARKER="$BATS_TEST_TMPDIR/swap-units"
+    _SYSTEMD_UNIT_DIR="$BATS_TEST_TMPDIR/systemd"
+    printf '%s\n' 'UUID=abc / ext4 defaults 0 1' > "$_FSTAB_FILE"
+
+    restore_fstab_swap
+
+    if fake_calls | grep -q -e 'start swap.target' -e 'swapon -a'; then return 1; fi
+}
