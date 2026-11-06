@@ -29,7 +29,10 @@ _resolve_auto_proxy_mode() {
 # Resolve PROXY_MODE=auto (requires K8S_VERSION).
 resolve_proxy_mode() {
     if [ "$PROXY_MODE" = auto ]; then
-        PROXY_MODE=$(_resolve_auto_proxy_mode "$K8S_VERSION")
+        local version=""
+        # A version that is not known yet (dry run) means a current release
+        case "$K8S_VERSION" in [0-9]*) version="$K8S_VERSION" ;; esac
+        PROXY_MODE=$(_resolve_auto_proxy_mode "$version")
         log_info "Proxy mode auto: using ${PROXY_MODE} (Kubernetes ${K8S_VERSION}, kernel $(_kernel_release))"
         if [ "${ACTION:-}" = join ]; then
             log_info "  kube-proxy runs in the cluster's mode; pass --proxy-mode if it differs from ${PROXY_MODE}"

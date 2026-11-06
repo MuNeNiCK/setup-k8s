@@ -359,6 +359,25 @@ _run_setup() {
         detect_distribution
     fi
 
+    # A dry run changes nothing: no package installs or index refreshes, and
+    # no host preparation. Values that need missing tools (curl) are reported
+    # as resolved at install time.
+    if [ "$DRY_RUN" = true ]; then
+        if ! command -v curl >/dev/null 2>&1 && [ -z "$K8S_VERSION" ] && [ "${DISTRO_K8S_SOURCE:-}" != distro ]; then
+            log_info "curl is not installed; the latest stable Kubernetes version is resolved during setup"
+            K8S_VERSION="(latest stable)"
+        else
+            determine_k8s_version || exit 1
+        fi
+        resolve_proxy_mode
+        case "$K8S_VERSION" in
+            [0-9]*) validate_proxy_mode; validate_swap_enabled ;;
+        esac
+        validate_ha_args
+        _setup_dry_run
+        exit 0
+    fi
+
     log_info "Installing dependencies..."
     install_node_dependencies
     determine_k8s_version
@@ -366,11 +385,6 @@ _run_setup() {
     validate_proxy_mode
     validate_swap_enabled
     validate_ha_args
-
-    if [ "$DRY_RUN" = true ]; then
-        _setup_dry_run
-        exit 0
-    fi
 
     log_info "Starting Kubernetes initialization script..."
     log_info "Action: ${ACTION}"
