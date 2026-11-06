@@ -20,14 +20,12 @@ _configure_kubectl() {
 }
 
 # Determine kubeconfig path for kube-vip.
-# K8s 1.29+ generates super-admin.conf (server: localhost:6443) which avoids
-# the chicken-and-egg problem where admin.conf points to the VIP that kube-vip
-# hasn't yet claimed.  For K8s < 1.29 super-admin.conf doesn't exist, so fall
-# back to admin.conf (which still points to localhost on those versions).
+# Newer kubeadm generates super-admin.conf (server: localhost:6443), which
+# avoids the chicken-and-egg problem where admin.conf points to the VIP that
+# kube-vip hasn't yet claimed. Older releases have no super-admin.conf, so
+# fall back to admin.conf (which still points to localhost on those versions).
 _kube_vip_kubeconfig_path() {
-    local k8s_minor
-    k8s_minor=$(echo "$K8S_VERSION" | cut -d. -f2)
-    if [ -n "$k8s_minor" ] && [ "$k8s_minor" -ge 29 ] 2>/dev/null; then
+    if k8s_supports super-admin-conf; then
         echo "/etc/kubernetes/super-admin.conf"
     else
         echo "/etc/kubernetes/admin.conf"

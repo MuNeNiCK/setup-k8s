@@ -256,31 +256,31 @@ _preflight_check_cri() {
 }
 
 _preflight_check_containerd_v2_readiness() {
+    local min
+    min=$(k8s_feature_min containerd-v2-required)
     local version major
     version=$(containerd --version 2>/dev/null | awk '{print $3}' | sed 's/^v//') || version=""
     if [ -z "$version" ]; then
-        _preflight_record_warn "Cannot determine containerd version; Kubernetes 1.36+ requires containerd 2.0+"
+        _preflight_record_warn "Cannot determine containerd version; Kubernetes ${min}+ requires containerd 2.0+"
         return
     fi
 
     major=$(echo "$version" | cut -d. -f1)
     if ! echo "$major" | grep -qE '^[0-9]+$'; then
-        _preflight_record_warn "Cannot parse containerd version '$version'; Kubernetes 1.36+ requires containerd 2.0+"
+        _preflight_record_warn "Cannot parse containerd version '$version'; Kubernetes ${min}+ requires containerd 2.0+"
         return
     fi
 
     if [ "$major" -lt 2 ]; then
         if [ -n "$PREFLIGHT_K8S_VERSION" ]; then
-            local k8s_minor
-            k8s_minor=$(echo "$PREFLIGHT_K8S_VERSION" | cut -d. -f2)
-            if [ "$k8s_minor" -ge 36 ]; then
+            if k8s_supports containerd-v2-required "$PREFLIGHT_K8S_VERSION"; then
                 _preflight_record_warn "containerd ${version} detected; upgrade to containerd 2.0+ before Kubernetes ${PREFLIGHT_K8S_VERSION}"
             fi
         else
-            _preflight_record_warn "containerd ${version} detected; Kubernetes 1.36+ requires containerd 2.0+"
+            _preflight_record_warn "containerd ${version} detected; Kubernetes ${min}+ requires containerd 2.0+"
         fi
     else
-        _preflight_record_pass "containerd ${version} is ready for Kubernetes 1.36+"
+        _preflight_record_pass "containerd ${version} is ready for Kubernetes ${min}+"
     fi
 }
 

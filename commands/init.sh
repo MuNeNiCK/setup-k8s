@@ -379,15 +379,17 @@ _run_setup() {
         check_nftables_availability
     fi
 
+    # Kubernetes first: the container runtime is configured with the pause
+    # image of the installed kubeadm. kubelet restarts until kubeadm runs.
+    log_info "Setting up Kubernetes..."
+    k8s_install
+
     log_info "Setting up container runtime: ${CRI}..."
     if [ "$CRI" = "containerd" ]; then
         containerd_install
     else
         crio_install
     fi
-
-    log_info "Setting up Kubernetes..."
-    k8s_install
 
     log_info "Performing pre-installation cleanup..."
     cleanup_pre_common
@@ -486,42 +488,28 @@ validate_proxy_mode() {
         exit 1
     fi
 
-    if [ "$PROXY_MODE" = "ipvs" ]; then
-        local k8s_major k8s_minor
-        k8s_major=$(echo "$K8S_VERSION" | cut -d. -f1)
-        k8s_minor=$(echo "$K8S_VERSION" | cut -d. -f2)
-        if [ "$k8s_major" -gt 1 ] || [ "$k8s_major" -eq 1 ] && [ "$k8s_minor" -ge 35 ]; then
-            log_warn "ipvs proxy mode is deprecated in Kubernetes 1.35+; migrate to nftables when possible"
-        fi
+    if [ "$PROXY_MODE" = "ipvs" ] && k8s_supports ipvs-deprecated; then
+        log_warn "ipvs proxy mode is deprecated in Kubernetes $(k8s_feature_min ipvs-deprecated)+; migrate to nftables when possible"
     fi
 
     if [ "$PROXY_MODE" = "nftables" ]; then
-        local k8s_major k8s_minor
-        k8s_major=$(echo "$K8S_VERSION" | cut -d. -f1)
-        k8s_minor=$(echo "$K8S_VERSION" | cut -d. -f2)
-
-        if [ "$k8s_major" -lt 1 ] || [ "$k8s_major" -eq 1 ] && [ "$k8s_minor" -lt 29 ]; then
-            log_error "nftables proxy mode requires Kubernetes 1.29 or higher"
+        if ! k8s_supports nftables; then
+            log_error "nftables proxy mode requires Kubernetes $(k8s_feature_min nftables) or higher"
             log_error "Current version: $K8S_VERSION"
-            log_error "Please use --kubernetes-version 1.29 or higher, or choose a different proxy mode"
+            log_error "Please use --kubernetes-version $(k8s_feature_min nftables) or higher, or choose a different proxy mode"
             exit 1
         fi
-
-        if [ "$k8s_major" -eq 1 ] && [ "$k8s_minor" -lt 31 ]; then
-            log_warn "nftables is in alpha status in Kubernetes $K8S_VERSION (beta from 1.31+)"
+        if ! k8s_supports nftables-beta; then
+            log_warn "nftables is in alpha status in Kubernetes $K8S_VERSION (beta from $(k8s_feature_min nftables-beta))"
         fi
     fi
 }
 
-# Validate swap enabled option (requires K8s 1.28+)
+# Validate swap enabled option (requires NodeSwap support)
 validate_swap_enabled() {
-    if [ "$SWAP_ENABLED" = true ] && [ -n "$K8S_VERSION" ]; then
-        local k8s_minor
-        k8s_minor=$(echo "$K8S_VERSION" | cut -d. -f2)
-        if [ -n "$k8s_minor" ] && [ "$k8s_minor" -lt 28 ]; then
-            log_error "--swap-enabled requires Kubernetes 1.28+ (got: $K8S_VERSION)"
-            exit 1
-        fi
+    if [ "$SWAP_ENABLED" = true ] && [ -n "$K8S_VERSION" ] && ! k8s_supports swap; then
+        log_error "--swap-enabled requires Kubernetes $(k8s_feature_min swap)+ (got: $K8S_VERSION)"
+        exit 1
     fi
 }
 

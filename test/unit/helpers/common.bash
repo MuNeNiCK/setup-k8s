@@ -11,6 +11,9 @@
 #   _assert_eq / _assert_ne / _assert_exit_code
 #                      Assertions that fail the test with a readable message.
 
+# "run !" and other assertions used by the tests need bats 1.5+
+bats_require_minimum_version 1.5.0
+
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 export PROJECT_ROOT
 

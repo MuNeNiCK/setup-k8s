@@ -109,7 +109,8 @@ KUBELET_NODE_IP=""
 
 # Version constants (overridable via environment)
 KUBE_VIP_VERSION="${KUBE_VIP_VERSION:-v0.8.9}"
-PAUSE_IMAGE_VERSION="${PAUSE_IMAGE_VERSION:-3.10}"
+# Pause image tag; empty = use the tag reported by the installed kubeadm
+PAUSE_IMAGE_VERSION="${PAUSE_IMAGE_VERSION:-}"
 
 # Component version defaults for generic distro (overridable via environment)
 CONTAINERD_VERSION="${CONTAINERD_VERSION:-2.0.4}"

@@ -17,8 +17,8 @@ _kubeadm_api_version() {
     local api_ver
     api_ver=$(_kubeadm_defaults | awk '/^apiVersion: kubeadm\.k8s\.io\// {print $2; exit}')
     if [ -z "$api_ver" ]; then
-        log_warn "Could not detect kubeadm API version, using default: kubeadm.k8s.io/v1beta3"
-        api_ver="kubeadm.k8s.io/v1beta3"
+        log_warn "Could not detect kubeadm API version, using default: kubeadm.k8s.io/v1beta4"
+        api_ver="kubeadm.k8s.io/v1beta4"
     fi
     echo "$api_ver"
 }

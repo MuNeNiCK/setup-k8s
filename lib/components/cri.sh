@@ -3,7 +3,7 @@
 # CRI (Container Runtime Interface) helpers.
 # Containerd TOML generation, CRI socket, crictl config, CRI-O management.
 #
-# Depends on: lib/core/system.sh (_detect_init_system, _service_*), lib/core/defaults.sh (PAUSE_IMAGE_VERSION)
+# Depends on: lib/core/system.sh (_detect_init_system, _service_*), lib/core/k8s_version.sh (k8s_pause_image)
 
 # Helper: configure containerd TOML with v2 layout, SystemdCgroup=true, sandbox_image
 configure_containerd_toml() {
@@ -23,8 +23,9 @@ configure_containerd_toml() {
         sed -i '1s/^/version = 2\n/' /etc/containerd/config.toml
     fi
 
-    # Set sandbox_image to registry.k8s.io/pause:<version>
-    local _pause_image="registry.k8s.io/pause:${PAUSE_IMAGE_VERSION}"
+    # Set sandbox_image to the pause image of the installed kubeadm
+    local _pause_image
+    _pause_image=$(k8s_pause_image)
     if grep -q '^\s*sandbox_image\s*=\s*"' /etc/containerd/config.toml; then
         sed -i "s#^\s*sandbox_image\s*=\s*\".*\"#  sandbox_image = \"${_pause_image}\"#" /etc/containerd/config.toml
     else
@@ -124,7 +125,7 @@ _write_crio_config() {
 cgroup_manager = "${cgroup_mgr}"
 
 [crio.image]
-pause_image = "registry.k8s.io/pause:${PAUSE_IMAGE_VERSION}"
+pause_image = "$(k8s_pause_image)"
 EOF
 }
 
