@@ -346,7 +346,7 @@ _run_setup() {
     fi
 
     log_info "Installing dependencies..."
-    _dispatch "install_dependencies_${DISTRO_FAMILY}"
+    install_node_dependencies
     determine_k8s_version
     validate_proxy_mode
     validate_swap_enabled
@@ -381,13 +381,13 @@ _run_setup() {
 
     log_info "Setting up container runtime: ${CRI}..."
     if [ "$CRI" = "containerd" ]; then
-        _dispatch "setup_containerd_${DISTRO_FAMILY}"
+        containerd_install
     else
-        _dispatch "setup_crio_${DISTRO_FAMILY}"
+        crio_install
     fi
 
     log_info "Setting up Kubernetes..."
-    _dispatch "setup_kubernetes_${DISTRO_FAMILY}"
+    k8s_install
 
     log_info "Performing pre-installation cleanup..."
     cleanup_pre_common

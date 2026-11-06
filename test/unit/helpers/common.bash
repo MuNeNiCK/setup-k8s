@@ -19,17 +19,26 @@ FAKE_BIN="${BATS_TEST_TMPDIR}/fakebin"
 FAKE_LOG="${BATS_TEST_TMPDIR}/fake_calls.log"
 mkdir -p "$FAKE_BIN"
 : > "$FAKE_LOG"
-export FAKE_BIN FAKE_LOG
+PATH="$FAKE_BIN:$PATH"
+export FAKE_BIN FAKE_LOG PATH
 
-# Source all modules in production order. Removes the EXIT trap installed by
-# lib/core/bootstrap.sh so that it does not interfere with bats.
+# Source all modules in production order. lib/core/bootstrap.sh installs its
+# own EXIT trap. In the test shell, restore the bats trap (bats reports
+# results from it); in a subshell, clear it (`trap -p` shows the parent's
+# traps there, and re-installing them would report the test twice).
 load_modules() {
+    local saved_exit_trap
+    saved_exit_trap=$(trap -p EXIT)
     # shellcheck disable=SC2034 # read by _source_all_modules
     SCRIPT_DIR="$PROJECT_ROOT"
     # shellcheck source=lib/core/bootstrap.sh
     . "$PROJECT_ROOT/lib/core/bootstrap.sh"
     _source_all_modules
-    trap - EXIT
+    if [ "${BASH_SUBSHELL:-0}" -eq 0 ] && [ -n "$saved_exit_trap" ]; then
+        eval "$saved_exit_trap"
+    else
+        trap - EXIT
+    fi
 }
 
 # Silence log output from modules (errors included).
@@ -54,10 +63,6 @@ fake_cmd() {
         printf 'exit %s\n' "$rc"
     } > "$FAKE_BIN/$name"
     chmod +x "$FAKE_BIN/$name"
-    case ":$PATH:" in
-        *":$FAKE_BIN:"*) ;;
-        *) PATH="$FAKE_BIN:$PATH"; export PATH ;;
-    esac
 }
 
 fake_calls() {

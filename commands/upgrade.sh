@@ -27,7 +27,7 @@ upgrade_node_local() {
 
     # 1. Upgrade kubeadm package
     log_info "Step 1: Upgrading kubeadm to ${UPGRADE_TARGET_VERSION}..."
-    _dispatch "upgrade_kubeadm_${DISTRO_FAMILY}" "$UPGRADE_TARGET_VERSION"
+    k8s_upgrade_kubeadm "$UPGRADE_TARGET_VERSION"
 
     # 2. Run kubeadm upgrade
     if [ "$role" = "first-control-plane" ]; then
@@ -54,7 +54,7 @@ upgrade_node_local() {
 
     # 3. Upgrade kubelet + kubectl packages
     log_info "Step 3: Upgrading kubelet and kubectl to ${UPGRADE_TARGET_VERSION}..."
-    _dispatch "upgrade_kubelet_kubectl_${DISTRO_FAMILY}" "$UPGRADE_TARGET_VERSION"
+    k8s_upgrade_node "$UPGRADE_TARGET_VERSION"
 
     # 4. Restart kubelet
     log_info "Step 4: Restarting kubelet..."

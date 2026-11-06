@@ -2,9 +2,9 @@
 
 set -eu
 
-# Entry point. In a local checkout this file loads every module from lib/,
-# commands/ and distros/. In the release bundle (dist/setup-k8s.sh) the
-# modules are embedded above this code and BUNDLED_MODE=true.
+# Entry point. In a local checkout this file loads every module from lib/
+# and commands/. In the release bundle (dist/setup-k8s.sh) the modules are
+# embedded above this code and BUNDLED_MODE=true.
 
 # Ensure /usr/local/bin is in PATH (binary installs place tools there)
 case ":$PATH:" in

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# shellcheck disable=SC2034 # tests set globals read by the modules under test
 # Ported from test/unit/test_networking.sh
 
 setup() {
@@ -261,41 +262,21 @@ net.ipv6.conf.all.forwarding"
 # Test: install_proxy_mode_packages logic
 # ============================================================
 _case_install_proxy_mode_packages_logic() {
-    echo "=== Test: install_proxy_mode_packages logic ==="
-    (
-        load_modules
-        local captured_args=""
-        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
+    load_modules; quiet_logs
+    DISTRO_PKG=apt
+    fake_cmd apt-get
+    fake_cmd apt-mark
 
-        # Mock install command
-        mock_install() { captured_args="$*"; return 0; }
+    PROXY_MODE=ipvs install_proxy_mode_packages
+    fake_calls | grep -q '^apt-get install -y .* ipvsadm ipset$'
 
-        # IPVS mode
-        PROXY_MODE="ipvs"
-        captured_args=""
-        install_proxy_mode_packages mock_install
-        local has_ipvsadm="false"
-        echo "$captured_args" | grep -q "ipvsadm" && has_ipvsadm="true"
-        _assert_eq "ipvs installs ipvsadm" "true" "$has_ipvsadm"
-        local has_ipset="false"
-        echo "$captured_args" | grep -q "ipset" && has_ipset="true"
-        _assert_eq "ipvs installs ipset" "true" "$has_ipset"
+    : > "$FAKE_LOG"
+    PROXY_MODE=nftables install_proxy_mode_packages
+    fake_calls | grep -q '^apt-get install -y .* nftables$'
 
-        # nftables mode
-        PROXY_MODE="nftables"
-        captured_args=""
-        install_proxy_mode_packages mock_install
-        local has_nftables="false"
-        echo "$captured_args" | grep -q "nftables" && has_nftables="true"
-        _assert_eq "nftables installs nftables" "true" "$has_nftables"
-
-        # iptables mode (should not install anything)
-        # shellcheck disable=SC2034 # used by install_proxy_mode_packages
-        PROXY_MODE="iptables"
-        captured_args=""
-        install_proxy_mode_packages mock_install
-        _assert_eq "iptables installs nothing" "" "$captured_args"
-    )
+    : > "$FAKE_LOG"
+    PROXY_MODE=iptables install_proxy_mode_packages
+    [ -z "$(fake_calls)" ]
 }
 
 @test "kernel version comparison" {

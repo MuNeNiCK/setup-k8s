@@ -10,8 +10,16 @@ _has_cgroupv2() {
 
 _K8S_MIN_CGROUPV2="1.35"
 
-# Determine the latest stable Kubernetes version
+# Determine the Kubernetes minor version to install: the requested one, the
+# version shipped by the distribution when Kubernetes comes from distribution
+# packages, or the latest stable release.
 determine_k8s_version() {
+    if [ -z "$K8S_VERSION" ] && [ "${DISTRO_K8S_SOURCE:-}" = distro ]; then
+        K8S_VERSION=$(k8s_distro_minor_version) || K8S_VERSION=""
+        if [ -n "$K8S_VERSION" ]; then
+            log_info "Using the Kubernetes minor version provided by ${DISTRO_NAME:-the distribution}: ${K8S_VERSION}"
+        fi
+    fi
     if [ -z "$K8S_VERSION" ]; then
         log_info "Determining latest stable Kubernetes minor version..."
         local STABLE_VER

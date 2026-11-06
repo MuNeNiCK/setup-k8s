@@ -1,19 +1,56 @@
 #!/bin/sh
 
-# Install proxy-mode-specific packages (IPVS or nftables).
-# Usage: install_proxy_mode_packages <install_cmd...>
-#   install_cmd: the package install command prefix (e.g., "apt-get install -y")
-# Automatically detects PROXY_MODE and installs the right packages.
+# === Node dependencies ===
+
+# Commands that must exist when no package manager is available.
+_REQUIRED_NODE_COMMANDS="curl socat conntrack iptables"
+
+# Install the packages every node needs, prepare host settings, and install
+# the package that provides br_netfilter when the module is missing.
+install_node_dependencies() {
+    if [ -z "${DISTRO_PKG:-}" ]; then
+        log_warn "No package manager found. Checking required commands..."
+        local cmd missing=""
+        for cmd in $_REQUIRED_NODE_COMMANDS; do
+            command -v "$cmd" >/dev/null 2>&1 || missing="${missing}${missing:+ }$cmd"
+        done
+        if [ -n "$missing" ]; then
+            log_error "Missing required commands: $missing"
+            log_error "Install them manually before proceeding."
+            return 1
+        fi
+        system_prepare
+        return 0
+    fi
+
+    log_info "Installing dependencies via ${DISTRO_PKG}..."
+    pkg_refresh
+    # shellcheck disable=SC2046 # space-separated package names
+    if ! pkg_install $(pkg_base_dependencies); then
+        log_error "Failed to install base dependencies"
+        return 1
+    fi
+    system_prepare
+
+    if [ -n "${DISTRO_KMOD_PKG:-}" ] && ! modprobe -n br_netfilter >/dev/null 2>&1; then
+        log_info "br_netfilter not available — installing ${DISTRO_KMOD_PKG}..."
+        pkg_install "$DISTRO_KMOD_PKG" || return 1
+    fi
+
+    install_proxy_mode_packages
+}
+
+# Install proxy-mode-specific packages (IPVS or nftables) for PROXY_MODE.
 install_proxy_mode_packages() {
     if [ "$PROXY_MODE" = "ipvs" ]; then
         log_info "Installing IPVS packages for IPVS proxy mode..."
-        if ! "$@" ipvsadm ipset; then
+        if ! pkg_install ipvsadm ipset; then
             log_error "Failed to install IPVS packages (ipvsadm, ipset)"
             return 1
         fi
     elif [ "$PROXY_MODE" = "nftables" ]; then
         log_info "Installing nftables package for nftables proxy mode..."
-        if ! "$@" nftables; then
+        if ! pkg_install nftables; then
             log_error "Failed to install nftables package"
             return 1
         fi

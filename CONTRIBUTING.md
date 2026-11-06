@@ -49,20 +49,20 @@ repository:
 |---|---|
 | `setup-k8s.sh` | Entry point: global flags and subcommand dispatch |
 | `scripts/build.sh` | Builds the single-file release bundle `dist/setup-k8s.sh` |
-| `lib/core/` | Module loading, defaults, logging, validation, distribution detection, Kubernetes versions |
+| `lib/core/` | Module loading, defaults, logging, validation, distribution detection and per-distribution values, Kubernetes versions |
+| `lib/pkg/` | Package management interface and adapters (apt, dnf, zypper, apk, pacman) |
 | `lib/components/` | Installed components (Kubernetes packages, container runtimes, kube-vip, Helm/Kustomize, completion) |
 | `lib/node/` | Node configuration (kernel modules and sysctl, swap, kubeadm config) |
 | `lib/remote/` | SSH transport, sessions, and script transfer for remote subcommands |
 | `lib/cluster/` | Cluster operations (upgrade orchestration, etcd, health, state, diagnostics) |
 | `commands/` | Subcommands: argument parsing, help, dry-run, and execution |
-| `distros/<family>/` | Per-distribution logic for `debian`, `rhel`, `suse`, `arch`, `alpine`, `generic` |
 | `test/unit/` | bats-core unit tests, mirroring `lib/` and `commands/` |
 | `test/scenarios/` | VM-based end-to-end scenarios |
 | `docs/` | MkDocs documentation site |
 
 ## Coding guidelines
 
-- Runtime scripts (`setup-k8s.sh`, `scripts/`, `lib/`, `commands/`, `distros/`) must be POSIX
+- Runtime scripts (`setup-k8s.sh`, `scripts/`, `lib/`, `commands/`) must be POSIX
   `sh`. They run under dash, ash, and busybox sh, so avoid bashisms
   (`[[ ]]`, arrays, `${var//}`, `source`, `pipefail`, ...). `local` is allowed;
   see `.shellcheckrc`.
@@ -70,12 +70,15 @@ repository:
 - New `lib/` or `commands/` modules must be added to `_MODULES` in
   `lib/core/bootstrap.sh`. The list defines the source order for both a local
   checkout and the single-file bundle built by `scripts/build.sh`.
-- Each distribution family implements the same entry points, which are called
-  via `_dispatch`:
-  `install_dependencies_<family>`, `setup_containerd_<family>`,
-  `setup_crio_<family>`, `setup_kubernetes_<family>`,
-  `upgrade_kubeadm_<family>`, `upgrade_kubelet_kubectl_<family>`, and
-  `cleanup_<family>`.
+- Distribution names are known only by `lib/core/distro.sh`. It sets values
+  such as the package manager and the Kubernetes, containerd, and CRI-O
+  sources; other modules branch on those values, the package format, or
+  observed state (init system, missing files or modules), never on the
+  distribution name. Adding a distribution that uses an existing package
+  manager means adding it to `lib/core/distro.sh`.
+- Package operations go through `lib/pkg/pkg.sh` (`pkg_install`,
+  `pkg_repo_add`, ...). Package-manager specifics, including differences
+  between versions of the tool, belong in `lib/pkg/<manager>.sh`.
 - Never log secrets such as join tokens, certificate keys, or SSH passwords.
 - When adding or changing an option, update the subcommand `--help` text, the
   global help in `setup-k8s.sh`, and `docs/content/reference.md`.
@@ -87,7 +90,7 @@ repository:
 CI uses ShellCheck 0.11.0 and fails on warnings:
 
 ```sh
-shellcheck -s sh -S warning setup-k8s.sh scripts/*.sh lib/*/*.sh commands/*.sh distros/*/*.sh
+shellcheck -s sh -S warning setup-k8s.sh scripts/*.sh lib/*/*.sh commands/*.sh
 shellcheck -s bash -S warning test/scenarios/*.sh test/lib/*.sh test/unit/helpers/*.bash
 shellcheck -S warning test/unit/*/*.bats
 ```

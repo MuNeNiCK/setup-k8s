@@ -21,7 +21,7 @@ jobs:
           rm -rf shellcheck-v0.11.0
           shellcheck --version
       - name: Run ShellCheck on runtime scripts
-        run: shellcheck -s sh -S warning setup-k8s.sh scripts/*.sh lib/*/*.sh commands/*.sh distros/*/*.sh
+        run: shellcheck -s sh -S warning setup-k8s.sh scripts/*.sh lib/*/*.sh commands/*.sh
       - name: Run ShellCheck on test scripts
         run: shellcheck -s bash -S warning test/scenarios/*.sh test/lib/*.sh test/unit/helpers/*.bash
       - name: Run ShellCheck on unit tests

@@ -84,9 +84,36 @@ stop_cri_services() {
 # Remove Kubernetes configuration files
 remove_kubernetes_configs() {
     log_info "Removing Kubernetes configuration files..."
-    rm -f /etc/default/kubelet
+    rm -f /etc/default/kubelet /etc/sysconfig/kubelet
     rm -rf /etc/kubernetes
     rm -rf /etc/systemd/system/kubelet.service.d
+}
+
+# Remove installed components (packages, repositories, binaries) and host
+# preparation artifacts, then verify that nothing is left.
+cleanup_installed_components() {
+    local rc=0 remaining=0
+    k8s_remove || rc=1
+    crio_remove || rc=1
+    containerd_cleanup || rc=1
+    if [ "${DISTRO_K8S_SOURCE:-}" = binary ] && [ "$PRESERVE_CNI" = false ] && [ -d /opt/cni/bin ]; then
+        rm -rf /opt/cni/bin
+        log_info "Removed /opt/cni/bin/"
+    fi
+    system_cleanup
+    _service_reload
+
+    if [ -n "${DISTRO_PKG:-}" ]; then
+        remaining=$(_verify_packages_removed pkg_installed kubeadm kubelet kubectl cri-o)
+    fi
+    for bin in kubeadm kubectl kubelet; do
+        if [ -f "/usr/local/bin/$bin" ]; then
+            log_warn "$bin still exists in /usr/local/bin"
+            remaining=1
+        fi
+    done
+    _verify_cleanup "$remaining" /etc/default/kubelet /etc/sysconfig/kubelet || rc=1
+    return "$rc"
 }
 
 # Reset Kubernetes cluster state
@@ -245,7 +272,7 @@ _run_cleanup() {
     reset_iptables || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
     reset_containerd_config || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
     _service_reload || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
-    _dispatch "cleanup_${DISTRO_FAMILY}" || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_installed_components || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
     cleanup_kubernetes_completions || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
     if [ "${REMOVE_HELM:-false}" = true ]; then
         cleanup_helm || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))

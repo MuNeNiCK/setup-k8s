@@ -222,3 +222,14 @@ _case_preflight_new_checks_defined() {
 @test "preflight new check functions defined" {
     _case_preflight_new_checks_defined
 }
+
+@test "SELinux Enforcing is reported as info, not as a warning" {
+    load_modules
+    fake_cmd getenforce 0 Enforcing
+    _PREFLIGHT_WARN=0
+    run _preflight_check_selinux
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[INFO] SELinux mode: Enforcing"* ]]
+    _preflight_check_selinux 2>/dev/null
+    [ "$_PREFLIGHT_WARN" -eq 0 ]
+}

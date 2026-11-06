@@ -18,18 +18,15 @@ fi
 
 # Modules in source order, relative to the project root without ".sh".
 # This is the single source of truth for both the local loader and the
-# bundle builder. Distribution modules (distros/*/*.sh) follow these.
-_MODULES="lib/core/bootstrap lib/core/defaults lib/core/log lib/core/util lib/core/system lib/core/download lib/core/validate lib/core/distro lib/core/k8s_version lib/components/kubernetes lib/components/cri lib/components/kube_vip lib/components/tools lib/components/completion lib/node/kernel lib/node/swap lib/node/kubeadm lib/remote/ssh lib/remote/args lib/remote/session lib/remote/bundle lib/cluster/state lib/cluster/health lib/cluster/diagnostics lib/cluster/etcd lib/cluster/upgrade commands/init commands/join commands/cleanup commands/deploy commands/upgrade commands/remove commands/etcd commands/renew commands/status commands/preflight"
+# bundle builder.
+_MODULES="lib/core/bootstrap lib/core/defaults lib/core/log lib/core/util lib/core/system lib/core/download lib/core/validate lib/core/distro lib/core/k8s_version lib/pkg/pkg lib/pkg/apt lib/pkg/dnf lib/pkg/zypper lib/pkg/apk lib/pkg/pacman lib/components/kubernetes lib/components/cri lib/components/cni lib/components/containerd lib/components/crio lib/components/kube_vip lib/components/tools lib/components/completion lib/node/kernel lib/node/swap lib/node/kubeadm lib/remote/ssh lib/remote/args lib/remote/session lib/remote/bundle lib/cluster/state lib/cluster/health lib/cluster/diagnostics lib/cluster/etcd lib/cluster/upgrade commands/init commands/join commands/cleanup commands/deploy commands/upgrade commands/remove commands/etcd commands/renew commands/status commands/preflight"
 
 # Print module file paths in source order.
 # Usage: _module_files <project_root>
 _module_files() {
-    local _root="$1" _mod _f
+    local _root="$1" _mod
     for _mod in $_MODULES; do
         printf '%s\n' "$_root/$_mod.sh"
-    done
-    for _f in "$_root"/distros/*/*.sh; do
-        if [ -f "$_f" ]; then printf '%s\n' "$_f"; fi
     done
 }
 
@@ -37,7 +34,7 @@ _module_files() {
 # Paths are built inline (not via _module_files) so that SCRIPT_DIR may
 # contain spaces and definitions stay in the current shell.
 _source_all_modules() {
-    local _mod _f
+    local _mod
     for _mod in $_MODULES; do
         [ "$_mod" = "lib/core/bootstrap" ] && continue
         if [ ! -f "$SCRIPT_DIR/$_mod.sh" ]; then
@@ -46,12 +43,6 @@ _source_all_modules() {
         fi
         # shellcheck source=/dev/null
         . "$SCRIPT_DIR/$_mod.sh"
-    done
-    for _f in "$SCRIPT_DIR"/distros/*/*.sh; do
-        if [ -f "$_f" ]; then
-            # shellcheck source=/dev/null
-            . "$_f"
-        fi
     done
 }
 
@@ -242,7 +233,7 @@ _generate_bundle_core() {
         _module_files "$root" | while IFS= read -r _f; do
             _rel="${_f#"$root"/}"
             echo "# === ${_rel} ==="
-            awk '!/^source.*SCRIPT_DIR/ && !/^\. .*SCRIPT_DIR/ && !/^SCRIPT_DIR=/' "$_f"
+            cat "$_f"
             echo ""
         done
         echo "# === setup-k8s.sh ==="

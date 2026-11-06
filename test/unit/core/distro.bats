@@ -72,39 +72,6 @@ _case_detect_init_system() {
 }
 
 # ============================================================
-# Test: detect_distribution family mapping
-# ============================================================
-_case_detect_distro_family_mapping() {
-    echo "=== Test: detect_distribution family mapping ==="
-    (
-        load_modules
-        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
-
-        # Test override path
-        DISTRO_OVERRIDE="debian"
-        detect_distribution
-        _assert_eq "distro override family" "debian" "$DISTRO_FAMILY"
-        _assert_eq "distro override name" "debian-manual" "$DISTRO_NAME"
-
-        DISTRO_OVERRIDE="rhel"
-        detect_distribution
-        _assert_eq "distro override rhel" "rhel" "$DISTRO_FAMILY"
-
-        DISTRO_OVERRIDE="arch"
-        detect_distribution
-        _assert_eq "distro override arch" "arch" "$DISTRO_FAMILY"
-
-        DISTRO_OVERRIDE="suse"
-        detect_distribution
-        _assert_eq "distro override suse" "suse" "$DISTRO_FAMILY"
-
-        DISTRO_OVERRIDE="generic"
-        detect_distribution
-        _assert_eq "distro override generic" "generic" "$DISTRO_FAMILY"
-    )
-}
-
-# ============================================================
 # Test: _has_cgroupv2 function
 # ============================================================
 _case_has_cgroupv2() {
@@ -126,55 +93,15 @@ _case_has_cgroupv2() {
     )
 }
 
-# ============================================================
-# Test: detect_distribution all family mappings (deep)
-# ============================================================
-_case_detect_distro_family_all_mappings() {
-    echo "=== Test: detect_distribution all family mappings ==="
-    (
-        load_modules
-        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
-
-        # Test each distro family without overrides
-        # We test the case statement directly by mimicking os-release vars
-        local test_cases="ubuntu:debian
-debian:debian
-centos:rhel
-rhel:rhel
-fedora:rhel
-rocky:rhel
-almalinux:rhel
-ol:rhel
-suse:suse
-sles:suse
-arch:arch
-manjaro:arch
-alpine:alpine
-mysteriousos:generic"
-
-        for tc in $test_cases; do
-            local distro_name="${tc%%:*}"
-            local expected_family="${tc##*:}"
-
-            DISTRO_OVERRIDE=""
-            DISTRO_NAME="$distro_name"
-            # Simulate the case statement
-            case "$DISTRO_NAME" in
-                ubuntu|debian) DISTRO_FAMILY="debian" ;;
-                centos|rhel|fedora|rocky|almalinux|ol) DISTRO_FAMILY="rhel" ;;
-                suse|sles|opensuse*) DISTRO_FAMILY="suse" ;;
-                arch|manjaro) DISTRO_FAMILY="arch" ;;
-                alpine) DISTRO_FAMILY="alpine" ;;
-                *) DISTRO_FAMILY="unknown" ;;
-            esac
-            # Then the support check remaps unknown to generic
-            case "$DISTRO_FAMILY" in
-                debian|rhel|suse|arch|alpine) ;;
-                *) DISTRO_FAMILY="generic" ;;
-            esac
-            _assert_eq "distro $distro_name -> $expected_family" "$expected_family" "$DISTRO_FAMILY"
-        done
-    )
+# Detect with a fixture os-release and print the resulting values.
+# Usage: _detect_with <os-release lines...>
+_detect_with() {
+    printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/os-release"
+    _OS_RELEASE_FILE="$BATS_TEST_TMPDIR/os-release"
+    DISTRO_OVERRIDE="${DISTRO_OVERRIDE:-}"
+    detect_distribution
+    printf '%s|%s|%s|%s|%s|%s|%s\n' "$DISTRO_FAMILY" "$DISTRO_PKG" "$DISTRO_K8S_SOURCE" \
+        "$DISTRO_CONTAINERD_SOURCE" "$DISTRO_CRIO_SOURCE" "$DISTRO_DOCKER_REPO" "$DISTRO_CODENAME"
 }
 
 @test "--distro sets DISTRO_OVERRIDE" {
@@ -193,14 +120,70 @@ mysteriousos:generic"
     _case_detect_init_system
 }
 
-@test "detect_distribution family mapping" {
-    _case_detect_distro_family_mapping
-}
 
 @test "_has_cgroupv2 function" {
     _case_has_cgroupv2
 }
 
-@test "detect_distribution all family mappings" {
-    _case_detect_distro_family_all_mappings
+@test "detect_distribution: Debian and Ubuntu use pkgs.k8s.io, Docker containerd, isv:cri-o" {
+    load_modules; quiet_logs
+    run _detect_with ID=ubuntu VERSION_ID=24.04 VERSION_CODENAME=noble UBUNTU_CODENAME=noble
+    [ "$output" = "debian|apt|pkgs|docker|isv|ubuntu|noble" ]
+    run _detect_with ID=debian VERSION_ID=13 VERSION_CODENAME=trixie
+    [ "$output" = "debian|apt|pkgs|docker|isv|debian|trixie" ]
+}
+
+@test "detect_distribution: Ubuntu derivatives use ID_LIKE and the Ubuntu codename" {
+    load_modules; quiet_logs
+    run _detect_with ID=linuxmint 'ID_LIKE="ubuntu debian"' VERSION_ID=22 VERSION_CODENAME=wilma UBUNTU_CODENAME=noble
+    [ "$output" = "debian|apt|pkgs|docker|isv|ubuntu|noble" ]
+}
+
+@test "detect_distribution: RHEL family selects the Docker repository by ID" {
+    load_modules; quiet_logs
+    local id
+    for id in rhel rocky almalinux ol; do
+        run _detect_with "ID=$id" VERSION_ID=9.6
+        [ "$output" = "rhel|dnf|pkgs|docker|isv|rhel|" ]
+    done
+    run _detect_with ID=fedora VERSION_ID=44
+    [ "$output" = "rhel|dnf|pkgs|docker|isv|fedora|" ]
+    run _detect_with ID=centos VERSION_ID=10
+    [ "$output" = "rhel|dnf|pkgs|docker|isv|centos|" ]
+}
+
+@test "detect_distribution: openSUSE Tumbleweed and Leap differ only in the containerd source" {
+    load_modules; quiet_logs
+    run _detect_with ID=opensuse-tumbleweed VERSION_ID=20261101
+    [ "$output" = "suse|zypper|pkgs|distro|isv||" ]
+    _detect_with ID=opensuse-leap VERSION_ID=16.0 >/dev/null
+    [ "$DISTRO_CONTAINERD_SOURCE" = obs ]
+    [ "$DISTRO_OBS_REPO" = "Virtualization:/containers/16.0" ]
+}
+
+@test "detect_distribution: Alpine and Arch use distribution packages" {
+    load_modules; quiet_logs
+    run _detect_with ID=alpine VERSION_ID=3.24.0
+    [ "$output" = "alpine|apk|distro|distro|distro||" ]
+    run _detect_with ID=arch
+    [ "$output" = "arch|pacman|distro|distro|distro||" ]
+    run _detect_with ID=manjaro 'ID_LIKE=arch'
+    [ "$output" = "arch|pacman|distro|distro|distro||" ]
+}
+
+@test "detect_distribution: unknown distributions use release binaries" {
+    load_modules; quiet_logs
+    _detect_with ID=mysteriousos >/dev/null
+    [ "$DISTRO_FAMILY" = generic ]
+    [ "$DISTRO_K8S_SOURCE" = binary ]
+    [ "$DISTRO_CONTAINERD_SOURCE" = binary ]
+    [ "$DISTRO_CRIO_SOURCE" = binary ]
+}
+
+@test "detect_distribution: --distro overrides the family but keeps the real ID" {
+    load_modules; quiet_logs
+    DISTRO_OVERRIDE=generic _detect_with ID=ubuntu VERSION_CODENAME=noble >/dev/null
+    [ "$DISTRO_FAMILY" = generic ]
+    [ "$DISTRO_NAME" = ubuntu ]
+    [ "$DISTRO_K8S_SOURCE" = binary ]
 }

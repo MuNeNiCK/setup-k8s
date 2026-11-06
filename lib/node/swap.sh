@@ -50,11 +50,21 @@ restore_fstab_swap() {
     fi
 }
 
-# Disable zram swap (especially for Fedora and Arch)
+# Succeed when zram swap is active or configured to start at boot
+# (zram-generator, used by Fedora and Arch among others).
+_zram_swap_present() {
+    grep -q zram /proc/swaps 2>/dev/null && return 0
+    [ -f /etc/systemd/zram-generator.conf ] && return 0
+    [ -f /usr/lib/systemd/zram-generator.conf ] && return 0
+    [ -n "$(ls /etc/systemd/zram-generator.conf.d/ 2>/dev/null)" ] && return 0
+    return 1
+}
+
+# Disable zram swap
 disable_zram_swap() {
     log_info "Checking and disabling zram swap if present..."
-    if grep -q zram /proc/swaps || [ "$DISTRO_NAME" = "fedora" ] || [ "$DISTRO_NAME" = "arch" ] || [ "$DISTRO_NAME" = "manjaro" ]; then
-        log_info "zram swap detected or Fedora/Arch system, disabling..."
+    if _zram_swap_present; then
+        log_info "zram swap detected, disabling..."
         local k8s_zram_marker="/var/lib/setup-k8s-zram-masked"
         : > "$k8s_zram_marker"
         # Stop, disable, and mask all potential zram swap services (systemd-only)

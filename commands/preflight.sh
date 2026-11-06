@@ -38,7 +38,7 @@ Checks performed:
   - containerd v2 readiness for Kubernetes 1.36+ (warning only)
   - Swap state (warning only)
   - cgroups v2
-  - SELinux state (warning only)
+  - SELinux mode (info only)
   - AppArmor state (info only)
   - Unattended upgrades detection (warning only)
   - Existing cluster detection (init only)
@@ -321,6 +321,8 @@ _preflight_check_existing_cluster() {
     fi
 }
 
+# Report the SELinux mode. setup-k8s does not change it; container-selinux is
+# installed on RPM-based systems so the runtimes work in Enforcing mode.
 _preflight_check_selinux() {
     if ! command -v getenforce >/dev/null 2>&1; then
         # SELinux not installed, nothing to check
@@ -328,20 +330,7 @@ _preflight_check_selinux() {
     fi
     local mode
     mode=$(getenforce 2>/dev/null) || mode="unknown"
-    case "$mode" in
-        Enforcing)
-            _preflight_record_warn "SELinux is in Enforcing mode (may require additional configuration for K8s)"
-            ;;
-        Permissive)
-            _preflight_record_pass "SELinux is in Permissive mode"
-            ;;
-        Disabled)
-            _preflight_record_pass "SELinux is disabled"
-            ;;
-        *)
-            _preflight_record_warn "Cannot determine SELinux state: $mode"
-            ;;
-    esac
+    log_info "  [INFO] SELinux mode: ${mode}"
 }
 
 _preflight_check_apparmor() {
@@ -469,7 +458,7 @@ preflight_dry_run() {
     fi
     log_info "  8. Swap state"
     log_info "  9. cgroups v2"
-    log_info "  10. SELinux state"
+    log_info "  10. SELinux mode"
     log_info "  11. AppArmor state"
     log_info "  12. Unattended upgrades detection"
     if [ "$PREFLIGHT_MODE" = "init" ]; then

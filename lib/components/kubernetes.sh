@@ -1,13 +1,301 @@
 #!/bin/sh
 
 # Kubernetes node components (kubeadm, kubelet, kubectl).
+#
+# Source is DISTRO_K8S_SOURCE:
+#   pkgs    pkgs.k8s.io repository for the Kubernetes minor version (deb/rpm)
+#   distro  distribution packages (DISTRO_K8S_PKGS)
+#   binary  release binaries from dl.k8s.io with a kubelet service definition
+#
+#   k8s_install                     Install for K8S_VERSION (MAJOR.MINOR)
+#   k8s_upgrade_kubeadm <version>   Upgrade kubeadm to MAJOR.MINOR.PATCH
+#   k8s_upgrade_node <version>      Upgrade kubelet and kubectl to MAJOR.MINOR.PATCH
+#   k8s_remove                      Remove packages, repository, and binaries
+
+_K8S_CORE_PKGS="kubeadm kubelet kubectl"
+
+# --- pkgs.k8s.io ---
+
+_k8s_repo_add() {
+    local minor="$1" base
+    base="https://pkgs.k8s.io/core:/stable:/v${minor}"
+    case "$(pkg_format)" in
+        deb) pkg_repo_add kubernetes "${base}/deb/" "${base}/deb/Release.key" ;;
+        rpm) pkg_repo_add kubernetes "${base}/rpm/" "${base}/rpm/repodata/repomd.xml.key" ;;
+        *)   log_error "pkgs.k8s.io provides deb and rpm packages only"; return 1 ;;
+    esac
+}
+
+# Remove Kubernetes packages shipped by the distribution (e.g. kubernetes1.31-*)
+# that conflict with pkgs.k8s.io packages.
+_k8s_remove_conflicting_packages() {
+    [ "$(pkg_format)" = rpm ] || return 0
+    local conflicting
+    conflicting=$(rpm -qa --qf '%{NAME}\n' 'kubernetes1*' 2>/dev/null | tr '\n' ' ')
+    if [ -n "$conflicting" ]; then
+        log_info "Removing distribution Kubernetes packages to avoid conflicts: $conflicting"
+        # shellcheck disable=SC2086 # space-separated package names
+        pkg_remove $conflicting || return 1
+    fi
+}
+
+# --- distribution packages ---
+
+# Print package specs for the distro source, pinning the core packages.
+_k8s_distro_specs() {
+    local version="$1" pkg specs=""
+    for pkg in $DISTRO_K8S_PKGS; do
+        case " $_K8S_CORE_PKGS " in
+            *" $pkg "*) specs="${specs}${specs:+ }${pkg}=${version}" ;;
+            *)          specs="${specs}${specs:+ }${pkg}" ;;
+        esac
+    done
+    echo "$specs"
+}
+
+# Fail with a clear message when the distribution does not provide the
+# requested Kubernetes minor version.
+_k8s_require_distro_version() {
+    local wanted="$1" available
+    available=$(pkg_available_version kubeadm)
+    if [ -z "$available" ]; then
+        log_error "kubeadm is not available from ${DISTRO_NAME} packages"
+        return 1
+    fi
+    if [ "$(_k8s_minor_version "$available")" != "$(_k8s_minor_version "$wanted")" ]; then
+        log_error "Kubernetes ${wanted} is not available from ${DISTRO_NAME} packages (available: ${available})"
+        log_error "  Use --kubernetes-version $(_k8s_minor_version "$available"), or --distro generic to install release binaries"
+        return 1
+    fi
+}
+
+# Print the Kubernetes minor version provided by distribution packages.
+k8s_distro_minor_version() {
+    local available
+    available=$(pkg_available_version kubeadm)
+    [ -n "$available" ] && _k8s_minor_version "$available"
+}
+
+# --- release binaries ---
+
+# Resolve full patch version from MAJOR.MINOR (e.g. 1.32 -> 1.32.3)
+_resolve_k8s_patch_version() {
+    local minor="$1"
+    curl -fsSL --retry 3 --retry-delay 2 "https://dl.k8s.io/release/stable-${minor}.txt" | tr -d 'v'
+}
+
+# Download and install a single K8s binary with checksum verification
+_install_k8s_binary() {
+    local binary="$1" version="$2"
+    local arch
+    arch=$(_detect_arch)
+    local url="https://dl.k8s.io/release/v${version}/bin/linux/${arch}/${binary}"
+    _download_with_checksum "$url" "/usr/local/bin/${binary}" "${url}.sha256"
+}
+
+# Install kubelet service file (systemd unit or OpenRC init script)
+_install_kubelet_service() {
+    case "$(_detect_init_system)" in
+        systemd)
+            cat > /etc/systemd/system/kubelet.service <<'UNIT'
+[Unit]
+Description=kubelet: The Kubernetes Node Agent
+Documentation=https://kubernetes.io/docs/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/kubelet
+Restart=always
+StartLimitInterval=0
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+            mkdir -p /etc/systemd/system/kubelet.service.d
+            cat > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf <<'DROPIN'
+[Service]
+Environment="KUBELET_KUBECONFIG_ARGS=--bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf"
+Environment="KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml"
+EnvironmentFile=-/var/lib/kubelet/kubeadm-flags.env
+EnvironmentFile=-/etc/default/kubelet
+ExecStart=
+ExecStart=/usr/local/bin/kubelet $KUBELET_KUBECONFIG_ARGS $KUBELET_CONFIG_ARGS $KUBELET_KUBEADM_ARGS $KUBELET_EXTRA_ARGS
+DROPIN
+            _service_reload
+            ;;
+        openrc)
+            cat > /etc/init.d/kubelet <<'INITD'
+#!/sbin/openrc-run
+name="kubelet"
+description="Kubernetes Node Agent"
+command="/usr/local/bin/kubelet"
+command_args="--bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf \
+  --kubeconfig=/etc/kubernetes/kubelet.conf \
+  --config=/var/lib/kubelet/config.yaml"
+command_background=true
+pidfile="/run/kubelet.pid"
+output_log="/var/log/kubelet.log"
+error_log="/var/log/kubelet.log"
+
+depend() {
+    need net localmount
+    use cgroups
+    after containerd crio
+}
+
+start_pre() {
+    if [ -f /var/lib/kubelet/kubeadm-flags.env ]; then
+        . /var/lib/kubelet/kubeadm-flags.env
+        command_args="$command_args $KUBELET_KUBEADM_ARGS"
+    fi
+    if [ -f /etc/default/kubelet ]; then
+        . /etc/default/kubelet
+        command_args="$command_args $KUBELET_EXTRA_ARGS"
+    fi
+}
+INITD
+            chmod +x /etc/init.d/kubelet
+            ;;
+    esac
+}
+
+_k8s_install_binaries() {
+    local patch_version
+    patch_version=$(_resolve_k8s_patch_version "$K8S_VERSION")
+    if [ -z "$patch_version" ]; then
+        log_error "Failed to resolve patch version for K8s ${K8S_VERSION}"
+        return 1
+    fi
+    log_info "Resolved Kubernetes version: v${patch_version}"
+
+    # glibc binaries on musl systems
+    if [ "${DISTRO_PKG:-}" = apk ]; then
+        pkg_install gcompat || log_warn "gcompat could not be installed; glibc binaries may not run"
+    fi
+    # CRI-O release tarballs bundle CNI plugins
+    if [ "$CRI" != "crio" ]; then
+        cni_install_binaries || return 1
+    fi
+
+    log_info "Downloading Kubernetes binaries v${patch_version}..."
+    _install_k8s_binary kubeadm "$patch_version" || return 1
+    _install_k8s_binary kubelet "$patch_version" || return 1
+    _install_k8s_binary kubectl "$patch_version" || return 1
+    _install_kubelet_service
+    log_info "Kubernetes v${patch_version} binaries installed to /usr/local/bin/"
+}
+
+_k8s_remove_binaries() {
+    local bin
+    for bin in kubeadm kubectl kubelet; do
+        if [ -f "/usr/local/bin/$bin" ]; then
+            rm -f "/usr/local/bin/$bin"
+            log_info "Removed /usr/local/bin/$bin"
+        fi
+    done
+    rm -f /etc/systemd/system/kubelet.service /etc/init.d/kubelet
+    rm -rf /etc/systemd/system/kubelet.service.d
+}
+
+# --- interface ---
+
+k8s_install() {
+    log_info "Installing Kubernetes ${K8S_VERSION} (source: ${DISTRO_K8S_SOURCE})..."
+    case "$DISTRO_K8S_SOURCE" in
+        pkgs)
+            _k8s_remove_conflicting_packages || return 1
+            _k8s_repo_add "$K8S_VERSION" || return 1
+            pkg_install --hold --repo kubernetes \
+                "kubelet=${K8S_VERSION}" "kubeadm=${K8S_VERSION}" "kubectl=${K8S_VERSION}" cri-tools || return 1
+            ;;
+        distro)
+            _k8s_require_distro_version "$K8S_VERSION" || return 1
+            # shellcheck disable=SC2046 # space-separated package specs
+            pkg_install --hold $(_k8s_distro_specs "$K8S_VERSION") || return 1
+            ;;
+        binary)
+            _k8s_install_binaries || return 1
+            ;;
+        *)
+            log_error "Unknown Kubernetes source: ${DISTRO_K8S_SOURCE}"
+            return 1
+            ;;
+    esac
+    if ! command -v kubeadm >/dev/null 2>&1; then
+        log_error "kubeadm is not available after installation"
+        return 1
+    fi
+    _enable_and_start_kubelet
+}
+
+k8s_upgrade_kubeadm() {
+    local target="$1"
+    log_info "Upgrading kubeadm to v${target}..."
+    case "$DISTRO_K8S_SOURCE" in
+        pkgs)
+            _k8s_repo_add "$(_k8s_minor_version "$target")" || return 1
+            pkg_install --hold --repo kubernetes "kubeadm=${target}"
+            ;;
+        distro) pkg_install --hold "kubeadm=${target}" ;;
+        binary) _install_k8s_binary kubeadm "$target" ;;
+    esac
+}
+
+k8s_upgrade_node() {
+    local target="$1"
+    log_info "Upgrading kubelet and kubectl to v${target}..."
+    case "$DISTRO_K8S_SOURCE" in
+        pkgs)   pkg_install --hold --repo kubernetes "kubelet=${target}" "kubectl=${target}" cri-tools ;;
+        distro) pkg_install --hold "kubelet=${target}" "kubectl=${target}" ;;
+        binary)
+            _install_k8s_binary kubelet "$target" || return 1
+            _install_k8s_binary kubectl "$target"
+            ;;
+    esac
+}
+
+k8s_remove() {
+    log_info "Removing Kubernetes packages..."
+    local rc=0
+    case "$DISTRO_K8S_SOURCE" in
+        pkgs)
+            pkg_remove kubeadm kubectl kubelet kubernetes-cni cri-tools || rc=1
+            pkg_repo_remove kubernetes
+            ;;
+        distro)
+            # shellcheck disable=SC2086 # space-separated package names
+            pkg_remove $_K8S_CORE_PKGS kubelet-openrc || rc=1
+            ;;
+    esac
+    # Binaries may exist from a binary install on any distribution
+    _k8s_remove_binaries
+    hash -r 2>/dev/null || true
+    return "$rc"
+}
+
+# --- kubelet helpers ---
+
+# Environment file read by the installed kubelet unit (rpm packages use
+# /etc/sysconfig/kubelet, deb packages and binary installs /etc/default/kubelet).
+_kubelet_env_file() {
+    if grep -rqs 'EnvironmentFile=-/etc/sysconfig/kubelet' \
+        /usr/lib/systemd/system/kubelet.service.d /etc/systemd/system/kubelet.service.d 2>/dev/null; then
+        echo /etc/sysconfig/kubelet
+    else
+        echo /etc/default/kubelet
+    fi
+}
 
 # Configure kubelet node-ip if KUBELET_NODE_IP is set.
 _configure_kubelet_node_ip() {
     if [ -n "${KUBELET_NODE_IP:-}" ]; then
-        log_info "Setting kubelet node-ip: $KUBELET_NODE_IP"
-        mkdir -p /etc/default
-        echo "KUBELET_EXTRA_ARGS=\"--node-ip=${KUBELET_NODE_IP}\"" > /etc/default/kubelet
+        local env_file
+        env_file=$(_kubelet_env_file)
+        log_info "Setting kubelet node-ip: $KUBELET_NODE_IP ($env_file)"
+        mkdir -p "$(dirname "$env_file")"
+        echo "KUBELET_EXTRA_ARGS=\"--node-ip=${KUBELET_NODE_IP}\"" > "$env_file"
     fi
 }
 

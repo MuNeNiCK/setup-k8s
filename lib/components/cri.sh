@@ -55,6 +55,17 @@ configure_containerd_toml() {
     fi
 }
 
+# Install the SELinux policy for containers on RPM-based systems with
+# SELinux. The SELinux mode itself is not changed.
+cri_install_selinux_policy() {
+    [ "$(pkg_format)" = rpm ] || return 0
+    [ -d /usr/share/selinux ] || command -v getenforce >/dev/null 2>&1 || return 0
+    if ! pkg_installed container-selinux; then
+        log_info "Installing container-selinux..."
+        pkg_install container-selinux || log_warn "container-selinux could not be installed"
+    fi
+}
+
 # Helper: Get CRI socket path based on runtime
 get_cri_socket() {
     case "$CRI" in
