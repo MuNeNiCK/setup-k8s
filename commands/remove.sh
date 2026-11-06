@@ -65,6 +65,20 @@ _confirm_remove() {
     _confirm_destructive_action
 }
 
+# Succeed when the node object no longer exists (polled for up to 60 s).
+# Usage: _remove_node_absent <cp_user> <cp_host> <sudo_prefix> <node_name>
+_remove_node_absent() {
+    local user="$1" host="$2" pfx="$3" name="$4" out elapsed=0
+    while [ "$elapsed" -le 60 ]; do
+        if out=$(_deploy_ssh "$user" "$host" "${pfx}kubectl --kubeconfig=/etc/kubernetes/admin.conf get node '${name}' --ignore-not-found -o name" 2>/dev/null) && [ -z "$out" ]; then
+            return 0
+        fi
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
+    return 1
+}
+
 # Main remove orchestration (remote mode)
 remove_cluster() {
     local node_count
@@ -108,24 +122,38 @@ remove_cluster() {
         log_info "  [${node_host}] Processing node removal..."
 
         # a. Resolve Kubernetes node name
-        local node_name
-        node_name=$(_get_node_name "$cp_user" "$cp_host" "$node_host")
-        if [ -z "$node_name" ]; then
-            log_warn "  [${node_host}] Could not resolve node name, using host as node name"
-            node_name="$node_host"
-        fi
-        log_info "  [${node_host}] Kubernetes node name: ${node_name}"
-
-        # b. kubectl drain
-        log_info "  [${node_host}] Draining node ${node_name}..."
-        if ! _deploy_ssh "$cp_user" "$cp_host" "${sudo_pfx}kubectl --kubeconfig=/etc/kubernetes/admin.conf drain '${node_name}' --ignore-daemonsets --delete-emptydir-data --force --timeout=300s" 2>&1; then
-            log_warn "  [${node_host}] Drain failed (node may already be drained or not ready). Continuing..."
+        local node_name="" name_rc=0
+        node_name=$(_get_node_name "$cp_user" "$cp_host" "$node_host") || name_rc=$?
+        if [ "$name_rc" -eq 2 ]; then
+            log_error "  [${node_host}] Could not read the node list from the control plane"
+            remove_failed=true
+            failed_nodes="${failed_nodes}${failed_nodes:+, }${node_host}"
+            _i=$((_i + 1))
+            continue
         fi
 
-        # c. kubectl delete node
-        log_info "  [${node_host}] Deleting node ${node_name} from cluster..."
-        if ! _deploy_ssh "$cp_user" "$cp_host" "${sudo_pfx}kubectl --kubeconfig=/etc/kubernetes/admin.conf delete node '${node_name}'" 2>&1; then
-            log_warn "  [${node_host}] Delete node failed. Continuing with reset..."
+        if [ "$name_rc" -eq 1 ]; then
+            # Not (or no longer) registered: nothing to drain or delete
+            log_warn "  [${node_host}] Not registered in the cluster (no node with this address or hostname)"
+        else
+            log_info "  [${node_host}] Kubernetes node name: ${node_name}"
+
+            # b. kubectl drain (best effort: the node is deleted next)
+            log_info "  [${node_host}] Draining node ${node_name}..."
+            if ! _deploy_ssh "$cp_user" "$cp_host" "${sudo_pfx}kubectl --kubeconfig=/etc/kubernetes/admin.conf drain '${node_name}' --ignore-daemonsets --delete-emptydir-data --force --timeout=300s" 2>&1; then
+                log_warn "  [${node_host}] Drain failed (node may be unreachable). Its pods are removed with the node."
+            fi
+
+            # c. kubectl delete node, then make sure it is gone
+            log_info "  [${node_host}] Deleting node ${node_name} from cluster..."
+            _deploy_ssh "$cp_user" "$cp_host" "${sudo_pfx}kubectl --kubeconfig=/etc/kubernetes/admin.conf delete node '${node_name}' --ignore-not-found" 2>&1 || true
+            if ! _remove_node_absent "$cp_user" "$cp_host" "$sudo_pfx" "$node_name"; then
+                log_error "  [${node_host}] Node ${node_name} is still registered in the cluster"
+                remove_failed=true
+                failed_nodes="${failed_nodes}${failed_nodes:+, }${node_host}"
+                _i=$((_i + 1))
+                continue
+            fi
         fi
 
         # d. kubeadm reset on target node

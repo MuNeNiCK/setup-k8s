@@ -298,3 +298,118 @@ _case_compute_upgrade_steps_defined() {
 @test "_compute_upgrade_steps function defined" {
     _case_compute_upgrade_steps_defined
 }
+
+# --- node resolution, verification, kubelet restart ---
+
+_fake_nodes() {
+    NODES="$1"
+    _deploy_ssh() {
+        case "$3" in
+            *"get nodes -o jsonpath"*) [ -n "$NODES" ] && printf '%s\n' "$NODES" ;;
+            hostname) echo "${REMOTE_HOSTNAME:-}" ;;
+        esac
+    }
+    sleep() { :; }
+}
+
+@test "_get_node_name: a unique address match wins" {
+    load_modules; quiet_logs
+    _fake_nodes 'cp1 10.0.0.1 cp1
+w1 10.0.0.2 w1'
+    [ "$(_get_node_name root 10.0.0.1 10.0.0.2)" = w1 ]
+}
+
+@test "_get_node_name: nodes sharing an address are told apart by hostname" {
+    load_modules; quiet_logs
+    _fake_nodes 'cp1 10.0.2.15 cp1
+w1 10.0.2.15 w1'
+    _DEPLOY_ALL_NODES="10.0.2.15"
+    REMOTE_HOSTNAME=W1
+    [ "$(_get_node_name root 10.0.0.1 10.0.2.15)" = w1 ]
+}
+
+@test "_get_node_name: unknown node and unreachable API are different failures" {
+    load_modules; quiet_logs
+    _fake_nodes 'cp1 10.0.0.1 cp1'
+    REMOTE_HOSTNAME=other
+    run _get_node_name root 10.0.0.1 10.0.0.9
+    [ "$status" -eq 1 ]
+    _fake_nodes ''
+    run _get_node_name root 10.0.0.1 10.0.0.9
+    [ "$status" -eq 2 ]
+}
+
+@test "the cluster must report the upgraded kubelet and API server versions" {
+    load_modules; quiet_logs
+    sleep() { :; }
+    _deploy_ssh() {
+        case "$3" in
+            *"get node"*kubeletVersion*) echo "$KUBELET_V" ;;
+            *"version -o json"*) printf '{\n "clientVersion": {\n  "gitVersion": "v1.37.2"\n },\n "serverVersion": {\n  "gitVersion": "%s"\n }\n}\n' "$SERVER_V" ;;
+        esac
+    }
+    KUBELET_V=v1.37.2 SERVER_V=v1.37.2
+    _upgrade_verify_node_version root cp1 w1 1.37.2
+    _upgrade_verify_api_version root cp1 1.37.2
+    KUBELET_V=v1.36.6 SERVER_V=v1.36.6
+    run _upgrade_verify_node_version root cp1 w1 1.37.2
+    [ "$status" -ne 0 ]
+    run _upgrade_verify_api_version root cp1 1.37.2
+    [ "$status" -ne 0 ]
+}
+
+@test "a failing uncordon is retried and then reported" {
+    load_modules; quiet_logs
+    sleep() { :; }
+    TRIES="$BATS_TEST_TMPDIR/tries"; : > "$TRIES"
+    _deploy_ssh() { echo x >> "$TRIES"; [ "$(wc -l < "$TRIES")" -ge "${OK_AT:-99}" ]; }
+    OK_AT=3 _upgrade_uncordon_node root cp1 w1
+    : > "$TRIES"
+    run _upgrade_uncordon_node root cp1 w1
+    [ "$status" -ne 0 ]
+    [ "$(wc -l < "$TRIES")" -eq 5 ]
+}
+
+@test "node upgrade fails when kubelet does not stay active or versions differ" {
+    load_modules; quiet_logs
+    sleep() { :; }
+    _service_reload() { :; }
+    _service_restart() { :; }
+    _service_is_active() { [ "${KUBELET_UP:-true}" = true ]; }
+    _upgrade_restart_kubelet
+    KUBELET_UP=false
+    run _upgrade_restart_kubelet
+    [ "$status" -ne 0 ]
+    cat > "$FAKE_BIN/kubeadm" <<'FAKE'
+#!/bin/sh
+echo v1.37.2
+FAKE
+    cat > "$FAKE_BIN/kubelet" <<'FAKE'
+#!/bin/sh
+echo "Kubernetes v1.36.6"
+FAKE
+    chmod +x "$FAKE_BIN/kubeadm" "$FAKE_BIN/kubelet"
+    run _upgrade_verify_local_versions 1.37.2
+    [ "$status" -ne 0 ]
+}
+
+@test "kubeadm upgrade apply skips the node-readiness checks only while nodes are NotReady" {
+    load_modules; quiet_logs
+    _detect_node_role() { echo first-control-plane; }
+    _get_current_k8s_version() { echo 1.36.6; }
+    k8s_upgrade_kubeadm() { :; }
+    k8s_upgrade_node() { :; }
+    _upgrade_restart_kubelet() { :; }
+    _upgrade_verify_local_versions() { :; }
+    show_versions() { :; }
+    _detect_init_system() { echo systemd; }
+    fake_cmd kubeadm
+    UPGRADE_TARGET_VERSION=1.37.2
+    fake_cmd kubectl 0 "cp1 NotReady control-plane 1m v1.36.6"
+    upgrade_node_local
+    fake_calls | grep -qx 'kubeadm upgrade apply v1.37.2 --yes --ignore-preflight-errors=ControlPlaneNodesReady,CreateJob'
+    : > "$FAKE_LOG"
+    fake_cmd kubectl 0 "cp1 Ready control-plane 1m v1.36.6"
+    upgrade_node_local
+    fake_calls | grep -qx 'kubeadm upgrade apply v1.37.2 --yes'
+}

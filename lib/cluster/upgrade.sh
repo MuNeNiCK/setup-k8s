@@ -178,14 +178,58 @@ _upgrade_drain_node() {
 
 # Helper: uncordon a node
 _upgrade_uncordon_node() {
-    local user="$1" host="$2" node_name="$3"
+    local user="$1" host="$2" node_name="$3" attempt=1
     local pfx; pfx=$(_sudo_prefix "$user")
     log_info "  [${node_name}] Uncordoning node..."
-    if ! _deploy_ssh "$user" "$host" "${pfx}kubectl --kubeconfig=/etc/kubernetes/admin.conf uncordon '$node_name'"; then
-        log_error "  [${node_name}] Uncordon failed"
-        return 1
-    fi
+    # The API server may be restarting right after a control-plane upgrade
+    until _deploy_ssh "$user" "$host" "${pfx}kubectl --kubeconfig=/etc/kubernetes/admin.conf uncordon '$node_name'"; do
+        if [ "$attempt" -ge 5 ]; then
+            log_error "  [${node_name}] Uncordon failed"
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep 5
+    done
     log_info "  [${node_name}] Node uncordoned"
+}
+
+# Wait until the API server reports <version> (after "kubeadm upgrade apply").
+# Usage: _upgrade_verify_api_version <cp_user> <cp_host> <version>
+_upgrade_verify_api_version() {
+    local user="$1" host="$2" version="$3"
+    local pfx; pfx=$(_sudo_prefix "$user")
+    local got="" elapsed=0
+    while [ "$elapsed" -le 120 ]; do
+        got=$(_deploy_ssh "$user" "$host" "${pfx}kubectl --kubeconfig=/etc/kubernetes/admin.conf version -o json" 2>/dev/null \
+            | awk -F'"' '/"serverVersion"/ {s = 1} s && /"gitVersion"/ {print $4; exit}') || got=""
+        if [ "$got" = "v${version}" ]; then
+            log_info "  API server reports v${version}"
+            return 0
+        fi
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
+    log_error "  API server reports ${got:-no version} (expected v${version})"
+    return 1
+}
+
+# Wait until the cluster reports the node's kubelet at <version>.
+# Usage: _upgrade_verify_node_version <cp_user> <cp_host> <node_name> <version>
+_upgrade_verify_node_version() {
+    local user="$1" host="$2" node_name="$3" version="$4"
+    local pfx; pfx=$(_sudo_prefix "$user")
+    local got="" elapsed=0
+    while [ "$elapsed" -le 120 ]; do
+        got=$(_deploy_ssh "$user" "$host" "${pfx}kubectl --kubeconfig=/etc/kubernetes/admin.conf get node '$node_name' -o jsonpath='{.status.nodeInfo.kubeletVersion}'" 2>/dev/null) || got=""
+        if [ "$got" = "v${version}" ]; then
+            log_info "  [${node_name}] kubelet reports v${version}"
+            return 0
+        fi
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
+    log_error "  [${node_name}] kubelet reports ${got:-no version} (expected v${version})"
+    return 1
 }
 
 # Upgrade a single node: resolve, drain, execute, uncordon, rollback on error.
@@ -206,10 +250,9 @@ _upgrade_single_node() {
     local node_sudo; node_sudo=$(_sudo_prefix "$node_user")
 
     local node_name
-    node_name=$(_get_node_name "$cp1_user" "$cp1_host" "$node_host")
-    if [ -z "$node_name" ]; then
-        log_warn "Could not resolve node name for ${node_host}, using host as node name"
-        node_name="$node_host"
+    if ! node_name=$(_get_node_name "$cp1_user" "$cp1_host" "$node_host"); then
+        log_error "Could not find the Kubernetes node of ${node_host} (by address or hostname)"
+        return 1
     fi
 
     _record_pre_upgrade_versions "$node_user" "$node_host"
@@ -261,9 +304,15 @@ _upgrade_single_node() {
 
     [ -n "$post_hook" ] && "$post_hook" "$node_user" "$node_host" "$node_sudo" "${_hook_data}" "success" || true
 
+    if ! _upgrade_verify_node_version "$cp1_user" "$cp1_host" "$node_name" "$UPGRADE_TARGET_VERSION"; then
+        return 1
+    fi
+
     if [ "$UPGRADE_SKIP_DRAIN" != true ]; then
         if ! _upgrade_uncordon_node "$cp1_user" "$cp1_host" "$node_name"; then
-            log_warn "Uncordon failed for ${node_host}. Continuing..."
+            log_error "${node_host} was upgraded but stays cordoned (SchedulingDisabled)."
+            log_error "  Run: kubectl uncordon ${node_name}"
+            return 1
         fi
     fi
 
@@ -431,6 +480,9 @@ upgrade_cluster() {
         node=$(_csv_get "$DEPLOY_CONTROL_PLANES" "$_i")
         is_first=$([ "$_i" -eq 0 ] && echo true || echo false)
         if ! _upgrade_single_node "$node" "upgrade_cp" "$is_first"; then
+            upgrade_failed=true; break
+        fi
+        if [ "$is_first" = true ] && ! _upgrade_verify_api_version "$cp1_user" "$cp1_host" "$UPGRADE_TARGET_VERSION"; then
             upgrade_failed=true; break
         fi
         _i=$((_i + 1))

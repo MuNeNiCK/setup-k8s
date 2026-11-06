@@ -32,65 +32,64 @@ _check_ssh_connectivity() {
 
 # --- Shared Node Name Resolution ---
 
-# Resolve a node's Kubernetes node name from its host IP/hostname via kubectl.
-# Tries: 1) match by InternalIP address, 2) match by Hostname, 3) SSH to target and get its hostname
+# Resolve a node's Kubernetes node name from its address.
+# 1) a node with exactly one matching address (InternalIP/Hostname/...);
+# 2) otherwise (no or several matches, e.g. nodes behind NAT sharing an
+#    address) the node whose name is the target's hostname.
+# Prints the name. Returns 0 when found, 1 when no node matches, 2 when the
+# node list could not be read (the API server did not answer).
 # Usage: _get_node_name <cp_user> <cp_host> <target_host>
-# Requires: _deploy_ssh, _parse_node_address, _DEPLOY_ALL_NODES, _csv_count, _csv_get
 _get_node_name() {
     local user="$1" host="$2" target_host="$3"
     local pfx; pfx=$(_sudo_prefix "$user")
-    local node_name=""
     local stripped="${target_host#[}"
     stripped="${stripped%]}"
 
-    # Try matching by InternalIP or Hostname address
-    local nodes_info
-    nodes_info=$(_deploy_ssh "$user" "$host" "${pfx}kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o jsonpath='{range .items[*]}{.metadata.name}{\" \"}{range .status.addresses[*]}{.address}{\" \"}{end}{\"\\n\"}{end}'" 2>/dev/null) || true
-    if [ -n "$nodes_info" ]; then
-        node_name=$(echo "$nodes_info" | while read -r name addrs; do
-            for addr in $addrs; do
-                if [ "$addr" = "$stripped" ] || [ "$addr" = "$target_host" ]; then
-                    echo "$name"
-                    return 0
-                fi
-            done
-        done)
-    fi
-
-    # Fallback: SSH to the target node and get its hostname, then match against node names
-    if [ -z "$node_name" ]; then
-        _parse_node_address "$target_host"
-        local target_user="$_NODE_USER" target_actual_host="$_NODE_HOST"
-        # For bare IPs passed as target_host, re-parse with the original node address
-        # Find the matching node from _DEPLOY_ALL_NODES
-        local _all_cnt _ni
-        _all_cnt=$(_csv_count "$_DEPLOY_ALL_NODES")
-        _ni=0
-        while [ "$_ni" -lt "$_all_cnt" ]; do
-            local _node_entry
-            _node_entry=$(_csv_get "$_DEPLOY_ALL_NODES" "$_ni")
-            local _check_host="${_node_entry#*@}"
-            if [ "$_check_host" = "$target_host" ] || [ "$_check_host" = "$stripped" ]; then
-                _parse_node_address "$_node_entry"
-                target_user="$_NODE_USER"
-                target_actual_host="$_NODE_HOST"
-                break
-            fi
-            _ni=$((_ni + 1))
-        done
-        local remote_hostname
-        remote_hostname=$(_deploy_ssh "$target_user" "$target_actual_host" "hostname" 2>/dev/null | tr -d '[:space:]') || true
-        if [ -n "$remote_hostname" ] && [ -n "$nodes_info" ]; then
-            node_name=$(echo "$nodes_info" | while read -r name _addrs; do
-                if [ "$name" = "$remote_hostname" ]; then
-                    echo "$name"
-                    return 0
-                fi
-            done)
+    local nodes_info="" attempt=0
+    while [ "$attempt" -lt 3 ]; do
+        if nodes_info=$(_deploy_ssh "$user" "$host" "${pfx}kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o jsonpath='{range .items[*]}{.metadata.name}{\" \"}{range .status.addresses[*]}{.address}{\" \"}{end}{\"\\n\"}{end}'" 2>/dev/null) && [ -n "$nodes_info" ]; then
+            break
         fi
+        nodes_info=""
+        attempt=$((attempt + 1))
+        sleep 3
+    done
+    if [ -z "$nodes_info" ]; then
+        log_error "  Could not list the cluster nodes from ${host}"
+        return 2
     fi
 
-    echo "$node_name"
+    local matches
+    matches=$(printf '%s\n' "$nodes_info" | awk -v a="$stripped" -v b="$target_host" '
+        { for (i = 2; i <= NF; i++) if ($i == a || $i == b) { print $1; break } }')
+    if [ "$(printf '%s\n' "$matches" | grep -c .)" -eq 1 ]; then
+        echo "$matches"
+        return 0
+    fi
+
+    # By hostname, using the SSH address of the node as given on the command line
+    local target_user target_actual_host _node_entry _i=0 _cnt
+    _parse_node_address "$target_host"
+    target_user="$_NODE_USER" target_actual_host="$_NODE_HOST"
+    _cnt=$(_csv_count "$_DEPLOY_ALL_NODES")
+    while [ "$_i" -lt "$_cnt" ]; do
+        _node_entry=$(_csv_get "$_DEPLOY_ALL_NODES" "$_i")
+        case "${_node_entry#*@}" in
+            "$target_host"|"$stripped")
+                _parse_node_address "$_node_entry"
+                target_user="$_NODE_USER" target_actual_host="$_NODE_HOST"
+                break
+                ;;
+        esac
+        _i=$((_i + 1))
+    done
+    local remote_hostname
+    remote_hostname=$(_deploy_ssh "$target_user" "$target_actual_host" "hostname" 2>/dev/null | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]') || remote_hostname=""
+    if [ -n "$remote_hostname" ] && printf '%s\n' "$nodes_info" | awk '{print $1}' | grep -qxF "$remote_hostname"; then
+        echo "$remote_hostname"
+        return 0
+    fi
+    return 1
 }
 
 # --- Remote temp directory ---
