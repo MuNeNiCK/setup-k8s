@@ -105,6 +105,19 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Fixed
 
+- `init` and `join` with `--dry-run` installed base packages, refreshed the
+  package indexes, and prepared the host before printing "no changes made".
+- Remote commands (deploy, upgrade, backup, restore, renew): a command that
+  finished at the last poll was reported as a timeout, a remote process that
+  died without an exit status was only noticed at the timeout, and the exit
+  status file could be read before it was written.
+- `deploy` reported success when the API server or etcd was unhealthy after
+  the joins, and could fail because a node object appeared a few seconds
+  after `kubeadm join` returned. It now requires the API server, etcd, and
+  every node to be registered (waiting up to 2 minutes for registration);
+  NotReady nodes and Pending CoreDNS before a CNI plugin is installed are
+  reported, not failures. `--resume` no longer joins workers again that
+  already joined.
 - Nodes set up by earlier setup-k8s versions can be upgraded and cleaned up:
   versionlock entries on RHEL-family distributions (which blocked upgrades
   and new installs) are removed, Arch AUR `*-bin` packages are replaced by

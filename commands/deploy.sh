@@ -256,6 +256,12 @@ deploy_cluster() {
             _parse_node_address "$node"
             local w_host="$_NODE_HOST"
 
+            if _state_is_step_done "join_worker_${w_host}"; then
+                log_info "  [${w_host}] Worker join... (skipped, resumed)"
+                _i=$((_i + 1))
+                continue
+            fi
+
             # Run in background subshell (HA settings apply to control planes only)
             (
                 _deploy_remote_run "--ha-vip --ha-interface" "$node" "join worker" \
@@ -272,20 +278,19 @@ deploy_cluster() {
             _pi=$((_pi + 1))
             local _w_host
             _w_host=$(echo "$worker_hosts" | tr ' ' '\n' | sed -n "${_pi}p")
-            if ! wait "$_pid"; then
+            if wait "$_pid"; then
+                _state_mark_step "join_worker_${_w_host}" "done"
+            else
                 log_error "Worker join failed for ${_w_host}"
                 worker_failed=true
             fi
         done
     fi
 
-    # --- Post-deploy health check ---
+    # --- Verify the cluster (API server, etcd, every node registered) ---
     log_info ""
-    _health_check_cluster "$cp1_user" "$cp1_host" --post || true
-
-    # Verify expected node count (fatal if mismatch)
-    local node_count_ok=true
-    _verify_node_count "$cp1_user" "$cp1_host" "$all_count" || node_count_ok=false
+    local cluster_ok=true
+    _verify_deployed_cluster "$cp1_user" "$cp1_host" "$all_count" || cluster_ok=false
 
     # --- Step 7: Clean up remote bundle directories ---
     _step=$((_step + 1))
@@ -317,15 +322,15 @@ deploy_cluster() {
     log_info "  2. Verify: kubectl get nodes"
     log_info "=========================="
 
-    if [ "$worker_failed" = true ] || [ "$node_count_ok" = false ]; then
+    if [ "$worker_failed" = true ] || [ "$cluster_ok" = false ]; then
         _state_set "status" "failed"
         if [ "$worker_failed" = true ]; then
             _audit_log "deploy" "failed" "some worker joins failed"
             log_error "Some worker joins failed. Check logs above."
         fi
-        if [ "$node_count_ok" = false ]; then
-            _audit_log "deploy" "failed" "node count mismatch"
-            log_error "Not all nodes registered. Check logs above."
+        if [ "$cluster_ok" = false ]; then
+            _audit_log "deploy" "failed" "cluster verification failed"
+            log_error "The cluster did not pass verification (API server, etcd, or node registration). Check logs above."
         fi
         return 1
     fi

@@ -119,7 +119,12 @@ _create_remote_tmpdir() {
 
 # --- Remote Execution ---
 
-# Execute a command on a remote node via nohup + polling
+# Execute a command on a remote node via nohup + polling.
+# The command runs detached (it survives a dropped SSH connection) and writes
+# its exit status atomically (temp file + mv) when it ends. Each poll reports
+# "done", "running" (with the last log line), or "gone" when the process
+# ended without an exit status (killed, OOM, reboot), which fails at once
+# instead of waiting for the timeout.
 # Usage: _deploy_exec_remote <user> <host> <description> <command>
 _deploy_exec_remote() {
     local user="$1" host="$2" desc="$3" cmd="$4"
@@ -134,6 +139,7 @@ _deploy_exec_remote() {
     local remote_script="${remote_dir}/run.sh"
     local log_file="${remote_dir}/run.log"
     local exit_file="${remote_dir}/run.exit"
+    local pid_file="${remote_dir}/run.pid"
 
     # Write command to remote script via stdin
     if ! printf '%s\n' "$cmd" | _deploy_ssh "$user" "$host" "cat > '$remote_script' && chmod 700 '$remote_script'"; then
@@ -142,34 +148,48 @@ _deploy_exec_remote() {
         return 1
     fi
 
-    # Launch via nohup (nohup wraps the entire command to ensure exit-code file is written)
-    if ! _deploy_ssh "$user" "$host" "nohup sh -c 'sh \"$remote_script\" > \"$log_file\" 2>&1; echo \$? > \"$exit_file\"' </dev/null >/dev/null 2>&1 &"; then
+    # Launch detached; the exit status appears only when complete
+    if ! _deploy_ssh "$user" "$host" "nohup sh -c 'sh \"$remote_script\" > \"$log_file\" 2>&1; echo \$? > \"$exit_file.tmp\" && mv \"$exit_file.tmp\" \"$exit_file\"' </dev/null >/dev/null 2>&1 & echo \$! > '$pid_file'"; then
         log_error "[$host] Failed to launch remote command"
         _deploy_ssh "$user" "$host" "rm -rf '$remote_dir'" >/dev/null 2>&1 || true
         return 1
     fi
 
     # Poll for completion
-    local elapsed=0 _last_poll_err=""
+    local poll="if [ -f '$exit_file' ]; then echo done; elif kill -0 \"\$(cat '$pid_file' 2>/dev/null)\" 2>/dev/null; then echo running; tail -n 1 '$log_file' 2>/dev/null; else echo gone; fi"
+    local elapsed=0 state="" reply="" _last_poll_err=""
     while [ "$elapsed" -lt "$DEPLOY_REMOTE_TIMEOUT" ]; do
         sleep "$DEPLOY_POLL_INTERVAL"
         elapsed=$((elapsed + DEPLOY_POLL_INTERVAL))
-
-        if _last_poll_err=$(_deploy_ssh "$user" "$host" "test -f '$exit_file'" 2>&1 >/dev/null); then
-            break
+        if ! reply=$(_deploy_ssh "$user" "$host" "$poll" 2>&1); then
+            # Transient SSH failure: keep waiting
+            _last_poll_err="$reply"
+            continue
         fi
-
-        # Show progress
-        local progress_line
-        progress_line=$(_deploy_ssh "$user" "$host" "tail -1 '$log_file'" 2>/dev/null || true)
-        if [ -n "$progress_line" ]; then
-            log_info "[$host] [${elapsed}s] $progress_line"
-        fi
+        state=$(printf '%s\n' "$reply" | head -n 1)
+        case "$state" in
+            done) break ;;
+            gone)
+                # The status may have been written between the two tests
+                if _deploy_ssh "$user" "$host" "test -f '$exit_file'" >/dev/null 2>&1; then
+                    state="done"
+                fi
+                break
+                ;;
+            running)
+                reply=$(printf '%s\n' "$reply" | sed -n '2p')
+                [ -n "$reply" ] && log_info "[$host] [${elapsed}s] $reply"
+                ;;
+        esac
     done
 
-    if [ "$elapsed" -ge "$DEPLOY_REMOTE_TIMEOUT" ]; then
-        log_error "[$host] Timeout after ${DEPLOY_REMOTE_TIMEOUT}s: $desc"
-        [ -n "$_last_poll_err" ] && log_error "[$host] Last poll error: $_last_poll_err"
+    if [ "$state" != "done" ]; then
+        if [ "$state" = gone ]; then
+            log_error "[$host] The remote command ended without an exit status (killed or the node restarted): $desc"
+        else
+            log_error "[$host] Timeout after ${DEPLOY_REMOTE_TIMEOUT}s: $desc"
+            [ -n "$_last_poll_err" ] && log_error "[$host] Last poll error: $_last_poll_err"
+        fi
         log_error "[$host] Remote log:"
         _deploy_ssh "$user" "$host" "cat '$log_file'" || true
         _deploy_ssh "$user" "$host" "rm -rf '$remote_dir'" >/dev/null 2>&1 || true
@@ -178,8 +198,7 @@ _deploy_exec_remote() {
 
     # Retrieve exit code
     local remote_exit
-    remote_exit=$(_deploy_ssh "$user" "$host" "cat '$exit_file'" || echo "1")
-    remote_exit=$(echo "$remote_exit" | tr -d '[:space:]')
+    remote_exit=$(_deploy_ssh "$user" "$host" "cat '$exit_file'" 2>/dev/null | tr -d '[:space:]') || remote_exit=""
 
     if ! echo "$remote_exit" | grep -qE '^[0-9]+$'; then
         log_error "[$host] Invalid exit code from remote: '$remote_exit'"

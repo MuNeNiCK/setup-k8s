@@ -61,26 +61,36 @@ _health_check_nodes_ready() {
 }
 
 # Verify that the expected number of nodes are registered in the cluster.
-# Usage: _verify_node_count <user> <host> <expected_count>
+# Node objects can appear a few seconds after "kubeadm join" returns, so the
+# count is polled for up to <wait_seconds> (default 120).
+# Usage: _verify_node_count <user> <host> <expected_count> [wait_seconds]
 _verify_node_count() {
-    local user="$1" host="$2" expected="$3"
+    local user="$1" host="$2" expected="$3" wait="${4:-120}"
     local pfx; pfx=$(_sudo_prefix "$user")
+    local nodes_output actual=0 elapsed=0
 
-    local nodes_output
-    nodes_output=$(_deploy_ssh "$user" "$host" "${pfx}kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes --no-headers" 2>/dev/null) || true
+    while :; do
+        nodes_output=$(_deploy_ssh "$user" "$host" "${pfx}kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes --no-headers" 2>/dev/null) || nodes_output=""
+        if [ -n "$nodes_output" ]; then
+            actual=$(printf '%s\n' "$nodes_output" | grep -c .)
+            if [ "$actual" -eq "$expected" ]; then
+                log_info "Node count verified: ${actual}/${expected}"
+                return 0
+            fi
+            if [ "$actual" -gt "$expected" ]; then
+                break
+            fi
+        fi
+        [ "$elapsed" -ge "$wait" ] && break
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
     if [ -z "$nodes_output" ]; then
         log_error "Could not retrieve node list for node count verification"
-        return 1
-    fi
-
-    local actual
-    actual=$(echo "$nodes_output" | wc -l | tr -d '[:space:]')
-    if [ "$actual" -ne "$expected" ]; then
+    else
         log_error "Node count mismatch: expected ${expected}, got ${actual}"
-        return 1
     fi
-    log_info "Node count verified: ${actual}/${expected}"
-    return 0
+    return 1
 }
 
 # Check etcd cluster health and quorum.
@@ -130,6 +140,35 @@ _health_check_core_pods() {
     total=$(echo "$pods_output" | wc -l | tr -d '[:space:]')
     log_info "  All ${total} kube-system pod(s) are Running/Completed"
     return 0
+}
+
+# Verify a newly deployed cluster. The API server and etcd must be healthy
+# and every node registered. Node readiness and the kube-system pods are only
+# reported: nodes stay NotReady and CoreDNS Pending until a CNI plugin is
+# installed, which setup-k8s does not do.
+# Usage: _verify_deployed_cluster <user> <host> <expected_nodes>
+_verify_deployed_cluster() {
+    local user="$1" host="$2" expected="$3" ok=0 tries=0
+    log_info "Verifying the cluster..."
+    # The API server may restart briefly while control planes join
+    until _health_check_api_server "$user" "$host"; do
+        tries=$((tries + 1))
+        if [ "$tries" -ge 12 ]; then
+            log_error "  The API server is not ready"
+            ok=1
+            break
+        fi
+        sleep 5
+    done
+    if ! _health_check_etcd "$user" "$host"; then
+        log_error "  etcd is not healthy"
+        ok=1
+    fi
+    _verify_node_count "$user" "$host" "$expected" || ok=1
+    if ! _health_check_nodes_ready "$user" "$host" || ! _health_check_core_pods "$user" "$host"; then
+        log_info "  NotReady nodes and Pending CoreDNS pods are expected until a CNI plugin is installed"
+    fi
+    return "$ok"
 }
 
 # Run all health checks (pre or post operation).
