@@ -12,19 +12,26 @@ _download_binary() {
     chmod +x "$dest"
 }
 
-# Download a file and verify it against a published sha256 checksum file
-# (first field of its first line). Fails, and removes the download, when the
-# checksum cannot be fetched or does not match.
-# Usage: _download_with_checksum <url> <dest> <checksum_url>
+# Download a file and verify it against a published sha256 checksum file.
+# Without <filename>, the first field of the first line is the checksum (one
+# file per checksum file). With <filename>, the line naming that file is used
+# (checksum lists such as checksums.txt or *.sha256sum with many entries).
+# Fails, and removes the download, when the checksum cannot be fetched or
+# does not match.
+# Usage: _download_with_checksum <url> <dest> <checksum_url> [filename]
 _download_with_checksum() {
-    local url="$1" dest="$2" checksum_url="$3" expected actual
+    local url="$1" dest="$2" checksum_url="$3" filename="${4:-}" sums expected actual
     _download_binary "$url" "$dest" || return 1
-    if ! expected=$(curl -fsSL --retry 3 --retry-delay 2 "$checksum_url"); then
+    if ! sums=$(curl -fsSL --retry 3 --retry-delay 2 "$checksum_url"); then
         log_error "Failed to download checksum: $checksum_url"
         rm -f "$dest"
         return 1
     fi
-    expected=$(printf '%s\n' "$expected" | awk 'NR == 1 {print $1}')
+    if [ -n "$filename" ]; then
+        expected=$(printf '%s\n' "$sums" | awk -v f="$filename" '$2 == f || $2 == "*"f {print $1; exit}')
+    else
+        expected=$(printf '%s\n' "$sums" | awk 'NR == 1 {print $1}')
+    fi
     actual=$(sha256sum "$dest" | awk '{print $1}')
     if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
         log_error "Checksum mismatch for $(basename "$dest")"

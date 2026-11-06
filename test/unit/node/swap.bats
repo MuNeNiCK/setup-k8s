@@ -40,18 +40,18 @@ _case_validate_swap_enabled() {
         validate_swap_enabled
         _assert_eq "swap enabled 1.32 passes" "true" "$SWAP_ENABLED"
 
-        # swap enabled with K8s 1.28 should pass
+        # swap enabled with K8s 1.30 (NodeSwap on by default) should pass
         SWAP_ENABLED=true
-        K8S_VERSION="1.28"
+        K8S_VERSION="1.30"
         validate_swap_enabled
-        _assert_eq "swap enabled 1.28 passes" "true" "$SWAP_ENABLED"
+        _assert_eq "swap enabled 1.30 passes" "true" "$SWAP_ENABLED"
 
-        # swap enabled with K8s 1.27 should fail
+        # swap enabled with K8s 1.29 (NodeSwap off by default) should fail
         SWAP_ENABLED=true
-        K8S_VERSION="1.27"
+        K8S_VERSION="1.29"
         local exit_code=0
         (validate_swap_enabled) >/dev/null 2>&1 || exit_code=$?
-        _assert_ne "swap enabled 1.27 rejected" "0" "$exit_code"
+        _assert_ne "swap enabled 1.29 rejected" "0" "$exit_code"
 
         # swap disabled should always pass regardless of version
         SWAP_ENABLED=false

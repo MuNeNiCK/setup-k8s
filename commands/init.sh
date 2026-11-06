@@ -13,10 +13,16 @@ cluster (join). Must be run as root.
 
 Options (init and join):
   --cri RUNTIME             Container runtime: containerd or crio (default: containerd)
-  --proxy-mode MODE         kube-proxy mode: iptables, ipvs, or nftables (default: iptables)
-  --kubernetes-version VER  Kubernetes minor version, e.g. 1.37 (default: latest stable)
+  --proxy-mode MODE         kube-proxy mode: auto, iptables, ipvs, or nftables (default: auto =
+                            nftables on Kubernetes 1.33+ with kernel 5.13+, otherwise iptables)
+  --kubernetes-version VER  Kubernetes version: MAJOR.MINOR (latest patch) or MAJOR.MINOR.PATCH
+                            (pinned), e.g. 1.37 or 1.37.2 (default: latest stable)
+  --prerelease              Install the next release from the prerelease channels
+                            (pkgs.k8s.io / isv:cri-o prerelease; default version: latest)
+  --image-repository REPO   Pull control-plane images from REPO instead of registry.k8s.io
+  --kubeadm-patches DIR     Apply kubeadm patches from DIR (kubeadm --patches) on init and join
   --kubelet-node-ip IP      Set the kubelet node IP
-  --swap-enabled            Keep swap enabled (NodeSwap, LimitedSwap)
+  --swap-enabled            Keep swap enabled (NodeSwap, LimitedSwap; Kubernetes 1.30+)
   --distro FAMILY           Override distro family detection (debian, rhel, suse, arch, alpine, generic)
   --enable-completion BOOL  Set up shell completion (default: true)
   --completion-shells LIST  Shells to configure: auto, bash, zsh, fish, or a comma-separated list
@@ -60,13 +66,37 @@ parse_setup_args() {
                 ;;
             --kubernetes-version)
                 _require_value $# "$1" "${2:-}"
-                # Strict format validation: must be MAJOR.MINOR (e.g., 1.29, 1.32)
-                if ! echo "$2" | grep -qE '^[0-9]+\.[0-9]+$'; then
-                    log_error "--kubernetes-version must be in MAJOR.MINOR format (e.g., 1.29, 1.32), got '$2'"
+                # MAJOR.MINOR (latest patch) or MAJOR.MINOR.PATCH (pinned)
+                if ! echo "$2" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+                    log_error "--kubernetes-version must be MAJOR.MINOR or MAJOR.MINOR.PATCH (e.g., 1.37 or 1.37.2), got '$2'"
                     exit 1
                 fi
-                # shellcheck disable=SC2034 # used by setup-k8s.sh
-                K8S_VERSION="$2"
+                K8S_VERSION=$(_k8s_minor_version "$2")
+                # shellcheck disable=SC2034 # used by lib/components/kubernetes.sh
+                case "$2" in
+                    *.*.*) K8S_PATCH_VERSION="$2" ;;
+                esac
+                shift 2
+                ;;
+            --prerelease)
+                # shellcheck disable=SC2034 # used by lib/components and lib/core/k8s_version.sh
+                K8S_PRERELEASE=true
+                shift
+                ;;
+            --image-repository)
+                _require_value $# "$1" "${2:-}"
+                # shellcheck disable=SC2034 # used by lib/node/kubeadm.sh
+                KUBEADM_IMAGE_REPOSITORY="$2"
+                shift 2
+                ;;
+            --kubeadm-patches)
+                _require_value $# "$1" "${2:-}"
+                if [ ! -d "$2" ]; then
+                    log_error "--kubeadm-patches directory not found: $2"
+                    exit 1
+                fi
+                # shellcheck disable=SC2034 # used by lib/node/kubeadm.sh
+                KUBEADM_PATCHES_DIR=$(cd "$2" && pwd)
                 shift 2
                 ;;
             --join-token)
@@ -218,34 +248,18 @@ initialize_cluster() {
     _configure_kubelet_node_ip
 
     # Run kubeadm init, capturing exit code for rollback
-    local init_exit=0
-    if [ "$PROXY_MODE" != "iptables" ] || [ -n "$KUBEADM_POD_CIDR" ] || \
-       [ -n "$KUBEADM_SERVICE_CIDR" ] || [ -n "$KUBEADM_API_ADDR" ] || \
-       [ -n "$KUBEADM_CP_ENDPOINT" ] || [ "$SWAP_ENABLED" = true ] || \
-       [ -n "${API_SERVER_EXTRA_SANS:-}" ] || [ -n "${KUBEADM_CONFIG_PATCH:-}" ]; then
-        local CONFIG_FILE
-        if ! CONFIG_FILE=$(generate_kubeadm_config); then
-            log_error "Failed to generate kubeadm configuration"
-            if [ "$HA_ENABLED" = true ]; then
-                _rollback_vip
-            fi
-            return 1
+    local init_exit=0 CONFIG_FILE
+    if ! CONFIG_FILE=$(generate_kubeadm_config); then
+        log_error "Failed to generate kubeadm configuration"
+        if [ "$HA_ENABLED" = true ]; then
+            _rollback_vip
         fi
-        log_info "Using kubeadm configuration file: $CONFIG_FILE"
-        # shellcheck disable=SC2046 # intentional word splitting
-        kubeadm init --config "$CONFIG_FILE" $(_kubeadm_preflight_ignore_args) || init_exit=$?
-        rm -f "$CONFIG_FILE"
-    else
-        if [ "$CRI" != "containerd" ]; then
-            local cri_socket
-            cri_socket=$(get_cri_socket)
-            # shellcheck disable=SC2046 # intentional word splitting
-            kubeadm init --cri-socket "$cri_socket" $(_kubeadm_preflight_ignore_args) || init_exit=$?
-        else
-            # shellcheck disable=SC2046 # intentional word splitting
-            kubeadm init $(_kubeadm_preflight_ignore_args) || init_exit=$?
-        fi
+        return 1
     fi
+    log_info "Using kubeadm configuration file: $CONFIG_FILE"
+    # shellcheck disable=SC2046 # intentional word splitting
+    kubeadm init --config "$CONFIG_FILE" $(_kubeadm_preflight_ignore_args) || init_exit=$?
+    rm -f "$CONFIG_FILE"
 
     if [ "$init_exit" -ne 0 ]; then
         log_error "kubeadm init failed (exit code: $init_exit)"
@@ -348,6 +362,7 @@ _run_setup() {
     log_info "Installing dependencies..."
     install_node_dependencies
     determine_k8s_version
+    resolve_proxy_mode
     validate_proxy_mode
     validate_swap_enabled
     validate_ha_args
@@ -369,6 +384,7 @@ _run_setup() {
         disable_zram_swap
     fi
 
+    install_proxy_mode_packages
     enable_kernel_modules
     configure_network_settings
 
@@ -484,7 +500,7 @@ validate_completion_options() {
 # Validate proxy mode selection
 validate_proxy_mode() {
     if [ "$PROXY_MODE" != "iptables" ] && [ "$PROXY_MODE" != "ipvs" ] && [ "$PROXY_MODE" != "nftables" ]; then
-        log_error "Proxy mode must be 'iptables', 'ipvs', or 'nftables'"
+        log_error "Proxy mode must be 'auto', 'iptables', 'ipvs', or 'nftables'"
         exit 1
     fi
 

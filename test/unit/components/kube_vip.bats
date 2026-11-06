@@ -79,7 +79,7 @@ _case_generate_kube_vip_manifest() {
         load_modules
 
         local manifest
-        manifest=$(_generate_kube_vip_manifest "10.0.0.100" "eth0" "ghcr.io/kube-vip/kube-vip:v0.8.9" "/etc/kubernetes/super-admin.conf")
+        manifest=$(_generate_kube_vip_manifest "10.0.0.100" "eth0" "ghcr.io/kube-vip/kube-vip:v1.3.1" "/etc/kubernetes/super-admin.conf")
 
         local has_vip="false"
         if echo "$manifest" | grep -q 'value: "10.0.0.100"'; then has_vip="true"; fi
@@ -94,7 +94,7 @@ _case_generate_kube_vip_manifest() {
         _assert_eq "manifest contains kubeconfig path" "true" "$has_kubeconfig"
 
         local has_image="false"
-        if echo "$manifest" | grep -q 'image: ghcr.io/kube-vip/kube-vip:v0.8.9'; then has_image="true"; fi
+        if echo "$manifest" | grep -q 'image: ghcr.io/kube-vip/kube-vip:v1.3.1'; then has_image="true"; fi
         _assert_eq "manifest contains image" "true" "$has_image"
     )
 }
@@ -164,21 +164,24 @@ _case_generate_kube_vip_manifest_ipv6() {
         load_modules
 
         local manifest
-        manifest=$(_generate_kube_vip_manifest "fd00::100" "eth0" "ghcr.io/kube-vip/kube-vip:v0.8.9" "/etc/kubernetes/super-admin.conf")
+        manifest=$(_generate_kube_vip_manifest "fd00::100" "eth0" "ghcr.io/kube-vip/kube-vip:v1.3.1" "/etc/kubernetes/super-admin.conf")
 
         local has_cidr_128="false"
-        if echo "$manifest" | grep -q 'value: "128"'; then has_cidr_128="true"; fi
-        _assert_eq "IPv6 manifest has vip_cidr 128" "true" "$has_cidr_128"
+        if echo "$manifest" | grep -A1 -- '- name: vip_subnet' | grep -q 'value: "128"'; then has_cidr_128="true"; fi
+        _assert_eq "IPv6 manifest has vip_subnet 128" "true" "$has_cidr_128"
 
         local has_vip="false"
         if echo "$manifest" | grep -q 'value: "fd00::100"'; then has_vip="true"; fi
         _assert_eq "IPv6 manifest contains VIP" "true" "$has_vip"
 
         # IPv4 should still get cidr 32
-        manifest=$(_generate_kube_vip_manifest "10.0.0.100" "eth0" "ghcr.io/kube-vip/kube-vip:v0.8.9" "/etc/kubernetes/super-admin.conf")
+        manifest=$(_generate_kube_vip_manifest "10.0.0.100" "eth0" "ghcr.io/kube-vip/kube-vip:v1.3.1" "/etc/kubernetes/super-admin.conf")
         local has_cidr_32="false"
-        if echo "$manifest" | grep -q 'value: "32"'; then has_cidr_32="true"; fi
-        _assert_eq "IPv4 manifest has vip_cidr 32" "true" "$has_cidr_32"
+        if echo "$manifest" | grep -A1 -- '- name: vip_subnet' | grep -q 'value: "32"'; then has_cidr_32="true"; fi
+        _assert_eq "IPv4 manifest has vip_subnet 32" "true" "$has_cidr_32"
+
+        # kube-vip v1 reads the node name from vip_nodename
+        echo "$manifest" | grep -A3 -- '- name: vip_nodename' | grep -q 'fieldPath: spec.nodeName'
     )
 }
 

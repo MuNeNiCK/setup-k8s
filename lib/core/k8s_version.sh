@@ -12,20 +12,26 @@
 #   _k8s_minor_version <version>     Print MAJOR.MINOR
 
 # Minimum Kubernetes minor version per feature.
-#   swap                 NodeSwap with LimitedSwap (kubelet failSwapOn: false)
+#   swap                 NodeSwap with LimitedSwap enabled by default (kubelet failSwapOn: false)
 #   nftables             kube-proxy nftables mode (alpha)
 #   nftables-beta        kube-proxy nftables mode beta
+#   nftables-ga          kube-proxy nftables mode GA (used by --proxy-mode auto)
 #   super-admin-conf     kubeadm writes super-admin.conf (used by kube-vip during init)
 #   ipvs-deprecated      kube-proxy ipvs mode deprecated
 #   cgroupv2-required    kubelet fails on cgroups v1 by default
-#   containerd-v2-required  containerd 1.x is no longer supported
-_K8S_FEATURE_MINIMUMS="swap=1.28
+#   containerd-v2-required  kubelet no longer supports containerd 1.x
+#   selinux-mount        SELinuxMount GA: volumes relabeled with mount options
+#   user-namespaces      UserNamespacesSupport GA (Pods with hostUsers: false)
+_K8S_FEATURE_MINIMUMS="swap=1.30
 nftables=1.29
 nftables-beta=1.31
+nftables-ga=1.33
 super-admin-conf=1.29
 ipvs-deprecated=1.35
 cgroupv2-required=1.35
-containerd-v2-required=1.36"
+containerd-v2-required=1.38
+selinux-mount=1.37
+user-namespaces=1.36"
 
 # Fallback pause image tag when kubeadm cannot report it.
 _K8S_PAUSE_FALLBACK="3.10.2"
@@ -62,22 +68,31 @@ k8s_supports() {
     k8s_version_ge "$version" "$min"
 }
 
-# Print the pause image (registry.k8s.io/pause:<tag>) for the installed
-# kubeadm. PAUSE_IMAGE_VERSION overrides the tag.
+# Print the pause image for the installed kubeadm (honoring
+# --image-repository). PAUSE_IMAGE_VERSION overrides the tag.
 k8s_pause_image() {
     local tag="${PAUSE_IMAGE_VERSION:-}" kubeadm_version image
     if [ -z "$tag" ] && command -v kubeadm >/dev/null 2>&1; then
         kubeadm_version=$(kubeadm version -o short 2>/dev/null) || kubeadm_version=""
         if [ -n "$kubeadm_version" ]; then
-            image=$(kubeadm config images list --kubernetes-version "$kubeadm_version" 2>/dev/null | grep '/pause:' | head -n 1)
+            if [ -n "${KUBEADM_IMAGE_REPOSITORY:-}" ]; then
+                image=$(kubeadm config images list --kubernetes-version "$kubeadm_version" \
+                    --image-repository "$KUBEADM_IMAGE_REPOSITORY" 2>/dev/null | grep '/pause:' | head -n 1)
+            else
+                image=$(kubeadm config images list --kubernetes-version "$kubeadm_version" 2>/dev/null | grep '/pause:' | head -n 1)
+            fi
             tag="${image##*:}"
         fi
+    fi
+    if [ -n "${image:-}" ] && [ -z "${PAUSE_IMAGE_VERSION:-}" ]; then
+        echo "$image"
+        return 0
     fi
     if [ -z "$tag" ]; then
         tag="$_K8S_PAUSE_FALLBACK"
         log_warn "Could not determine the pause image from kubeadm; using pause:${tag}"
     fi
-    echo "registry.k8s.io/pause:${tag}"
+    echo "${KUBEADM_IMAGE_REPOSITORY:-registry.k8s.io}/pause:${tag}"
 }
 
 # Check if the system uses cgroups v2
@@ -96,17 +111,28 @@ determine_k8s_version() {
             log_info "Using the Kubernetes minor version provided by ${DISTRO_NAME:-the distribution}: ${K8S_VERSION}"
         fi
     fi
+    if [ "${K8S_PRERELEASE:-false}" = true ] && [ "${DISTRO_K8S_SOURCE:-}" = distro ]; then
+        log_error "--prerelease is not available when Kubernetes comes from ${DISTRO_NAME:-distribution} packages"
+        log_error "  Use --distro generic to install prerelease binaries"
+        return 1
+    fi
+    if [ -n "${K8S_PATCH_VERSION:-}" ] && [ "${K8S_PRERELEASE:-false}" = true ]; then
+        log_error "--prerelease selects the latest prerelease of a minor version; use --kubernetes-version MAJOR.MINOR"
+        return 1
+    fi
     if [ -z "$K8S_VERSION" ]; then
-        log_info "Determining latest stable Kubernetes minor version..."
+        local marker=stable
+        [ "${K8S_PRERELEASE:-false}" = true ] && marker=latest
+        log_info "Determining the latest ${marker} Kubernetes minor version..."
         local STABLE_VER
-        if ! STABLE_VER=$(curl -fsSL --retry 3 --retry-delay 2 https://dl.k8s.io/release/stable.txt); then
+        if ! STABLE_VER=$(curl -fsSL --retry 3 --retry-delay 2 "https://dl.k8s.io/release/${marker}.txt"); then
             log_error "Failed to fetch stable Kubernetes version from dl.k8s.io"
             log_error "  Specify explicitly with --kubernetes-version (e.g. --kubernetes-version 1.37)"
             return 1
         fi
         if echo "$STABLE_VER" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+'; then
             K8S_VERSION=$(_k8s_minor_version "$STABLE_VER")
-            log_info "Using detected stable Kubernetes minor: ${K8S_VERSION}"
+            log_info "Using detected ${marker} Kubernetes minor: ${K8S_VERSION}"
         else
             log_error "Unexpected response from dl.k8s.io: $STABLE_VER"
             log_error "  Specify explicitly with --kubernetes-version (e.g. --kubernetes-version 1.37)"

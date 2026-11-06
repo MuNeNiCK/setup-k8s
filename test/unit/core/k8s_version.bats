@@ -20,13 +20,17 @@ setup() {
 }
 
 @test "k8s_supports uses the feature table" {
-    K8S_VERSION=1.28
+    K8S_VERSION=1.30
     k8s_supports swap
-    run ! k8s_supports nftables
+    run ! k8s_supports swap 1.29
+    run ! k8s_supports nftables 1.28
     K8S_VERSION=1.37
     k8s_supports nftables
+    k8s_supports nftables-ga
     k8s_supports ipvs-deprecated
-    k8s_supports containerd-v2-required
+    k8s_supports selinux-mount
+    run ! k8s_supports containerd-v2-required
+    k8s_supports containerd-v2-required 1.38
     k8s_supports cgroupv2-required 1.35
     run ! k8s_supports cgroupv2-required 1.34
 }

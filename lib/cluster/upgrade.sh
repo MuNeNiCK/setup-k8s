@@ -234,6 +234,9 @@ _upgrade_single_node() {
     if [ "$is_first_cp" = true ]; then
         set -- "$@" --first-control-plane
     fi
+    if [ -n "${KUBEADM_PATCHES_DIR:-}" ]; then
+        set -- "$@" --kubeadm-patches "$(remote_node_dir "$node")/kubeadm-patches"
+    fi
     local upgrade_rc=0
     if [ -n "$_hook_data" ]; then
         remote_run --env "UPGRADE_ADMIN_CONF=${_hook_data}" --forward "$UPGRADE_PASSTHROUGH_ARGS" \
@@ -339,6 +342,11 @@ upgrade_cluster() {
     # --- Step 2: Transfer setup-k8s.sh to all nodes ---
     _step=$((_step + 1))
     if ! remote_session_open "upgrade" "$all_nodes"; then
+        return 1
+    fi
+    if [ -n "${KUBEADM_PATCHES_DIR:-}" ] && ! remote_send_dir "$KUBEADM_PATCHES_DIR" kubeadm-patches; then
+        log_error "Failed to transfer kubeadm patches"
+        remote_session_close
         return 1
     fi
 

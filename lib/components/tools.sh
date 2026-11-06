@@ -1,25 +1,41 @@
 #!/bin/sh
 
-# Helm package manager installation and setup
+# Helm and Kustomize, installed as pinned release binaries with sha256
+# verification (HELM_VERSION, KUSTOMIZE_VERSION).
+
+# Download a release tarball, verify it, and install one binary from it to
+# /usr/local/bin.
+# Usage: _install_tool_from_tarball <name> <url> <checksum_url> <checksum_filename> <path_in_tarball>
+_install_tool_from_tarball() {
+    local name="$1" url="$2" checksum_url="$3" checksum_name="$4" member="$5" tmp dir
+    tmp=$(mktemp /tmp/"${name}"-XXXXXX)
+    dir=$(mktemp -d /tmp/"${name}"-extract-XXXXXX)
+    if ! _download_with_checksum "$url" "$tmp" "$checksum_url" "$checksum_name"; then
+        rm -rf "$tmp" "$dir"
+        return 1
+    fi
+    if ! tar -xzf "$tmp" -C "$dir" "$member"; then
+        log_error "Failed to extract ${member} from ${url}"
+        rm -rf "$tmp" "$dir"
+        return 1
+    fi
+    if ! install -m 0755 "$dir/$member" "/usr/local/bin/${name}"; then
+        log_error "Failed to install /usr/local/bin/${name}"
+        rm -rf "$tmp" "$dir"
+        return 1
+    fi
+    rm -rf "$tmp" "$dir"
+    log_info "${name} installed to /usr/local/bin/${name}"
+}
 
 # Install Helm
 install_helm() {
-    log_info "Installing Helm package manager..."
-
-    # Download the official installer to a temporary file for inspection
-    local installer
-    installer=$(mktemp /tmp/get-helm-3-XXXXXX)
-    if ! curl -fsSL --retry 3 --retry-delay 2 https://raw.githubusercontent.com/helm/helm/v3.17.1/scripts/get-helm-3 -o "$installer"; then
-        log_error "Failed to download Helm installer"
-        rm -f "$installer"
-        return 1
-    fi
-
-    # Execute the installer (Helm's get-helm-3 script requires bash)
-    bash "$installer"
-    local rc=$?
-    rm -f "$installer"
-    return $rc
+    local arch file
+    arch=$(_detect_arch)
+    file="helm-v${HELM_VERSION}-linux-${arch}.tar.gz"
+    log_info "Installing Helm v${HELM_VERSION}..."
+    _install_tool_from_tarball helm "https://get.helm.sh/${file}" \
+        "https://get.helm.sh/${file}.sha256sum" "$file" "linux-${arch}/helm"
 }
 
 # Main function to setup Helm
@@ -69,26 +85,14 @@ cleanup_helm() {
 # Kustomize
 # ============================================================
 
-# Kustomize installation and setup
-
 # Install Kustomize
 install_kustomize() {
-    log_info "Installing Kustomize..."
-
-    # Download the official installer to a temporary file for inspection.
-    local installer
-    installer=$(mktemp /tmp/install-kustomize-XXXXXX)
-    if ! curl -fsSL --retry 3 --retry-delay 2 https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh -o "$installer"; then
-        log_error "Failed to download Kustomize installer"
-        rm -f "$installer"
-        return 1
-    fi
-
-    # Execute the installer (Kustomize's installer requires bash).
-    bash "$installer" /usr/local/bin
-    local rc=$?
-    rm -f "$installer"
-    return $rc
+    local arch file base
+    arch=$(_detect_arch)
+    file="kustomize_v${KUSTOMIZE_VERSION}_linux_${arch}.tar.gz"
+    base="https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}"
+    log_info "Installing Kustomize v${KUSTOMIZE_VERSION}..."
+    _install_tool_from_tarball kustomize "${base}/${file}" "${base}/checksums.txt" "$file" kustomize
 }
 
 # Main function to setup Kustomize

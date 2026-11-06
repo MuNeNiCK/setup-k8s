@@ -74,6 +74,36 @@ deploy_dry_run() {
     log_info "=== End of dry-run (no changes made) ==="
 }
 
+# Run a setup-k8s subcommand on a node with the forwarded deploy options
+# (minus <drop>) and the node's copy of the kubeadm patches.
+# Usage: _deploy_remote_run <drop> <node> <description> <subcommand> [args...]
+_deploy_remote_run() {
+    local drop="$1" node="$2" desc="$3"
+    shift 3
+    if [ -n "${KUBEADM_PATCHES_DIR:-}" ]; then
+        remote_run --forward "$DEPLOY_PASSTHROUGH_ARGS" --drop "$drop" "$node" "$desc" "$@" \
+            --kubeadm-patches "$(remote_node_dir "$node")/kubeadm-patches"
+    else
+        remote_run --forward "$DEPLOY_PASSTHROUGH_ARGS" --drop "$drop" "$node" "$desc" "$@"
+    fi
+}
+
+# kube-proxy runs in the cluster's mode on every node. When the mode was not
+# given (auto), forward the mode the first control plane selected so that
+# joining nodes are prepared for it, not for what their own kernel prefers.
+# Usage: _deploy_pin_proxy_mode <first_cp>
+_deploy_pin_proxy_mode() {
+    case "$DEPLOY_PASSTHROUGH_ARGS" in
+        *--proxy-mode*) return 0 ;;
+    esac
+    local mode
+    mode=$(remote_exec "$1" "kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system get configmap kube-proxy -o jsonpath='{.data.config\\.conf}'" 2>/dev/null \
+        | awk '/^mode:/ {gsub(/"/, "", $2); print $2}') || mode=""
+    [ -n "$mode" ] || mode=iptables   # empty mode is kube-proxy's iptables default
+    log_info "  Cluster kube-proxy mode: ${mode} (used for joining nodes)"
+    DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_pair "$DEPLOY_PASSTHROUGH_ARGS" --proxy-mode "$mode")
+}
+
 # Main deploy orchestration
 deploy_cluster() {
     local cp_count w_count
@@ -122,6 +152,11 @@ deploy_cluster() {
     if ! remote_session_open "deploy" "$_DEPLOY_ALL_NODES"; then
         return 1
     fi
+    if [ -n "${KUBEADM_PATCHES_DIR:-}" ] && ! remote_send_dir "$KUBEADM_PATCHES_DIR" kubeadm-patches; then
+        log_error "Failed to transfer kubeadm patches"
+        remote_session_close
+        return 1
+    fi
 
     # --- Step 3: Init first control-plane ---
     _step=$((_step + 1))
@@ -156,7 +191,7 @@ deploy_cluster() {
         local init_ha=""
         if [ "$cp_count" -gt 1 ]; then init_ha="--ha"; fi
         # shellcheck disable=SC2086 # init_ha is empty or a single flag
-        if ! remote_run --forward "$DEPLOY_PASSTHROUGH_ARGS" "$cp0" "kubeadm init" init $init_ha; then
+        if ! _deploy_remote_run "" "$cp0" "kubeadm init" init $init_ha; then
             log_error "First control-plane initialization failed. Aborting."
             if [ "${COLLECT_DIAGNOSTICS:-false}" = true ]; then
                 _collect_diagnostics "$cp1_user" "$cp1_host" "/tmp/setup-k8s-diag-init-$(date +%s)" || true
@@ -175,6 +210,7 @@ deploy_cluster() {
         log_error "Failed to extract join info. Aborting."
         return 1
     fi
+    _deploy_pin_proxy_mode "$cp0"
 
     # --- Step 5: Join additional control-planes (sequential) ---
     if [ "$cp_count" -gt 1 ]; then
@@ -192,7 +228,7 @@ deploy_cluster() {
                 continue
             fi
 
-            if ! remote_run --forward "$DEPLOY_PASSTHROUGH_ARGS" "$node" "join control-plane" \
+            if ! _deploy_remote_run "" "$node" "join control-plane" \
                 join --join-token "$_JOIN_TOKEN" --join-address "$_JOIN_ADDR" --discovery-token-hash "$_JOIN_HASH" \
                 --control-plane --certificate-key "$_CERT_KEY"; then
                 log_error "Control-plane join failed for ${_NODE_HOST}. Aborting."
@@ -222,7 +258,7 @@ deploy_cluster() {
 
             # Run in background subshell (HA settings apply to control planes only)
             (
-                remote_run --forward "$DEPLOY_PASSTHROUGH_ARGS" --drop "--ha-vip --ha-interface" "$node" "join worker" \
+                _deploy_remote_run "--ha-vip --ha-interface" "$node" "join worker" \
                     join --join-token "$_JOIN_TOKEN" --join-address "$_JOIN_ADDR" --discovery-token-hash "$_JOIN_HASH"
             ) &
             worker_pids="${worker_pids}${worker_pids:+ }$!"
@@ -315,16 +351,22 @@ show_deploy_help() {
     echo "  --ha-vip ADDRESS        VIP address for HA (required when >1 control-plane)"
     echo "  --ha-interface IFACE    Network interface for VIP (auto-detected on remote)"
     echo "  --cri RUNTIME           Container runtime (containerd or crio)"
-    echo "  --proxy-mode MODE       Kube-proxy mode (iptables, ipvs, or nftables)"
+    echo "  --proxy-mode MODE       Kube-proxy mode (auto, iptables, ipvs, or nftables; default: auto)"
     echo "  --distro FAMILY         Override distro family detection"
-    echo "  --swap-enabled          Keep swap enabled (K8s 1.28+)"
+    echo "  --swap-enabled          Keep swap enabled (Kubernetes 1.30+)"
     echo "  --enable-completion BOOL  Enable shell completion setup (default: true)"
     echo "  --install-helm BOOL     Install Helm package manager (default: false)"
     echo "  --install-kustomize BOOL  Install Kustomize (default: false)"
     echo "  --completion-shells LIST  Shells to configure (auto, bash, zsh, fish, or comma-separated)"
-    echo "  --kubernetes-version VER Kubernetes version (e.g., 1.32)"
+    echo "  --kubernetes-version VER Kubernetes version: MAJOR.MINOR or MAJOR.MINOR.PATCH (e.g., 1.37 or 1.37.2)"
+    echo "  --prerelease            Install the next release from the prerelease channels"
+    echo "  --image-repository REPO Pull control-plane images from REPO"
+    echo "  --kubeadm-patches DIR   Apply kubeadm patches from local DIR on every node"
     echo "  --pod-network-cidr CIDR Pod network CIDR"
     echo "  --service-cidr CIDR     Service CIDR"
+    echo "  --apiserver-advertise-address ADDR, --control-plane-endpoint ENDPOINT,"
+    echo "  --api-server-extra-sans LIST, --kubeadm-config-patch FILE, --kubelet-node-ip IP"
+    echo "                          Passed to init/join on the nodes (see 'init --help')"
     echo "  --resume                Resume a previously interrupted deploy"
     _show_help_footer "  " "Show deployment plan and exit"
     echo ""
@@ -357,7 +399,20 @@ parse_deploy_args() {
                 DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_pair "$DEPLOY_PASSTHROUGH_ARGS" "$1" "$2")
                 shift 2
                 ;;
-            --cri|--proxy-mode|--kubernetes-version|--pod-network-cidr|--service-cidr|--apiserver-advertise-address|--control-plane-endpoint|--kubeadm-config-patch|--api-server-extra-sans|--kubelet-node-ip)
+            --kubeadm-patches)
+                _require_value $# "$1" "${2:-}"
+                if [ ! -d "$2" ]; then
+                    log_error "--kubeadm-patches directory not found: $2"
+                    exit 1
+                fi
+                KUBEADM_PATCHES_DIR=$(cd "$2" && pwd)
+                shift 2
+                ;;
+            --prerelease)
+                DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_flag "$DEPLOY_PASSTHROUGH_ARGS" "$1")
+                shift
+                ;;
+            --cri|--proxy-mode|--kubernetes-version|--image-repository|--pod-network-cidr|--service-cidr|--apiserver-advertise-address|--control-plane-endpoint|--kubeadm-config-patch|--api-server-extra-sans|--kubelet-node-ip)
                 _require_value $# "$1" "${2:-}"
                 DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_pair "$DEPLOY_PASSTHROUGH_ARGS" "$1" "$2")
                 shift 2

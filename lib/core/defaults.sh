@@ -17,7 +17,11 @@ _AUDIT_SYSLOG="${_AUDIT_SYSLOG:-false}"
 COLLECT_DIAGNOSTICS="${COLLECT_DIAGNOSTICS:-false}"
 
 # Default values for global variables
-K8S_VERSION=""
+K8S_VERSION=""            # MAJOR.MINOR
+K8S_PATCH_VERSION=""      # MAJOR.MINOR.PATCH when a patch version was requested
+K8S_PRERELEASE=false      # install from prerelease channels
+KUBEADM_IMAGE_REPOSITORY=""  # kubeadm imageRepository (empty = registry.k8s.io)
+KUBEADM_PATCHES_DIR=""    # kubeadm patches directory
 ACTION="${ACTION:-}"  # init or join (set by subcommand)
 JOIN_TOKEN=""
 JOIN_ADDRESS=""
@@ -27,8 +31,8 @@ DISTRO_NAME=""
 DISTRO_VERSION=""
 DISTRO_FAMILY=""
 CRI="containerd"  # Container runtime interface (containerd, crio, etc.)
-PROXY_MODE="iptables"  # iptables, ipvs, or nftables (nftables requires K8s 1.29+)
-SWAP_ENABLED=false  # Keep swap enabled (K8s 1.28+, NodeSwap feature)
+PROXY_MODE="auto"  # auto, iptables, ipvs, or nftables (auto: nftables on K8s 1.33+ with kernel 5.13+, else iptables)
+SWAP_ENABLED=false  # Keep swap enabled (Kubernetes 1.30+, NodeSwap feature)
 
 # HA cluster support
 JOIN_AS_CONTROL_PLANE=false
@@ -91,7 +95,7 @@ STATUS_OUTPUT_FORMAT="text"   # output format: text or wide
 # Preflight subcommand
 PREFLIGHT_MODE="init"
 PREFLIGHT_CRI="containerd"
-PREFLIGHT_PROXY_MODE="iptables"
+PREFLIGHT_PROXY_MODE="auto"
 PREFLIGHT_K8S_VERSION=""
 PREFLIGHT_STRICT=false  # Treat WARN as FAIL in preflight checks
 
@@ -108,14 +112,17 @@ API_SERVER_EXTRA_SANS=""
 KUBELET_NODE_IP=""
 
 # Version constants (overridable via environment)
-KUBE_VIP_VERSION="${KUBE_VIP_VERSION:-v0.8.9}"
+KUBE_VIP_VERSION="${KUBE_VIP_VERSION:-v1.3.1}"
 # Pause image tag; empty = use the tag reported by the installed kubeadm
 PAUSE_IMAGE_VERSION="${PAUSE_IMAGE_VERSION:-}"
 
 # Component version defaults for generic distro (overridable via environment)
-CONTAINERD_VERSION="${CONTAINERD_VERSION:-2.0.4}"
-RUNC_VERSION="${RUNC_VERSION:-1.2.5}"
-CNI_PLUGINS_VERSION="${CNI_PLUGINS_VERSION:-1.6.2}"
+CONTAINERD_VERSION="${CONTAINERD_VERSION:-2.3.7}"
+RUNC_VERSION="${RUNC_VERSION:-1.5.2}"
+CNI_PLUGINS_VERSION="${CNI_PLUGINS_VERSION:-1.9.1}"
+# Helm and Kustomize release versions (--install-helm / --install-kustomize)
+HELM_VERSION="${HELM_VERSION:-4.3.1}"
+KUSTOMIZE_VERSION="${KUSTOMIZE_VERSION:-5.8.3}"
 CRIO_VERSION="${CRIO_VERSION:-}"
 # Timeout for remote operations (seconds)
 DEPLOY_REMOTE_TIMEOUT="${DEPLOY_REMOTE_TIMEOUT:-600}"

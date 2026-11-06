@@ -17,8 +17,9 @@ _K8S_CORE_PKGS="kubeadm kubelet kubectl"
 # --- pkgs.k8s.io ---
 
 _k8s_repo_add() {
-    local minor="$1" base
-    base="https://pkgs.k8s.io/core:/stable:/v${minor}"
+    local minor="$1" channel=stable base
+    [ "${K8S_PRERELEASE:-false}" = true ] && channel=prerelease
+    base="https://pkgs.k8s.io/core:/${channel}:/v${minor}"
     case "$(pkg_format)" in
         deb) pkg_repo_add kubernetes "${base}/deb/" "${base}/deb/Release.key" ;;
         rpm) pkg_repo_add kubernetes "${base}/rpm/" "${base}/rpm/repodata/repomd.xml.key" ;;
@@ -78,13 +79,46 @@ k8s_distro_minor_version() {
 
 # --- release binaries ---
 
-# Resolve full patch version from MAJOR.MINOR (e.g. 1.32 -> 1.32.3)
+# Resolve the release version to install from MAJOR.MINOR: the requested
+# patch version, or the latest stable (prerelease: latest) of that minor.
 _resolve_k8s_patch_version() {
-    local minor="$1"
-    curl -fsSL --retry 3 --retry-delay 2 "https://dl.k8s.io/release/stable-${minor}.txt" | tr -d 'v'
+    local minor="$1" marker=stable
+    if [ -n "${K8S_PATCH_VERSION:-}" ] && [ "$(_k8s_minor_version "$K8S_PATCH_VERSION")" = "$minor" ]; then
+        echo "$K8S_PATCH_VERSION"
+        return 0
+    fi
+    [ "${K8S_PRERELEASE:-false}" = true ] && marker=latest
+    curl -fsSL --retry 3 --retry-delay 2 "https://dl.k8s.io/release/${marker}-${minor}.txt" | tr -d 'v'
 }
 
 # Download and install a single K8s binary with checksum verification
+# Install crictl from the cri-tools release of the Kubernetes minor (or the
+# previous minor, as cri-tools releases after Kubernetes prereleases).
+# Usage: _crictl_install_binary <k8s_minor>
+_crictl_install_binary() {
+    local minor="$1" arch major m version file url tmp
+    arch=$(_detect_arch)
+    major="${minor%%.*}"
+    m="${minor#*.}"
+    for version in "v${major}.${m}.0" "v${major}.$((m - 1)).0"; do
+        file="crictl-${version}-linux-${arch}.tar.gz"
+        url="https://github.com/kubernetes-sigs/cri-tools/releases/download/${version}/${file}"
+        curl -fsSL -o /dev/null -I "$url" 2>/dev/null || continue
+        tmp=$(mktemp /tmp/crictl-XXXXXX)
+        if ! _download_with_checksum "$url" "$tmp" "${url}.sha256"; then
+            rm -f "$tmp"
+            return 1
+        fi
+        tar -xzf "$tmp" -C /usr/local/bin crictl || { rm -f "$tmp"; return 1; }
+        rm -f "$tmp"
+        chmod 0755 /usr/local/bin/crictl
+        log_info "crictl ${version} installed to /usr/local/bin/crictl"
+        return 0
+    done
+    log_error "No cri-tools release found for Kubernetes ${minor}"
+    return 1
+}
+
 _install_k8s_binary() {
     local binary="$1" version="$2"
     local arch
@@ -183,13 +217,17 @@ _k8s_install_binaries() {
     _install_k8s_binary kubeadm "$patch_version" || return 1
     _install_k8s_binary kubelet "$patch_version" || return 1
     _install_k8s_binary kubectl "$patch_version" || return 1
+    # CRI-O release tarballs bundle crictl
+    if [ "$CRI" != "crio" ]; then
+        _crictl_install_binary "$K8S_VERSION" || return 1
+    fi
     _install_kubelet_service
     log_info "Kubernetes v${patch_version} binaries installed to /usr/local/bin/"
 }
 
 _k8s_remove_binaries() {
     local bin
-    for bin in kubeadm kubectl kubelet; do
+    for bin in kubeadm kubectl kubelet crictl; do
         if [ -f "/usr/local/bin/$bin" ]; then
             rm -f "/usr/local/bin/$bin"
             log_info "Removed /usr/local/bin/$bin"
@@ -205,15 +243,23 @@ k8s_install() {
     log_info "Installing Kubernetes ${K8S_VERSION} (source: ${DISTRO_K8S_SOURCE})..."
     case "$DISTRO_K8S_SOURCE" in
         pkgs)
+            local v="${K8S_PATCH_VERSION:-$K8S_VERSION}"
             _k8s_remove_conflicting_packages || return 1
             _k8s_repo_add "$K8S_VERSION" || return 1
-            pkg_install --hold --repo kubernetes \
-                "kubelet=${K8S_VERSION}" "kubeadm=${K8S_VERSION}" "kubectl=${K8S_VERSION}" cri-tools || return 1
+            if [ "${K8S_PRERELEASE:-false}" = true ]; then
+                # The prerelease channel has no cri-tools package
+                pkg_install --hold --repo kubernetes \
+                    "kubelet=${v}" "kubeadm=${v}" "kubectl=${v}" || return 1
+                _crictl_install_binary "$K8S_VERSION" || return 1
+            else
+                pkg_install --hold --repo kubernetes \
+                    "kubelet=${v}" "kubeadm=${v}" "kubectl=${v}" cri-tools || return 1
+            fi
             ;;
         distro)
             _k8s_require_distro_version "$K8S_VERSION" || return 1
             # shellcheck disable=SC2046 # space-separated package specs
-            pkg_install --hold $(_k8s_distro_specs "$K8S_VERSION") || return 1
+            pkg_install --hold $(_k8s_distro_specs "${K8S_PATCH_VERSION:-$K8S_VERSION}") || return 1
             ;;
         binary)
             _k8s_install_binaries || return 1

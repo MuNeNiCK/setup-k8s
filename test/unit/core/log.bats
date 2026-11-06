@@ -16,7 +16,7 @@ _case_variables_defaults() {
         _assert_eq "DRY_RUN default" "false" "$DRY_RUN"
         _assert_eq "ACTION default" "" "$ACTION"
         _assert_eq "CRI default" "containerd" "$CRI"
-        _assert_eq "PROXY_MODE default" "iptables" "$PROXY_MODE"
+        _assert_eq "PROXY_MODE default" "auto" "$PROXY_MODE"
         _assert_eq "FORCE default" "false" "$FORCE"
         _assert_eq "ENABLE_COMPLETION default" "true" "$ENABLE_COMPLETION"
         _assert_eq "INSTALL_HELM default" "false" "$INSTALL_HELM"

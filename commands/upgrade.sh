@@ -62,7 +62,8 @@ upgrade_node_local() {
         if [ "$(_detect_init_system)" != "systemd" ]; then
             _preflight_errors="${_preflight_errors},SystemVerification"
         fi
-        kubeadm upgrade apply "v${UPGRADE_TARGET_VERSION}" --yes --ignore-preflight-errors="${_preflight_errors}"
+        # shellcheck disable=SC2046 # empty or "--patches DIR"
+        kubeadm upgrade apply "v${UPGRADE_TARGET_VERSION}" --yes --ignore-preflight-errors="${_preflight_errors}" $(_kubeadm_patches_args)
     else
         log_info "Step 2: Running kubeadm upgrade node..."
         # On workers, the default kubelet kubeconfig may lack permissions to read
@@ -75,7 +76,7 @@ upgrade_node_local() {
             _kubeconfig_arg="--kubeconfig ${UPGRADE_ADMIN_CONF}"
         fi
         # shellcheck disable=SC2086,SC2046 # intentional word splitting
-        kubeadm upgrade node $_kubeconfig_arg $(_kubeadm_preflight_ignore_args)
+        kubeadm upgrade node $_kubeconfig_arg $(_kubeadm_preflight_ignore_args) $(_kubeadm_patches_args)
     fi
 
     # 3. Upgrade kubelet + kubectl packages
@@ -185,6 +186,7 @@ show_upgrade_help() {
     echo "    --no-rollback             Disable automatic rollback on failure"
     echo "    --auto-step-upgrade       Automatically step through intermediate minor versions"
     echo "    --rollback-to VER         Reinstall packages at VER after a failed upgrade (replaces --kubernetes-version)"
+    echo "    --kubeadm-patches DIR     Apply kubeadm patches from DIR (use the same patches as on init/join)"
     echo "    --distro FAMILY           Override distro family detection"
     _show_help_footer "    "
     echo ""
@@ -261,6 +263,16 @@ parse_upgrade_local_args() {
                 UPGRADE_FIRST_CONTROL_PLANE=true
                 shift
                 ;;
+            --kubeadm-patches)
+                _require_value $# "$1" "${2:-}"
+                if [ ! -d "$2" ]; then
+                    log_error "--kubeadm-patches directory not found: $2"
+                    exit 1
+                fi
+                # shellcheck disable=SC2034 # used by lib/node/kubeadm.sh and lib/cluster/upgrade.sh
+                KUBEADM_PATCHES_DIR=$(cd "$2" && pwd)
+                shift 2
+                ;;
             --rollback-to)
                 _require_value $# "$1" "${2:-}"
                 if ! echo "$2" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -298,6 +310,16 @@ parse_upgrade_deploy_args() {
     while [ $# -gt 0 ]; do
         case $1 in
             --help|-h) show_upgrade_help ;;
+            --kubeadm-patches)
+                _require_value $# "$1" "${2:-}"
+                if [ ! -d "$2" ]; then
+                    log_error "--kubeadm-patches directory not found: $2"
+                    exit 1
+                fi
+                # shellcheck disable=SC2034 # used by lib/node/kubeadm.sh and lib/cluster/upgrade.sh
+                KUBEADM_PATCHES_DIR=$(cd "$2" && pwd)
+                shift 2
+                ;;
             --distro)
                 _require_value $# "$1" "${2:-}"
                 UPGRADE_PASSTHROUGH_ARGS=$(_passthrough_add_pair "$UPGRADE_PASSTHROUGH_ARGS" "$1" "$2")

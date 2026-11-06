@@ -23,7 +23,7 @@ _case_preflight_variables_defaults() {
         load_modules
         _assert_eq "PREFLIGHT_MODE default" "init" "$PREFLIGHT_MODE"
         _assert_eq "PREFLIGHT_CRI default" "containerd" "$PREFLIGHT_CRI"
-        _assert_eq "PREFLIGHT_PROXY_MODE default" "iptables" "$PREFLIGHT_PROXY_MODE"
+        _assert_eq "PREFLIGHT_PROXY_MODE default" "auto" "$PREFLIGHT_PROXY_MODE"
         _assert_eq "PREFLIGHT_K8S_VERSION default" "" "$PREFLIGHT_K8S_VERSION"
     )
 }
@@ -232,4 +232,35 @@ _case_preflight_new_checks_defined() {
     [[ "$output" == *"[INFO] SELinux mode: Enforcing"* ]]
     _preflight_check_selinux 2>/dev/null
     [ "$_PREFLIGHT_WARN" -eq 0 ]
+}
+
+@test "containerd 1.x fails preflight for Kubernetes 1.38+ and warns before" {
+    load_modules
+    fake_cmd containerd 0 "containerd github.com/containerd/containerd v1.7.28 abc"
+    _PREFLIGHT_FAIL=0 _PREFLIGHT_WARN=0
+    PREFLIGHT_K8S_VERSION=1.38
+    _preflight_check_containerd_v2_readiness 2>/dev/null
+    [ "$_PREFLIGHT_FAIL" -eq 1 ]
+    _PREFLIGHT_FAIL=0 _PREFLIGHT_WARN=0
+    PREFLIGHT_K8S_VERSION=1.37
+    _preflight_check_containerd_v2_readiness 2>/dev/null
+    [ "$_PREFLIGHT_FAIL" -eq 0 ]
+    [ "$_PREFLIGHT_WARN" -eq 1 ]
+}
+
+@test "preflight reports user namespace support and SELinuxMount as info" {
+    load_modules
+    _kernel_release() { echo "6.8.0"; }
+    run _preflight_check_user_namespaces
+    [[ "$output" == *"User namespaces for Pods: available"* ]]
+    _kernel_release() { echo "5.14.0"; }
+    run _preflight_check_user_namespaces
+    [[ "$output" == *"not available (kernel 5.14.0"* ]]
+    fake_cmd getenforce 0 Enforcing
+    PREFLIGHT_K8S_VERSION=1.37
+    run _preflight_check_selinux
+    [[ "$output" == *"SELinuxMount"* ]]
+    PREFLIGHT_K8S_VERSION=1.36
+    run _preflight_check_selinux
+    [[ "$output" != *"SELinuxMount"* ]]
 }
