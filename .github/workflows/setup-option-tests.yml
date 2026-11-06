@@ -51,11 +51,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: ubuntu2404-online-latest
-            distro: ubuntu-24.04-cloud-amd64
-            k8s_version: ""
-            setup_args: ""
-            test_mode: "online"
           - name: ubuntu2404-default
             distro: ubuntu-24.04-cloud-amd64
             k8s_version: ""

@@ -84,9 +84,36 @@ stop_cri_services() {
 # Remove Kubernetes configuration files
 remove_kubernetes_configs() {
     log_info "Removing Kubernetes configuration files..."
-    rm -f /etc/default/kubelet
+    rm -f /etc/default/kubelet /etc/sysconfig/kubelet
     rm -rf /etc/kubernetes
     rm -rf /etc/systemd/system/kubelet.service.d
+}
+
+# Remove installed components (packages, repositories, binaries) and host
+# preparation artifacts, then verify that nothing is left.
+cleanup_installed_components() {
+    local rc=0 remaining=0
+    k8s_remove || rc=1
+    crio_remove || rc=1
+    containerd_cleanup || rc=1
+    if [ "${DISTRO_K8S_SOURCE:-}" = binary ] && [ "$PRESERVE_CNI" = false ] && [ -d /opt/cni/bin ]; then
+        rm -rf /opt/cni/bin
+        log_info "Removed /opt/cni/bin/"
+    fi
+    system_cleanup
+    _service_reload
+
+    if [ -n "${DISTRO_PKG:-}" ]; then
+        remaining=$(_verify_packages_removed pkg_installed kubeadm kubelet kubectl cri-o)
+    fi
+    for bin in kubeadm kubectl kubelet; do
+        if [ -f "/usr/local/bin/$bin" ]; then
+            log_warn "$bin still exists in /usr/local/bin"
+            remaining=1
+        fi
+    done
+    _verify_cleanup "$remaining" /etc/default/kubelet /etc/sysconfig/kubelet || rc=1
+    return "$rc"
 }
 
 # Reset Kubernetes cluster state
@@ -146,9 +173,8 @@ cleanup_dry_run() {
     log_info "=== End of dry-run (no changes made) ==="
 }
 
-# confirm_cleanup and check_docker_warning are defined in lib/validation.sh
 
-# === Cleanup argument parsing (moved from lib/validation.sh) ===
+# === Cleanup argument parsing ===
 
 # Help message for cleanup
 show_cleanup_help() {
@@ -171,7 +197,7 @@ parse_cleanup_args() {
     while [ $# -gt 0 ]; do
         case $1 in
             --force)
-                # shellcheck disable=SC2034 # used by lib/validation.sh
+                # shellcheck disable=SC2034 # used by lib/core/validate.sh
                 FORCE=true
                 shift
                 ;;
@@ -204,7 +230,7 @@ parse_cleanup_args() {
     done
 }
 
-# === Cleanup confirmation (moved from lib/validation.sh) ===
+# === Cleanup confirmation ===
 
 # Confirmation prompt for cleanup
 confirm_cleanup() {
@@ -219,4 +245,46 @@ check_docker_warning() {
         log_warn "This cleanup script will reset containerd configuration but will NOT remove containerd."
         log_warn "Docker should continue to work normally after cleanup."
     fi
+}
+
+# === Runner ===
+
+_run_cleanup() {
+    _require_root "Cleanup"
+    parse_cleanup_args "$@"
+    _ensure_distro_detected
+    _dry_run_guard cleanup_dry_run
+    confirm_cleanup
+
+    CLEANUP_ERRORS=0
+    log_info "Starting Kubernetes cleanup..."
+    check_docker_warning
+    stop_kubernetes_services || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    stop_cri_services || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    reset_kubernetes_cluster || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    remove_kubernetes_configs || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    restore_fstab_swap || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    restore_zram_swap || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_cni_conditionally || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_network_configs || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_kube_configs || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_crictl_config || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    reset_iptables || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    reset_containerd_config || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    _service_reload || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_installed_components || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_kubernetes_completions || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    if [ "${REMOVE_HELM:-false}" = true ]; then
+        cleanup_helm || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    fi
+    if [ "${REMOVE_KUSTOMIZE:-false}" = true ]; then
+        cleanup_kustomize || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    fi
+
+    if [ "$CLEANUP_ERRORS" -gt 0 ]; then
+        log_error "Cleanup finished with $CLEANUP_ERRORS error(s). Check the output above for details."
+        exit 1
+    fi
+    log_info "Cleanup complete! Please reboot the system for all changes to take effect."
+    exit 0
 }

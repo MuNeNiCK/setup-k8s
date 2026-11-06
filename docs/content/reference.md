@@ -3,8 +3,10 @@
 ## setup-k8s.sh
 
 ```
-Usage: setup-k8s.sh <init|join|deploy|upgrade|remove|backup|restore|cleanup|renew|status|preflight> [options]
+Usage: setup-k8s.sh <subcommand> [options]
 ```
+
+Run `setup-k8s.sh <subcommand> --help` for the options of a subcommand.
 
 ### Subcommands
 
@@ -24,7 +26,7 @@ Usage: setup-k8s.sh <init|join|deploy|upgrade|remove|backup|restore|cleanup|rene
 
 ### Global Options
 
-These options apply to all subcommands and are parsed before subcommand-specific arguments.
+These options apply to all subcommands. They are handled by the entry point and may appear anywhere after the subcommand; all other options are passed to the subcommand unchanged.
 
 | Option | Description | Default | Example |
 |--------|-------------|---------|---------|
@@ -35,8 +37,10 @@ These options apply to all subcommands and are parsed before subcommand-specific
 | `--audit-syslog` | Send structured audit events to syslog via `logger` | — | `--audit-syslog` |
 | `--collect-diagnostics` | Collect node diagnostics (kubelet/containerd logs, events) on failure | — | `--collect-diagnostics` |
 | `--resume` | Resume a previously interrupted deploy or upgrade operation | — | `--resume` |
-| `--distro FAMILY` | Override distro family detection (debian, rhel, suse, arch, alpine, generic) | auto-detect | `--distro alpine` |
-| `--help`, `-h` | Display help message | — | `--help` |
+| `--version` | Print the setup-k8s version and exit | — | `--version` |
+| `--help`, `-h` | Display help message (global, or for the given subcommand) | — | `--help` |
+
+`--distro FAMILY` (override distro family detection: debian, rhel, suse, arch, alpine, generic) is a subcommand option accepted by `init`, `join`, `cleanup`, `deploy`, and the remote modes of `upgrade`, `backup`, `restore`, and `renew`.
 
 ### Init/Join Options
 
@@ -115,6 +119,7 @@ Options for the `upgrade` subcommand when orchestrating remotely via SSH.
 | `--kubernetes-version VER` | Target version in MAJOR.MINOR.PATCH format | — (required) | `--kubernetes-version 1.33.2` |
 | `--skip-drain` | Skip drain/uncordon for all nodes | — | `--skip-drain` |
 | `--no-rollback` | Disable automatic rollback on upgrade failure | — | `--no-rollback` |
+| `--rollback-to VER` | Local mode: reinstall kubeadm, kubelet, and kubectl at VER after a failed upgrade (instead of `--kubernetes-version`) | — | `--rollback-to 1.36.6` |
 | `--auto-step-upgrade` | Automatically step through intermediate minor versions (e.g., 1.31 → 1.32 → 1.33) | — | `--auto-step-upgrade` |
 
 ### Remove Options

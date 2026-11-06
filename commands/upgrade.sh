@@ -1,8 +1,8 @@
 #!/bin/sh
 
 # Upgrade module: local upgrade logic, dry-run display, and CLI parsing.
-# Remote orchestration -> lib/upgrade_orchestration.sh
-# Version helpers, node role detection, rollback -> lib/upgrade_helpers.sh
+# Remote orchestration -> lib/cluster/upgrade.sh
+# Version helpers, node role detection, rollback -> lib/cluster/upgrade.sh
 #
 # === Sections ===
 # 1. Local upgrade logic    (~line 12)
@@ -10,6 +10,32 @@
 # 3. CLI parsing & help     (~line 145)
 
 # --- Local Upgrade ---
+
+# Reinstall kubeadm, kubelet, and kubectl at an earlier version after a failed
+# upgrade (run with sudo). kubeadm restores its own control-plane manifests
+# when "kubeadm upgrade" fails, so only the packages are rolled back.
+rollback_node_local() {
+    local current target="$UPGRADE_ROLLBACK_VERSION"
+    current=$(_get_current_k8s_version) || current=""
+    if [ -n "$current" ] && [ "$(_k8s_minor_version "$current")" != "$(_k8s_minor_version "$target")" ]; then
+        local cur_minor tar_minor
+        cur_minor=$(echo "$current" | cut -d. -f2)
+        tar_minor=$(echo "$target" | cut -d. -f2)
+        if [ "$tar_minor" -lt $((cur_minor - 1)) ] || [ "$tar_minor" -gt "$cur_minor" ]; then
+            log_error "Rollback must target the same or the previous minor version (current: v${current}, target: v${target})"
+            return 1
+        fi
+    fi
+    log_info "Rolling back Kubernetes packages from v${current:-unknown} to v${target}..."
+    k8s_upgrade_kubeadm "$target" || return 1
+    k8s_upgrade_node "$target" || return 1
+    _service_reload
+    if ! _service_restart kubelet; then
+        log_warn "kubelet restart returned non-zero. It may take a moment to stabilize."
+    fi
+    show_versions
+    log_info "Rollback to v${target} complete"
+}
 
 # Upgrade the current node (run with sudo)
 upgrade_node_local() {
@@ -27,7 +53,7 @@ upgrade_node_local() {
 
     # 1. Upgrade kubeadm package
     log_info "Step 1: Upgrading kubeadm to ${UPGRADE_TARGET_VERSION}..."
-    _dispatch "upgrade_kubeadm_${DISTRO_FAMILY}" "$UPGRADE_TARGET_VERSION"
+    k8s_upgrade_kubeadm "$UPGRADE_TARGET_VERSION"
 
     # 2. Run kubeadm upgrade
     if [ "$role" = "first-control-plane" ]; then
@@ -54,7 +80,7 @@ upgrade_node_local() {
 
     # 3. Upgrade kubelet + kubectl packages
     log_info "Step 3: Upgrading kubelet and kubectl to ${UPGRADE_TARGET_VERSION}..."
-    _dispatch "upgrade_kubelet_kubectl_${DISTRO_FAMILY}" "$UPGRADE_TARGET_VERSION"
+    k8s_upgrade_node "$UPGRADE_TARGET_VERSION"
 
     # 4. Restart kubelet
     log_info "Step 4: Restarting kubelet..."
@@ -142,7 +168,7 @@ upgrade_dry_run() {
     log_info "=== End of dry-run (no changes made) ==="
 }
 
-# === Upgrade argument parsing (moved from lib/validation.sh) ===
+# === Upgrade argument parsing ===
 # Help message for upgrade
 show_upgrade_help() {
     echo "Usage: $0 upgrade [options]"
@@ -158,6 +184,7 @@ show_upgrade_help() {
     echo "    --skip-drain              Skip drain/uncordon (for single-node clusters)"
     echo "    --no-rollback             Disable automatic rollback on failure"
     echo "    --auto-step-upgrade       Automatically step through intermediate minor versions"
+    echo "    --rollback-to VER         Reinstall packages at VER after a failed upgrade (replaces --kubernetes-version)"
     echo "    --distro FAMILY           Override distro family detection"
     _show_help_footer "    "
     echo ""
@@ -234,6 +261,15 @@ parse_upgrade_local_args() {
                 UPGRADE_FIRST_CONTROL_PLANE=true
                 shift
                 ;;
+            --rollback-to)
+                _require_value $# "$1" "${2:-}"
+                if ! echo "$2" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+                    log_error "--rollback-to must be MAJOR.MINOR.PATCH (e.g., 1.36.6)"
+                    exit 1
+                fi
+                UPGRADE_ROLLBACK_VERSION="$2"
+                shift 2
+                ;;
             *)
                 if _parse_upgrade_common_arg $# "$1" "${2:-}"; then
                     shift "$_UPGRADE_ARG_SHIFT"
@@ -247,8 +283,12 @@ parse_upgrade_local_args() {
                 ;;
         esac
     done
-    if [ -z "$UPGRADE_TARGET_VERSION" ]; then
+    if [ -z "$UPGRADE_TARGET_VERSION" ] && [ -z "$UPGRADE_ROLLBACK_VERSION" ]; then
         log_error "--kubernetes-version is required for upgrade"
+        exit 1
+    fi
+    if [ -n "$UPGRADE_TARGET_VERSION" ] && [ -n "$UPGRADE_ROLLBACK_VERSION" ]; then
+        log_error "--kubernetes-version and --rollback-to cannot be combined"
         exit 1
     fi
 }
@@ -302,4 +342,22 @@ validate_upgrade_deploy_args() {
     fi
 
     _validate_remote_node_args
+}
+
+# === Runner ===
+
+_upgrade_node_local_main() {
+    _ensure_distro_detected
+    if [ -n "$UPGRADE_ROLLBACK_VERSION" ]; then
+        rollback_node_local
+    else
+        upgrade_node_local
+    fi
+}
+
+_run_upgrade() {
+    _run_dual_mode upgrade \
+        parse_upgrade_deploy_args validate_upgrade_deploy_args upgrade_dry_run upgrade_cluster \
+        "Local upgrade" parse_upgrade_local_args upgrade_dry_run _upgrade_node_local_main \
+        "$@"
 }

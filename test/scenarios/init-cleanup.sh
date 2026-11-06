@@ -15,7 +15,7 @@ cd "$TEST_DIR"
 
 SETUP_K8S_SCRIPT="$PROJECT_ROOT/setup-k8s.sh"
 DOCKER_VM_RUNNER_IMAGE="${DOCKER_VM_RUNNER_IMAGE:-ghcr.io/munenick/docker-vm-runner:latest}"
-GITHUB_BASE_URL="${GITHUB_BASE_URL:-https://raw.githubusercontent.com/MuNeNiCK/setup-k8s/main}"
+SETUP_K8S_URL="${SETUP_K8S_URL:-https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh}"
 VM_DATA_DIR="${VM_DATA_DIR:-$TEST_DIR/data}"
 
 # VM resource defaults
@@ -35,7 +35,7 @@ LOGIN_USER="user"
 
 # Timeout settings (seconds)
 TIMEOUT_TOTAL=1200    # 20 minutes
-SSH_READY_TIMEOUT=300 # 5 minutes for SSH to become available
+SSH_READY_TIMEOUT="${SSH_READY_TIMEOUT:-300}" # seconds for SSH to become available
 
 # SSH settings
 SSH_KEY_DIR=""
@@ -68,7 +68,7 @@ Options:
   --all, -a                 Test all distributions sequentially
   --k8s-version <version>   Kubernetes version to test (e.g., 1.32, 1.31, 1.30)
   --setup-args ARGS         Extra args for setup-k8s.sh (use quotes)
-  --online                  Run test using curl | bash from GitHub (requires push)
+  --online                  Run test using curl | sh with the published release asset
   --offline                 Run test in bundled mode with local code (default)
   --memory <MB>             VM memory in MB (default: $VM_MEMORY)
   --cpus <count>            VM CPU count (default: $VM_CPUS)
@@ -88,14 +88,14 @@ EOF
     echo "  $0 --online ubuntu-24.04-cloud-amd64"
     echo "  $0 --k8s-version 1.31 ubuntu-24.04-cloud-amd64"
     echo "  $0 --all                              # Test all distributions offline"
-    echo "  $0 --all --online                     # Test all distributions via curl | bash"
+    echo "  $0 --all --online                     # Test all distributions with the release asset"
     echo "  $0 --all --k8s-version 1.30           # Test all distributions with k8s v1.30"
     echo "  $0 --memory 16384 --cpus 8 ubuntu-24.04-cloud-amd64"
     echo "  $0 archlinux-cloud-amd64"
     echo "  $0 --k8s-version 1.32 rocky-9-cloud-amd64"
     echo
     echo "Test Modes:"
-    echo "  Online:  Runs curl | bash from GitHub inside VM (tests production flow; requires push)"
+    echo "  Online:  Runs curl | sh with the published release asset inside the VM"
     echo "  Offline: Uses pre-bundled script with local code (default; no push required)"
 }
 
@@ -117,7 +117,7 @@ generate_bundled_scripts() {
     _SETUP_BUNDLE=$(mktemp /tmp/setup-k8s-bundle.XXXXXX.sh)
 
     log_info "Generating bundled script..."
-    _generate_bundle "$SETUP_K8S_SCRIPT" "$_SETUP_BUNDLE" "all"
+    _generate_bundle "$SETUP_K8S_SCRIPT" "$_SETUP_BUNDLE"
     log_info "Bundled script generated successfully"
 }
 
@@ -162,6 +162,7 @@ run_vm_container() {
         docker run -d --rm
         --name "$container_name"
         --label "managed-by=k8s-test-runner"
+        --label "$TEST_OWNER_LABEL"
         --device /dev/kvm:/dev/kvm
         -v "$VM_DATA_DIR:/data"
         -p "${SSH_PORT}:2222"
@@ -225,8 +226,8 @@ CIEOF
 
     # --- Deploy scripts ---
     if [ "$TEST_MODE" = "online" ]; then
-        # Online mode: test the production curl | bash flow from GitHub
-        log_info "Online mode: testing curl | bash from ${GITHUB_BASE_URL}"
+        # Online mode: test the published release asset via curl | sh
+        log_info "Online mode: testing curl | sh with ${SETUP_K8S_URL}"
     else
         generate_bundled_scripts
         log_info "Transferring bundled script to VM..."
@@ -279,9 +280,9 @@ PATCH"
 
     local setup_cmd
     if [ "$TEST_MODE" = "online" ]; then
-        setup_cmd="set -o pipefail; curl -fsSL ${GITHUB_BASE_URL}/setup-k8s.sh | bash -s -- ${setup_args}"
+        setup_cmd="set -o pipefail; curl -fsSL ${SETUP_K8S_URL} | sh -s -- ${setup_args}"
     else
-        setup_cmd="bash /tmp/setup-k8s.sh ${setup_args}"
+        setup_cmd="sh /tmp/setup-k8s.sh ${setup_args}"
     fi
     setup_cmd+=" > /tmp/setup-k8s.log 2>&1; echo \$? > /tmp/setup-exit-code"
     vm_ssh "nohup bash -c '${setup_cmd}' </dev/null >/dev/null 2>&1 &"
@@ -306,9 +307,9 @@ PATCH"
     log_info "Running setup-k8s status..."
     local status_cmd
     if [ "$TEST_MODE" = "online" ]; then
-        status_cmd="bash -o pipefail -c \"curl -fsSL ${GITHUB_BASE_URL}/setup-k8s.sh | KUBECONFIG=/etc/kubernetes/admin.conf bash -s -- status --output wide\""
+        status_cmd="bash -o pipefail -c \"curl -fsSL ${SETUP_K8S_URL} | KUBECONFIG=/etc/kubernetes/admin.conf sh -s -- status --output wide\""
     else
-        status_cmd="KUBECONFIG=/etc/kubernetes/admin.conf bash /tmp/setup-k8s.sh status --output wide"
+        status_cmd="KUBECONFIG=/etc/kubernetes/admin.conf sh /tmp/setup-k8s.sh status --output wide"
     fi
     local status_exit_code=0
     vm_ssh "$status_cmd > /tmp/status-k8s.log 2>&1" || status_exit_code=$?
@@ -366,9 +367,9 @@ PATCH"
         log_info "Starting Kubernetes cleanup..."
         local cleanup_cmd
         if [ "$TEST_MODE" = "online" ]; then
-            cleanup_cmd="set -o pipefail; curl -fsSL ${GITHUB_BASE_URL}/setup-k8s.sh | bash -s -- cleanup --force"
+            cleanup_cmd="set -o pipefail; curl -fsSL ${SETUP_K8S_URL} | sh -s -- cleanup --force"
         else
-            cleanup_cmd="bash /tmp/setup-k8s.sh cleanup --force"
+            cleanup_cmd="sh /tmp/setup-k8s.sh cleanup --force"
         fi
         vm_ssh "nohup bash -c '${cleanup_cmd} > /tmp/cleanup-k8s.log 2>&1; echo \$? > /tmp/cleanup-exit-code' </dev/null >/dev/null 2>&1 &"
 
@@ -549,7 +550,7 @@ test_all() {
     log_info "Starting test for all distributions"
     log_info "Test mode: $TEST_MODE"
     if [ "$TEST_MODE" = "online" ]; then
-        log_info "Script source: curl | bash from GitHub"
+        log_info "Script source: release asset via curl | sh"
     else
         log_info "Script source: Bundled (all modules included)"
     fi
@@ -640,7 +641,7 @@ run_single_test() {
     log_info "Starting K8s test for: $distro"
     log_info "Test mode: $TEST_MODE"
     if [ "$TEST_MODE" = "online" ]; then
-        log_info "Script source: curl | bash from GitHub"
+        log_info "Script source: release asset via curl | sh"
     else
         log_info "Script source: Bundled (all modules included)"
     fi

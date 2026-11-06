@@ -86,7 +86,7 @@ remove_cluster() {
     # --- Step 1: SSH connectivity check ---
     _step=$((_step + 1))
     log_info "Step ${_step}: Checking SSH connectivity..."
-    if ! _init_remote_session "remove" "${REMOVE_CONTROL_PLANES},${REMOVE_NODES}"; then
+    if ! remote_session_open --no-transfer "remove" "${REMOVE_CONTROL_PLANES},${REMOVE_NODES}"; then
         return 1
     fi
 
@@ -164,9 +164,7 @@ remove_cluster() {
     log_info ""
     log_info "=========================="
 
-    # Clean up known_hosts
-    _teardown_session_known_hosts
-    _pop_cleanup
+    remote_session_close
 
     if [ "$remove_failed" = true ]; then
         _audit_log "remove" "failed" "failed=${failed_nodes}"
@@ -179,7 +177,7 @@ remove_cluster() {
     return 0
 }
 
-# === Remove argument parsing (moved from lib/validation.sh) ===
+# === Remove argument parsing ===
 
 # Help message for remove
 show_remove_help() {
@@ -220,7 +218,7 @@ parse_remove_args() {
                 shift 2
                 ;;
             --force)
-                # shellcheck disable=SC2034 # used by lib/validation.sh
+                # shellcheck disable=SC2034 # used by lib/core/validate.sh
                 FORCE=true
                 shift
                 ;;
@@ -274,4 +272,16 @@ validate_remove_args() {
         fi
     }
     _csv_for_each "$REMOVE_NODES" _check_not_cp_self
+}
+
+# === Runner ===
+
+# remove runs kubectl/kubeadm over SSH and does not transfer the script, so
+# it also works when the script is read from stdin.
+_run_remove() {
+    parse_remove_args "$@"
+    validate_remove_args
+    _dry_run_guard remove_dry_run
+    remove_cluster
+    exit $?
 }

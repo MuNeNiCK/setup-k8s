@@ -48,7 +48,7 @@ run_preflight_case() {
     local output exit_code=0
 
     log_info "Running preflight case: $name"
-    output=$(vm_ssh_root "$_CP_SSH_PORT" "bash /tmp/setup-k8s.sh preflight $* 2>&1") || exit_code=$?
+    output=$(vm_ssh_root "$_CP_SSH_PORT" "sh /tmp/setup-k8s.sh preflight $* 2>&1") || exit_code=$?
     printf '%s\n' "$output" >> "$_TEST_LOG_FILE"
 
     if [ "$expected" = "success" ] && [ "$exit_code" -eq 0 ]; then
@@ -79,7 +79,7 @@ run_preflight_test() {
 
     local bundle
     bundle=$(mktemp /tmp/setup-k8s-preflight-bundle.XXXXXX.sh)
-    _generate_bundle "$SETUP_K8S_SCRIPT" "$bundle" "all"
+    _generate_bundle "$SETUP_K8S_SCRIPT" "$bundle"
     scp "${SSH_OPTS[@]}" -P "$_CP_SSH_PORT" "$bundle" "root@localhost:/tmp/setup-k8s.sh" >/dev/null
     rm -f "$bundle"
     vm_ssh_root "$_CP_SSH_PORT" "chmod +x /tmp/setup-k8s.sh"

@@ -1,14 +1,14 @@
 #!/bin/sh
 
 # Deploy module: orchestrate remote Kubernetes cluster installation via SSH
-# SSH infrastructure is provided by lib/ssh.sh (loaded before this module).
+# SSH infrastructure is provided by lib/remote/ssh.sh (loaded before this module).
 #
 # === Sections ===
 # 1. Dry-run display                        (~line 11)
 # 2. Remote orchestration (deploy_cluster)   (~line 73)
 # 3. CLI parsing & help                     (~line 337)
 #
-# Token extraction -> lib/join_token.sh
+# Token extraction -> lib/node/kubeadm.sh
 
 # --- Main Orchestration ---
 
@@ -74,18 +74,6 @@ deploy_dry_run() {
     log_info "=== End of dry-run (no changes made) ==="
 }
 
-# Build a join command string with common join arguments.
-# Usage: join_cmd=$(_build_join_cmd <sudo_prefix> <bundle_path>)
-# Requires: _JOIN_TOKEN, _JOIN_ADDR, _JOIN_HASH (set by _extract_join_info)
-_build_join_cmd() {
-    local _sudo="$1" _bundle="$2"
-    local _cmd="${_sudo}sh ${_bundle} join"
-    _cmd="${_cmd} --join-token $(_posix_shell_quote "$_JOIN_TOKEN")"
-    _cmd="${_cmd} --join-address $(_posix_shell_quote "$_JOIN_ADDR")"
-    _cmd="${_cmd} --discovery-token-hash $(_posix_shell_quote "$_JOIN_HASH")"
-    printf '%s' "$_cmd"
-}
-
 # Main deploy orchestration
 deploy_cluster() {
     local cp_count w_count
@@ -127,16 +115,11 @@ deploy_cluster() {
     # --- Step 1: SSH connectivity check ---
     _step=$((_step + 1))
     log_info "Step ${_step}/${total_steps}: Checking SSH connectivity..."
-    if ! _init_remote_session "deploy" "$_DEPLOY_ALL_NODES"; then
-        return 1
-    fi
-
-    # --- Step 2: Generate and transfer bundle ---
-    # Always regenerate (even on resume), because bundle paths are
-    # process-local and remote temp dirs are cleaned on exit.
+    # --- Step 2: Transfer setup-k8s.sh ---
+    # Always transferred (even on resume): remote working directories are
+    # removed when the session closes.
     _step=$((_step + 1))
-    log_info "Step ${_step}/${total_steps}: Generating and transferring bundle..."
-    if ! _generate_and_transfer_bundle "deploy"; then
+    if ! remote_session_open "deploy" "$_DEPLOY_ALL_NODES"; then
         return 1
     fi
 
@@ -153,9 +136,7 @@ deploy_cluster() {
         # Transfer kubeadm config patch file to remote if specified
         local _remote_patch_path=""
         if [ -n "${KUBEADM_CONFIG_PATCH:-}" ] && [ -f "$KUBEADM_CONFIG_PATCH" ]; then
-            local _rdir
-            _rdir=$(_bundle_dir_lookup "$cp1_host")
-            _remote_patch_path="${_rdir}/kubeadm-config-patch.yaml"
+            _remote_patch_path="$(remote_node_dir "$cp0")/kubeadm-config-patch.yaml"
             log_info "  Transferring kubeadm config patch to ${cp1_host}..."
             if ! _deploy_scp "$KUBEADM_CONFIG_PATCH" "$cp1_user" "$cp1_host" "$_remote_patch_path"; then
                 log_error "Failed to transfer kubeadm config patch to ${cp1_host}"
@@ -171,18 +152,11 @@ deploy_cluster() {
             done)
         fi
 
-        # Build init command with passthrough args (shell-escaped)
-        local remote_bundle
-        remote_bundle="$(_bundle_dir_lookup "$cp1_host")/setup-k8s.sh"
-        local sudo_pfx; sudo_pfx=$(_sudo_prefix "$cp1_user")
-        local init_cmd="${sudo_pfx}sh ${remote_bundle} init"
-        # If multiple CPs, enable HA
-        if [ "$cp_count" -gt 1 ]; then
-            init_cmd="${init_cmd} --ha"
-        fi
-        init_cmd=$(_append_passthrough_to_cmd "$init_cmd" "$DEPLOY_PASSTHROUGH_ARGS")
-
-        if ! _deploy_exec_remote "$cp1_user" "$cp1_host" "kubeadm init" "$init_cmd"; then
+        # Multiple control planes enable HA
+        local init_ha=""
+        if [ "$cp_count" -gt 1 ]; then init_ha="--ha"; fi
+        # shellcheck disable=SC2086 # init_ha is empty or a single flag
+        if ! remote_run --forward "$DEPLOY_PASSTHROUGH_ARGS" "$cp0" "kubeadm init" init $init_ha; then
             log_error "First control-plane initialization failed. Aborting."
             if [ "${COLLECT_DIAGNOSTICS:-false}" = true ]; then
                 _collect_diagnostics "$cp1_user" "$cp1_host" "/tmp/setup-k8s-diag-init-$(date +%s)" || true
@@ -218,17 +192,9 @@ deploy_cluster() {
                 continue
             fi
 
-            local node_bundle
-            node_bundle="$(_bundle_dir_lookup "$_NODE_HOST")/setup-k8s.sh"
-            local sudo_pfx; sudo_pfx=$(_sudo_prefix "$_NODE_USER")
-            local join_cmd
-            join_cmd=$(_build_join_cmd "$sudo_pfx" "$node_bundle")
-            join_cmd="${join_cmd} --control-plane"
-            join_cmd="${join_cmd} --certificate-key $(_posix_shell_quote "$_CERT_KEY")"
-            # Pass through HA and other args (shell-escaped)
-            join_cmd=$(_append_passthrough_to_cmd "$join_cmd" "$DEPLOY_PASSTHROUGH_ARGS")
-
-            if ! _deploy_exec_remote "$_NODE_USER" "$_NODE_HOST" "join control-plane" "$join_cmd"; then
+            if ! remote_run --forward "$DEPLOY_PASSTHROUGH_ARGS" "$node" "join control-plane" \
+                join --join-token "$_JOIN_TOKEN" --join-address "$_JOIN_ADDR" --discovery-token-hash "$_JOIN_HASH" \
+                --control-plane --certificate-key "$_CERT_KEY"; then
                 log_error "Control-plane join failed for ${_NODE_HOST}. Aborting."
                 if [ "${COLLECT_DIAGNOSTICS:-false}" = true ]; then
                     _collect_diagnostics "$_NODE_USER" "$_NODE_HOST" "/tmp/setup-k8s-diag-join-cp-$(date +%s)" || true
@@ -252,18 +218,12 @@ deploy_cluster() {
             local node
             node=$(_csv_get "$DEPLOY_WORKERS" "$_i")
             _parse_node_address "$node"
-            local w_user="$_NODE_USER" w_host="$_NODE_HOST"
+            local w_host="$_NODE_HOST"
 
-            local w_bundle
-            w_bundle="$(_bundle_dir_lookup "$w_host")/setup-k8s.sh"
-            local w_sudo; w_sudo=$(_sudo_prefix "$w_user")
-            local join_cmd
-            join_cmd=$(_build_join_cmd "$w_sudo" "$w_bundle")
-            join_cmd=$(_append_passthrough_filtered "$join_cmd" "$DEPLOY_PASSTHROUGH_ARGS" "--ha-vip --ha-interface")
-
-            # Run in background subshell
+            # Run in background subshell (HA settings apply to control planes only)
             (
-                _deploy_exec_remote "$w_user" "$w_host" "join worker" "$join_cmd"
+                remote_run --forward "$DEPLOY_PASSTHROUGH_ARGS" --drop "--ha-vip --ha-interface" "$node" "join worker" \
+                    join --join-token "$_JOIN_TOKEN" --join-address "$_JOIN_ADDR" --discovery-token-hash "$_JOIN_HASH"
             ) &
             worker_pids="${worker_pids}${worker_pids:+ }$!"
             worker_hosts="${worker_hosts}${worker_hosts:+ }${w_host}"
@@ -293,9 +253,8 @@ deploy_cluster() {
 
     # --- Step 7: Clean up remote bundle directories ---
     _step=$((_step + 1))
-    log_info "Step ${_step}/${total_steps}: Cleaning up remote bundle directories..."
-    _cleanup_remote_bundle_dirs
-    _pop_cleanup
+    log_info "Step ${_step}/${total_steps}: Cleaning up remote working directories..."
+    remote_session_close
 
     # --- Step 8: Summary ---
     log_info ""
@@ -335,17 +294,13 @@ deploy_cluster() {
         return 1
     fi
 
-    # Clean up session-scoped known_hosts
-    _teardown_session_known_hosts
-    _pop_cleanup
-
     _state_complete
     _audit_log "deploy" "completed" "cp=${cp_count} workers=${w_count}"
     log_info "Cluster deployment completed successfully!"
     return 0
 }
 
-# === Deploy argument parsing (moved from lib/validation.sh) ===
+# === Deploy argument parsing ===
 show_deploy_help() {
     echo "Usage: $0 deploy [options]"
     echo ""
@@ -459,4 +414,10 @@ validate_deploy_args() {
         log_error "--ha-vip requires multiple control-plane nodes (got 1)"
         exit 1
     fi
+}
+
+# === Runner ===
+
+_run_deploy() {
+    _run_remote deploy parse_deploy_args validate_deploy_args deploy_dry_run deploy_cluster "$@"
 }

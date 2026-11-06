@@ -1,0 +1,416 @@
+#!/usr/bin/env bats
+# Ported from test/unit/test_parsing_validation.sh
+
+setup() {
+    load '../helpers/common'
+}
+
+# File-local module loader (avoids repeating source blocks in every test)
+_load_validation_test_modules() {
+    load_modules
+}
+
+# ============================================================
+# Test: parse_setup_args
+# ============================================================
+_case_parse_setup_args() {
+    echo "=== Test: parse_setup_args ==="
+    (
+        load_modules
+
+        ACTION="join"
+        parse_setup_args --cri crio --kubernetes-version 1.31 \
+            --join-token abc --join-address 1.2.3.4:6443 \
+            --discovery-token-hash sha256:xyz \
+            --proxy-mode ipvs --install-helm true --install-kustomize true \
+            --pod-network-cidr 10.244.0.0/16 --service-cidr 10.96.0.0/12
+
+        _assert_eq "ACTION" "join" "$ACTION"
+        _assert_eq "CRI parsed" "crio" "$CRI"
+        _assert_eq "K8S_VERSION parsed" "1.31" "$K8S_VERSION"
+        _assert_eq "JOIN_TOKEN parsed" "abc" "$JOIN_TOKEN"
+        _assert_eq "JOIN_ADDRESS parsed" "1.2.3.4:6443" "$JOIN_ADDRESS"
+        _assert_eq "PROXY_MODE parsed" "ipvs" "$PROXY_MODE"
+        _assert_eq "INSTALL_HELM parsed" "true" "$INSTALL_HELM"
+        _assert_eq "INSTALL_KUSTOMIZE parsed" "true" "$INSTALL_KUSTOMIZE"
+        _assert_eq "KUBEADM_POD_CIDR parsed" "10.244.0.0/16" "$KUBEADM_POD_CIDR"
+        _assert_eq "KUBEADM_SERVICE_CIDR parsed" "10.96.0.0/12" "$KUBEADM_SERVICE_CIDR"
+    )
+}
+
+# ============================================================
+# Test: _require_value catches missing arguments
+# ============================================================
+_case_require_value() {
+    echo "=== Test: _require_value argument guard ==="
+    (
+        _load_validation_test_modules
+
+        # Simulating $# = 1 (only the flag, no value)
+        local exit_code=0
+        (_require_value 1 "--cri") >/dev/null 2>&1 || exit_code=$?
+        _assert_ne "_require_value rejects missing value" "0" "$exit_code"
+
+        # Simulating $# = 2 (flag + value present)
+        exit_code=0
+        (_require_value 2 "--cri") >/dev/null 2>&1 || exit_code=$?
+        _assert_eq "_require_value accepts present value" "0" "$exit_code"
+    )
+}
+
+# ============================================================
+# Test: unknown option exits with non-zero
+# ============================================================
+_case_unknown_option_exit_code() {
+    echo "=== Test: unknown option exit code ==="
+    (
+        load_modules
+
+        local exit_code=0
+        ACTION="init"
+        (parse_setup_args --bogus-flag) >/dev/null 2>&1 || exit_code=$?
+        _assert_ne "parse_setup_args rejects unknown option" "0" "$exit_code"
+
+        exit_code=0
+        (parse_cleanup_args --bogus-flag) >/dev/null 2>&1 || exit_code=$?
+        _assert_ne "parse_cleanup_args rejects unknown option" "0" "$exit_code"
+    )
+}
+
+# ============================================================
+# Test: --help early exit (no module download)
+# ============================================================
+_case_help_early_exit() {
+    echo "=== Test: --help early exit ==="
+    _assert_exit_code "setup-k8s.sh --help exits 0" 0 bash "$PROJECT_ROOT/setup-k8s.sh" --help
+}
+
+# ============================================================
+# Test: validate_proxy_mode nftables version check
+# ============================================================
+_case_validate_proxy_mode() {
+    echo "=== Test: validate_proxy_mode ==="
+    (
+        _load_validation_test_modules
+
+        # iptables should always pass
+        PROXY_MODE="iptables"
+        K8S_VERSION="1.28"
+        validate_proxy_mode
+        _assert_eq "iptables mode passes" "iptables" "$PROXY_MODE"
+
+        # nftables with old version should fail (run in nested subshell
+        # because validate_proxy_mode uses exit, not return)
+        PROXY_MODE="nftables"
+        K8S_VERSION="1.28"
+        local exit_code=0
+        (validate_proxy_mode) >/dev/null 2>&1 || exit_code=$?
+        _assert_ne "nftables 1.28 rejected" "0" "$exit_code"
+    )
+}
+
+# ============================================================
+# Test: pipefail safety — awk pipelines must survive zero matches
+# ============================================================
+_case_pipefail_safety() {
+    echo "=== Test: pipefail safety (awk vs grep under set -euo pipefail) ==="
+
+    # networking.sh: nft list tables | awk ... | while read
+    # Simulate empty input (no k8s-related nft tables)
+    _assert_exit_code "nft awk pipeline (no match)" 0 \
+        bash -c "set -euo pipefail; echo '' | awk '/kube-proxy|kubernetes/ {print \$2, \$3}' | while read -r family name; do echo \"\$family \$name\"; done"
+
+    # debian/kubernetes.sh: apt-cache madison | awk -v ver=...
+    # Simulate no matching version
+    _assert_exit_code "apt-cache awk pipeline (no match)" 0 \
+        bash -c "set -euo pipefail; echo 'kubeadm | 1.30.0-1.1 | https://pkgs.k8s.io' | awk -v ver='9.99.' 'index(\$0, ver) {print \$3; exit}'"
+
+    # debian/kubernetes.sh: awk early exit with large input must not SIGPIPE
+    # Simulates apt-cache madison producing many lines; awk exits after first match
+    _assert_exit_code "awk early exit on large input (no SIGPIPE)" 0 \
+        bash -c "set -euo pipefail; madison_out=\$(seq 1 1000 | sed 's/^/kubeadm | 1.32./'); echo \"\$madison_out\" | awk -v ver='1.32.' 'index(\$0, ver) {print \$3; exit}'"
+
+    # Same pattern but piped directly — would SIGPIPE under pipefail
+    # Exit code varies by environment (141 locally, 1 on some CI), so just assert non-zero
+    local sigpipe_exit=0
+    bash -c 'set -euo pipefail; seq 1 100000 | awk "{print; exit}"' >/dev/null 2>&1 || sigpipe_exit=$?
+    _assert_ne "direct pipe awk early exit SIGPIPE (sanity check)" "0" "$sigpipe_exit"
+
+    # Negative test: confirm grep WOULD fail under pipefail
+    _assert_exit_code "grep pipeline fails under pipefail (sanity check)" 1 \
+        bash -c 'set -euo pipefail; echo "no-match" | grep "NOTFOUND" | head -1'
+}
+
+# ============================================================
+# Test: setup dry-run output covers parsed setup options
+# ============================================================
+_case_setup_dry_run_output() {
+    echo "=== Test: setup dry-run output ==="
+    (
+        load_modules
+
+        export ACTION="init"
+        export CRI="crio"
+        export PROXY_MODE="nftables"
+        export K8S_VERSION="1.32"
+        export DISTRO_NAME="ubuntu"
+        export DISTRO_FAMILY="debian"
+        export SWAP_ENABLED=true
+        export INSTALL_HELM=true
+        export INSTALL_KUSTOMIZE=true
+        export ENABLE_COMPLETION=false
+        export COMPLETION_SHELLS="bash,zsh,fish"
+        export KUBEADM_POD_CIDR="10.244.0.0/16"
+        export KUBEADM_SERVICE_CIDR="10.96.0.0/12"
+        export KUBEADM_API_ADDR="10.0.2.15"
+        export KUBEADM_CP_ENDPOINT="10.0.2.15:6443"
+
+        local output
+        output=$(_setup_dry_run 2>&1)
+
+        local has_action=false has_cri=false has_proxy=false has_swap=false
+        local has_helm=false has_kustomize=false has_completion=false
+        local has_pod_cidr=false has_service_cidr=false has_api=false has_endpoint=false
+
+        echo "$output" | grep -q "Action: init" && has_action=true
+        echo "$output" | grep -q "Container Runtime: crio" && has_cri=true
+        echo "$output" | grep -q "Proxy mode: nftables" && has_proxy=true
+        echo "$output" | grep -q "Swap enabled: true" && has_swap=true
+        echo "$output" | grep -q "Install Helm: true" && has_helm=true
+        echo "$output" | grep -q "Install Kustomize: true" && has_kustomize=true
+        echo "$output" | grep -q "Shell Completion: false (shells: bash,zsh,fish)" && has_completion=true
+        echo "$output" | grep -q "Pod network CIDR: 10.244.0.0/16" && has_pod_cidr=true
+        echo "$output" | grep -q "Service CIDR: 10.96.0.0/12" && has_service_cidr=true
+        echo "$output" | grep -q "API server address: 10.0.2.15" && has_api=true
+        echo "$output" | grep -q "Control plane endpoint: 10.0.2.15:6443" && has_endpoint=true
+
+        _assert_eq "dry-run action" "true" "$has_action"
+        _assert_eq "dry-run cri" "true" "$has_cri"
+        _assert_eq "dry-run proxy" "true" "$has_proxy"
+        _assert_eq "dry-run swap" "true" "$has_swap"
+        _assert_eq "dry-run helm" "true" "$has_helm"
+        _assert_eq "dry-run kustomize" "true" "$has_kustomize"
+        _assert_eq "dry-run completion" "true" "$has_completion"
+        _assert_eq "dry-run pod cidr" "true" "$has_pod_cidr"
+        _assert_eq "dry-run service cidr" "true" "$has_service_cidr"
+        _assert_eq "dry-run api address" "true" "$has_api"
+        _assert_eq "dry-run endpoint" "true" "$has_endpoint"
+    )
+}
+
+# ============================================================
+# Test: --swap-enabled in help text
+# ============================================================
+_case_help_contains_swap() {
+    echo "=== Test: help text contains --swap-enabled ==="
+    (
+        local help_out
+        help_out=$(bash "$PROJECT_ROOT/setup-k8s.sh" init --help 2>&1)
+        local has_swap="false"
+        if echo "$help_out" | grep -q -- '--swap-enabled'; then has_swap="true"; fi
+        _assert_eq "help contains --swap-enabled" "true" "$has_swap"
+    )
+}
+
+# ============================================================
+# Test: help text contains 'upgrade'
+# ============================================================
+_case_help_contains_upgrade() {
+    echo "=== Test: help text contains upgrade ==="
+    (
+        local help_out
+        help_out=$(bash "$PROJECT_ROOT/setup-k8s.sh" --help 2>&1)
+        local has_upgrade="false"
+        if echo "$help_out" | grep -q 'upgrade'; then has_upgrade="true"; fi
+        _assert_eq "help contains upgrade" "true" "$has_upgrade"
+    )
+}
+
+# ============================================================
+# Test: validate_join_args
+# ============================================================
+_case_validate_join_args() {
+    echo "=== Test: validate_join_args ==="
+    (
+        _load_validation_test_modules
+
+        # Valid join args should pass
+        ACTION="join"
+        JOIN_TOKEN="abcdef.1234567890abcdef"
+        JOIN_ADDRESS="10.0.0.1:6443"
+        DISCOVERY_TOKEN_HASH="sha256:$(printf '%064d' 0)"
+        validate_join_args
+        _assert_eq "valid join args pass" "join" "$ACTION"
+
+        # Missing token should fail
+        local exit_code=0
+        (
+            ACTION="join"
+            JOIN_TOKEN=""
+            JOIN_ADDRESS="10.0.0.1:6443"
+            DISCOVERY_TOKEN_HASH="sha256:$(printf '%064d' 0)"
+            validate_join_args
+        ) >/dev/null 2>&1 || exit_code=$?
+        _assert_ne "missing token rejected" "0" "$exit_code"
+
+        # Bad token format should fail
+        exit_code=0
+        (
+            ACTION="join"
+            JOIN_TOKEN="bad-token"
+            JOIN_ADDRESS="10.0.0.1:6443"
+            DISCOVERY_TOKEN_HASH="sha256:$(printf '%064d' 0)"
+            validate_join_args
+        ) >/dev/null 2>&1 || exit_code=$?
+        _assert_ne "bad token format rejected" "0" "$exit_code"
+
+        # Address without port should fail
+        exit_code=0
+        (
+            ACTION="join"
+            JOIN_TOKEN="abcdef.1234567890abcdef"
+            JOIN_ADDRESS="10.0.0.1"
+            DISCOVERY_TOKEN_HASH="sha256:$(printf '%064d' 0)"
+            validate_join_args
+        ) >/dev/null 2>&1 || exit_code=$?
+        _assert_ne "address without port rejected" "0" "$exit_code"
+
+        # init action should skip validation
+        ACTION="init"
+        JOIN_TOKEN=""
+        JOIN_ADDRESS=""
+        # shellcheck disable=SC2034 # used by validate_join_args
+        DISCOVERY_TOKEN_HASH=""
+        validate_join_args
+        _assert_eq "init action skips validation" "init" "$ACTION"
+    )
+}
+
+# ============================================================
+# Test: validate_cri
+# ============================================================
+_case_validate_cri() {
+    echo "=== Test: validate_cri ==="
+    (
+        _load_validation_test_modules
+
+        CRI="containerd"
+        validate_cri
+        _assert_eq "containerd passes" "containerd" "$CRI"
+
+        CRI="crio"
+        validate_cri
+        _assert_eq "crio passes" "crio" "$CRI"
+
+        local exit_code=0
+        (CRI="docker"; validate_cri) >/dev/null 2>&1 || exit_code=$?
+        _assert_ne "docker rejected" "0" "$exit_code"
+    )
+}
+
+# ============================================================
+# Test: _normalize_node_list
+# ============================================================
+_case_normalize_node_list() {
+    echo "=== Test: _normalize_node_list ==="
+    (
+        load_modules
+
+        local result
+        result=$(_normalize_node_list " node1 , node2,,node3 ")
+        _assert_eq "trims and deduplicates empty tokens" "node1,node2,node3" "$result"
+
+        result=$(_normalize_node_list "single")
+        _assert_eq "single node unchanged" "single" "$result"
+
+        result=$(_normalize_node_list ",,")
+        _assert_eq "all empty tokens gives empty" "" "$result"
+    )
+}
+
+# ============================================================
+# Test: _validate_node_addresses
+# ============================================================
+_case_validate_node_addresses() {
+    echo "=== Test: _validate_node_addresses ==="
+    (
+        load_modules
+
+        # Valid addresses should pass
+        local exit_code=0
+        (_validate_node_addresses "10.0.0.1,admin@10.0.0.2") >/dev/null 2>&1 || exit_code=$?
+        _assert_eq "valid addresses pass" "0" "$exit_code"
+
+        # Duplicate address should fail
+        exit_code=0
+        (_validate_node_addresses "10.0.0.1,10.0.0.1") >/dev/null 2>&1 || exit_code=$?
+        _assert_ne "duplicate address rejected" "0" "$exit_code"
+
+        # Bare IPv6 without brackets should fail
+        exit_code=0
+        (_validate_node_addresses "fd00::1") >/dev/null 2>&1 || exit_code=$?
+        _assert_ne "bare IPv6 rejected" "0" "$exit_code"
+
+        # Bracketed IPv6 should pass
+        exit_code=0
+        (_validate_node_addresses "[fd00::1]") >/dev/null 2>&1 || exit_code=$?
+        _assert_eq "bracketed IPv6 passes" "0" "$exit_code"
+
+        # Username starting with - should fail
+        exit_code=0
+        (_validate_node_addresses "-evil@10.0.0.1") >/dev/null 2>&1 || exit_code=$?
+        _assert_ne "dash username rejected" "0" "$exit_code"
+    )
+}
+
+@test "parse_setup_args" {
+    _case_parse_setup_args
+}
+
+@test "_require_value argument guard" {
+    _case_require_value
+}
+
+@test "unknown option exit code" {
+    _case_unknown_option_exit_code
+}
+
+@test "--help early exit" {
+    _case_help_early_exit
+}
+
+@test "validate_proxy_mode" {
+    _case_validate_proxy_mode
+}
+
+@test "pipefail safety (awk vs grep under set -euo pipefail)" {
+    _case_pipefail_safety
+}
+
+@test "setup dry-run output" {
+    _case_setup_dry_run_output
+}
+
+@test "help text contains --swap-enabled" {
+    _case_help_contains_swap
+}
+
+@test "help text contains upgrade" {
+    _case_help_contains_upgrade
+}
+
+@test "validate_join_args" {
+    _case_validate_join_args
+}
+
+@test "validate_cri" {
+    _case_validate_cri
+}
+
+@test "_normalize_node_list" {
+    _case_normalize_node_list
+}
+
+@test "_validate_node_addresses" {
+    _case_validate_node_addresses
+}

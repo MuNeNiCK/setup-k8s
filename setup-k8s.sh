@@ -2,324 +2,167 @@
 
 set -eu
 
-# === Sections ===
-# 1. Environment setup & global defaults       (~line 8)
-# 2. CLI argument parsing (pre-bootstrap)      (~line 38)
-# 3. Bootstrap & runners sourcing              (~line 264)
-# 4. Entry point (main)                       (~line 295)
-#
-# Subcommand runners -> lib/runners.sh
+# Entry point. In a local checkout this file loads every module from lib/
+# and commands/. In the release bundle (dist/setup-k8s.sh) the modules are
+# embedded above this code and BUNDLED_MODE=true.
 
-# Ensure /usr/local/bin is in PATH (generic distro installs binaries there)
+# Ensure /usr/local/bin is in PATH (binary installs place tools there)
 case ":$PATH:" in
     *:/usr/local/bin:*) ;;
     *) export PATH="/usr/local/bin:$PATH" ;;
 esac
 
-# Ensure SUDO_USER is defined even when script runs as root without sudo
+# Ensure SUDO_USER is defined even when the script runs as root without sudo
 SUDO_USER="${SUDO_USER:-}"
 
-# Get the directory where the script is located
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SETUP_K8S_VERSION="${SETUP_K8S_VERSION:-dev}"
+SETUP_K8S_RELEASE_URL="https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh"
 
-# Detect stdin execution mode (curl | sh)
-_STDIN_MODE=false
-case "$0" in
-    sh|dash|ash|bash|*/sh|*/dash|*/ash|*/bash|/dev/stdin|/proc/self/fd/0) _STDIN_MODE=true ;;
-esac
+# Path of the running bundle file, used to transfer the script to remote
+# nodes. Empty when the bundle was read from stdin (curl ... | sh).
+_SELF_PATH=""
 
-# Default GitHub base URL (can be overridden)
-GITHUB_BASE_URL="${GITHUB_BASE_URL:-https://raw.githubusercontent.com/MuNeNiCK/setup-k8s/main}"
+if [ "${BUNDLED_MODE:-false}" = true ]; then
+    if [ -f "$0" ] && head -n 3 "$0" 2>/dev/null | grep -q '^BUNDLED_MODE=true$'; then
+        _SELF_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+    fi
+else
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+    if [ ! -f "$SCRIPT_DIR/lib/core/bootstrap.sh" ]; then
+        echo "Error: lib/ not found next to $0." >&2
+        echo "Use the release bundle:" >&2
+        echo "  curl -fsSL $SETUP_K8S_RELEASE_URL | sh -s -- <subcommand> [options]" >&2
+        exit 1
+    fi
+    # shellcheck source=lib/core/bootstrap.sh
+    . "$SCRIPT_DIR/lib/core/bootstrap.sh"
+    _source_all_modules
+fi
 
-# Defaults for global flags parsed before modules are loaded
-LOG_DIR="${LOG_DIR:-}"
-_AUDIT_SYSLOG="${_AUDIT_SYSLOG:-false}"
-COLLECT_DIAGNOSTICS="${COLLECT_DIAGNOSTICS:-false}"
-RESUME_ENABLED="${RESUME_ENABLED:-false}"
+_SUBCOMMANDS="init join deploy upgrade remove backup restore cleanup status preflight renew"
 
-# Check if running in bundled mode (all modules embedded in this script)
-BUNDLED_MODE="${BUNDLED_MODE:-false}"
-
-# Single-pass argument parsing: extract subcommand, global flags, and build cli_args
-# before bootstrap to avoid unnecessary network fetch for --help.
-# Subcommand is detected strictly from the first positional argument only,
-# to avoid misinterpreting option values (e.g. --ha-interface deploy) as subcommands.
-ACTION=""
-_cli_argc=0
-_action_detected=false
-while [ $# -gt 0 ]; do
-    arg="$1"
-    # shellcheck disable=SC2034 # LOG_LEVEL used by logging module
-    case "$arg" in
-        --help|-h)
-            # Deploy/upgrade/backup/restore/status --help is deferred to their parsers
-            if [ "$_action_detected" = true ] && { [ "$ACTION" = "deploy" ] || [ "$ACTION" = "upgrade" ] || [ "$ACTION" = "remove" ] || [ "$ACTION" = "backup" ] || [ "$ACTION" = "restore" ] || [ "$ACTION" = "cleanup" ] || [ "$ACTION" = "status" ] || [ "$ACTION" = "preflight" ] || [ "$ACTION" = "renew" ]; }; then
-                _cli_argc=$((_cli_argc + 1)); eval "_cli_${_cli_argc}=\$arg"
-            else
-                cat <<'HELPEOF'
-Usage: setup-k8s.sh <init|join|deploy|upgrade|remove|backup|restore|cleanup|status|preflight|renew> [options]
+_show_global_help() {
+    cat <<'EOF'
+Usage: setup-k8s.sh <subcommand> [options]
 
 Subcommands:
-  init                    Initialize a new Kubernetes cluster
-  join                    Join an existing cluster as a worker or control-plane node
-  deploy                  Deploy a cluster across remote nodes via SSH
-  upgrade                 Upgrade cluster Kubernetes version
-  remove                  Remove nodes from the cluster (drain, delete, reset)
-  backup                  Create an etcd snapshot backup
-  restore                 Restore an etcd snapshot
-  cleanup                 Clean up Kubernetes installation from this node
-  status                  Show cluster and node status
-  preflight               Run preflight checks before init/join
-  renew                   Renew or check Kubernetes certificates
+  init        Initialize a new Kubernetes cluster on this node
+  join        Join this node to an existing cluster
+  deploy      Deploy a cluster across remote nodes via SSH
+  upgrade     Upgrade the cluster Kubernetes version
+  remove      Remove nodes from the cluster (drain, delete, reset)
+  backup      Create an etcd snapshot backup
+  restore     Restore an etcd snapshot
+  cleanup     Remove the Kubernetes installation from this node
+  status      Show cluster and node status
+  preflight   Run preflight checks before init/join
+  renew       Renew or check Kubernetes certificates
 
-Options (init/join):
-  --cri RUNTIME           Container runtime (containerd or crio). Default: containerd
-  --proxy-mode MODE       Kube-proxy mode (iptables, ipvs, or nftables). Default: iptables
-  --pod-network-cidr CIDR Pod network CIDR (e.g., 192.168.0.0/16)
-  --apiserver-advertise-address ADDR  API server advertise address
-  --control-plane-endpoint ENDPOINT   Control plane endpoint
-  --service-cidr CIDR     Service CIDR (e.g., 10.96.0.0/12)
-  --kubernetes-version VER Kubernetes version (e.g., 1.29, 1.28)
-  --join-token TOKEN      Join token (join only)
-  --join-address ADDR     Control plane address (join only)
-  --discovery-token-hash HASH  Discovery token hash (join only)
-  --control-plane         Join as control-plane node (join only, HA cluster)
-  --certificate-key KEY   Certificate key for control-plane join
-  --ha                    Enable HA mode with kube-vip (init only)
-  --ha-vip ADDRESS        VIP address (required when --ha; also for join --control-plane)
-  --ha-interface IFACE    Network interface for VIP (auto-detected if omitted)
-  --swap-enabled          Keep swap enabled (K8s 1.28+, NodeSwap LimitedSwap)
-  --distro FAMILY         Override distro family detection (debian, rhel, suse, arch, alpine, generic)
-  --enable-completion BOOL  Enable shell completion setup (default: true)
-  --completion-shells LIST  Shells to configure (auto, bash, zsh, fish, or comma-separated)
-  --install-helm BOOL     Install Helm package manager (default: false)
-  --install-kustomize BOOL  Install Kustomize (default: false)
-  --dry-run               Show configuration summary and exit without making changes
+Global options:
+  --dry-run               Show what would be done and exit
   --verbose               Enable debug logging
   --quiet                 Suppress informational messages (errors only)
+  --log-dir DIR           Also write logs to a file in DIR
+  --audit-syslog          Send audit events to syslog
+  --collect-diagnostics   Collect diagnostics on failure
+  --resume                Resume an interrupted operation
+  --version               Print the version and exit
   --help, -h              Display this help message
 
-Options (deploy):
-  --control-planes IPs    Comma-separated control-plane nodes (user@ip or ip)
-  --workers IPs           Comma-separated worker nodes (user@ip or ip)
-  --ssh-user USER         Default SSH user (default: root)
-  --ssh-port PORT         SSH port (default: 22)
-  --ssh-key PATH          Path to SSH private key (auto-discovered from ~/.ssh/ when omitted)
-  --ssh-password PASS     SSH password
-  --ssh-known-hosts FILE  known_hosts file for host key verification (recommended)
-  --ssh-host-key-check MODE  SSH host key policy: yes, no, or accept-new (default: accept-new)
-  --ha-vip ADDRESS        VIP for HA (required when >1 control-plane)
+Run 'setup-k8s.sh <subcommand> --help' for subcommand options.
+EOF
+}
 
-  Run 'setup-k8s.sh deploy --help' for deploy-specific details.
+_show_subcommand_help() {
+    case "$1" in
+        init|join) show_setup_help ;;
+        deploy)    show_deploy_help ;;
+        upgrade)   show_upgrade_help ;;
+        remove)    show_remove_help ;;
+        backup)    show_backup_help ;;
+        restore)   show_restore_help ;;
+        cleanup)   show_cleanup_help ;;
+        status)    show_status_help ;;
+        preflight) show_preflight_help ;;
+        renew)     show_renew_help ;;
+    esac
+}
 
-Options (upgrade):
-  --kubernetes-version VER  Target version in MAJOR.MINOR.PATCH format (e.g., 1.33.2)
-  --first-control-plane     Run 'kubeadm upgrade apply' (first CP only)
-  --skip-drain              Skip drain/uncordon (for single-node clusters)
-  --control-planes IPs      Remote mode: comma-separated control-plane nodes
-  --workers IPs             Remote mode: comma-separated worker nodes
-
-  Run 'setup-k8s.sh upgrade --help' for upgrade-specific details.
-
-Options (remove):
-  --control-planes IP       Control-plane node (user@ip or ip)
-  --workers IPs             Comma-separated nodes to remove (user@ip or ip)
-  --force                   Skip confirmation prompt
-
-  Run 'setup-k8s.sh remove --help' for details.
-
-Options (cleanup):
-  --force                 Skip confirmation prompt
-  --preserve-cni          Preserve CNI configurations
-  --remove-helm           Remove Helm binary and configuration
-  --remove-kustomize      Remove Kustomize binary and configuration
-  --dry-run               Show cleanup plan and exit
-
-  Run 'setup-k8s.sh cleanup --help' for details.
-
-Options (backup):
-  --snapshot-path PATH    Output snapshot path (default: auto-generated)
-  --control-planes IP     Remote mode: target control-plane node (user@ip or ip)
-
-  Run 'setup-k8s.sh backup --help' for details.
-
-Options (restore):
-  --snapshot-path PATH    Snapshot file to restore (required)
-  --control-planes IP     Remote mode: target control-plane node (user@ip or ip)
-
-  Run 'setup-k8s.sh restore --help' for details.
-
-Options (status):
-  --output FORMAT         Output format: text (default) or wide
-
-  Run 'setup-k8s.sh status --help' for details.
-
-Options (preflight):
-  --mode MODE             Check mode: init or join (default: init)
-  --cri RUNTIME           Container runtime to check (default: containerd)
-  --proxy-mode MODE       Proxy mode to check (default: iptables)
-  --kubernetes-version VER Target Kubernetes minor version (e.g., 1.36)
-  --preflight-strict      Treat warnings as failures
-
-  Run 'setup-k8s.sh preflight --help' for details.
-
-Options (renew):
-  --certs CERTS           Certificates to renew: 'all' or comma-separated list (default: all)
-  --check-only            Only check certificate expiration (no renewal)
-  --control-planes IPs    Remote mode: comma-separated control-plane nodes
-
-  Run 'setup-k8s.sh renew --help' for details.
-HELPEOF
+# shellcheck disable=SC2034 # global flags are read by the loaded modules
+_main() {
+    local _help=false _rest=""
+    ACTION=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --verbose) LOG_LEVEL=2 ;;
+            --quiet) LOG_LEVEL=0 ;;
+            --dry-run) DRY_RUN=true ;;
+            --log-dir)
+                if [ $# -lt 2 ]; then
+                    echo "Error: --log-dir requires a value" >&2
+                    exit 1
+                fi
+                LOG_DIR="$2"
+                shift
+                ;;
+            --audit-syslog) _AUDIT_SYSLOG=true ;;
+            --collect-diagnostics) COLLECT_DIAGNOSTICS=true ;;
+            --resume) RESUME_ENABLED=true ;;
+            --version)
+                echo "setup-k8s ${SETUP_K8S_VERSION}"
                 exit 0
-            fi
-            shift
-            ;;
-        --verbose)
-            LOG_LEVEL=2
-            shift
-            ;;
-        --quiet)
-            LOG_LEVEL=0
-            shift
-            ;;
-        --dry-run)
-            DRY_RUN=true
-            shift
-            ;;
-        --log-dir)
-            if [ $# -lt 2 ]; then
-                echo "Error: --log-dir requires a value" >&2
-                exit 1
-            fi
-            LOG_DIR="$2"
-            shift 2
-            ;;
-        --audit-syslog)
-            _AUDIT_SYSLOG=true
-            shift
-            ;;
-        --collect-diagnostics)
-            COLLECT_DIAGNOSTICS=true
-            shift
-            ;;
-        --distro)
-            if [ $# -lt 2 ]; then
-                echo "Error: --distro requires a value" >&2
-                exit 1
-            fi
-            DISTRO_OVERRIDE="$2"
-            _cli_argc=$((_cli_argc + 1)); eval "_cli_${_cli_argc}=\$arg"
-            _cli_argc=$((_cli_argc + 1)); eval "_cli_${_cli_argc}=\$2"
-            shift 2
-            ;;
-        --resume)
-            RESUME_ENABLED=true
-            shift
-            ;;
-        --ha|--control-plane|--swap-enabled|--first-control-plane|--skip-drain|--no-rollback|--auto-step-upgrade|--force|--preserve-cni|--remove-helm|--remove-kustomize|--check-only|--preflight-strict)
-            _cli_argc=$((_cli_argc + 1)); eval "_cli_${_cli_argc}=\$arg"
-            shift
-            ;;
-        -*)
-            # All other flags take a value: skip next token so it is never
-            # interpreted as a subcommand. Pass both through to cli_args.
-            if [ $# -lt 2 ]; then
-                echo "Error: $arg requires a value" >&2
-                exit 1
-            fi
-            _cli_argc=$((_cli_argc + 1)); eval "_cli_${_cli_argc}=\$arg"
-            _cli_argc=$((_cli_argc + 1)); eval "_cli_${_cli_argc}=\$2"
-            shift 2
-            ;;
-        *)
-            # First non-flag positional argument is the subcommand (strip it from cli_args)
-            if [ "$_action_detected" = false ]; then
-                case "$arg" in
-                    init|join|deploy|upgrade|remove|backup|restore|cleanup|status|preflight|renew)
-                        ACTION="$arg"
-                        _action_detected=true
-                        shift
-                        continue
-                        ;;
-                    *)
-                        echo "Error: Unknown subcommand '$arg'. Valid subcommands: init, join, deploy, upgrade, remove, backup, restore, cleanup, status, preflight, renew" >&2
-                        exit 1
-                        ;;
-                esac
-            fi
-            _cli_argc=$((_cli_argc + 1)); eval "_cli_${_cli_argc}=\$arg"
-            shift
-            ;;
-    esac
-done
-unset _action_detected
-
-# Inline helper: reconstruct cli_args into positional parameters.
-# In POSIX sh, `set --` inside a function only affects function-local params.
-# This macro must be used inline (not in a function) to modify the caller's $@.
-# Usage: eval "$_RESTORE_CLI_ARGS"
-_RESTORE_CLI_ARGS='set -- ; _i=1; while [ "$_i" -le "$_cli_argc" ]; do eval "set -- \"\$@\" \"\$_cli_${_i}\""; _i=$((_i + 1)); done'
-
-# Check if --control-planes is present in args (determines remote vs local mode).
-# Usage: eval "$_RESTORE_CLI_ARGS"; _has_control_planes_flag "$@"
-_has_control_planes_flag() {
-    for _arg in "$@"; do
-        [ "$_arg" = "--control-planes" ] && return 0
+                ;;
+            --help|-h) _help=true ;;
+            *)
+                if [ -n "$ACTION" ]; then
+                    _rest="${_rest}$(_posix_shell_quote "$1")"
+                else
+                    case " $_SUBCOMMANDS " in
+                        *" $1 "*) ACTION="$1" ;;
+                        *)
+                            case "$1" in
+                                -*) echo "Error: '$1' must follow the subcommand (setup-k8s.sh <subcommand> [options])" >&2 ;;
+                                *)  echo "Error: Unknown subcommand '$1'. Valid subcommands: $_SUBCOMMANDS" >&2 ;;
+                            esac
+                            exit 1
+                            ;;
+                    esac
+                fi
+                ;;
+        esac
+        shift
     done
-    return 1
-}
 
-# Source shared bootstrap logic (exit traps, module validation, _dispatch)
-if ! type _validate_shell_module >/dev/null 2>&1; then
-    if [ "$_STDIN_MODE" = false ] && [ -f "$SCRIPT_DIR/lib/bootstrap.sh" ]; then
-        . "$SCRIPT_DIR/lib/bootstrap.sh"
-    elif [ "$BUNDLED_MODE" = "true" ]; then
-        echo "Error: Bundled mode via stdin requires a script with embedded modules." >&2
-        exit 1
-    else
-        # Running standalone (e.g. curl | sh): download bootstrap.sh from GitHub
-        _BOOTSTRAP_TMP=$(mktemp /tmp/bootstrap-XXXXXX)
-        if curl -fsSL --retry 3 --retry-delay 2 "${GITHUB_BASE_URL}/lib/bootstrap.sh" > "$_BOOTSTRAP_TMP" && [ -s "$_BOOTSTRAP_TMP" ]; then
-            # shellcheck disable=SC1090
-            . "$_BOOTSTRAP_TMP"
-            rm -f "$_BOOTSTRAP_TMP"
+    if [ "$_help" = true ]; then
+        if [ -n "$ACTION" ]; then
+            _show_subcommand_help "$ACTION"
         else
-            echo "Error: Failed to download bootstrap.sh from ${GITHUB_BASE_URL}" >&2
-            rm -f "$_BOOTSTRAP_TMP"
-            exit 1
+            _show_global_help
         fi
+        exit 0
     fi
-fi
-
-# Source runners (subcommand implementations)
-if [ "$_STDIN_MODE" = false ] && [ -f "$SCRIPT_DIR/lib/runners.sh" ]; then
-    . "$SCRIPT_DIR/lib/runners.sh"
-elif [ "$_STDIN_MODE" = true ] && [ "$BUNDLED_MODE" != "true" ]; then
-    _RUNNERS_TMP=$(mktemp /tmp/runners-XXXXXX)
-    if curl -fsSL --retry 3 --retry-delay 2 "${GITHUB_BASE_URL}/lib/runners.sh" > "$_RUNNERS_TMP" && [ -s "$_RUNNERS_TMP" ]; then
-        # shellcheck disable=SC1090
-        . "$_RUNNERS_TMP"
-        rm -f "$_RUNNERS_TMP"
-    else
-        echo "Error: Failed to download runners.sh from ${GITHUB_BASE_URL}" >&2
-        rm -f "$_RUNNERS_TMP"
+    if [ -z "$ACTION" ]; then
+        echo "Error: Missing subcommand. Valid subcommands: $_SUBCOMMANDS" >&2
+        echo "Run with --help for usage information" >&2
         exit 1
     fi
-fi
 
-main() {
+    if [ -n "${LOG_DIR:-}" ]; then
+        _init_file_logging "$LOG_DIR"
+    fi
+
+    eval "set -- $_rest"
     case "$ACTION" in
-        deploy)          _run_deploy "$@" ;;
-        upgrade)         _run_upgrade "$@" ;;
-        remove)          _run_remove "$@" ;;
-        cleanup)         _run_cleanup "$@" ;;
-        backup|restore)  _run_etcd "$@" ;;
-        preflight)       _run_preflight "$@" ;;
-        renew)           _run_renew "$@" ;;
-        status)          _run_status "$@" ;;
-        init|join)       _run_setup "$@" ;;
-        "")              _error_missing_subcommand ;;
+        init|join)      _run_setup "$@" ;;
+        deploy)         _run_deploy "$@" ;;
+        upgrade)        _run_upgrade "$@" ;;
+        remove)         _run_remove "$@" ;;
+        backup|restore) _run_etcd "$@" ;;
+        cleanup)        _run_cleanup "$@" ;;
+        status)         _run_status "$@" ;;
+        preflight)      _run_preflight "$@" ;;
+        renew)          _run_renew "$@" ;;
     esac
 }
 
-main "$@"
+_main "$@"

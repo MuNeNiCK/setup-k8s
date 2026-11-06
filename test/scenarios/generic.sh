@@ -182,6 +182,7 @@ CIEOF
         docker run -d --rm
         --name "$container_name"
         --label "managed-by=k8s-test-runner"
+        --label "$TEST_OWNER_LABEL"
         --device /dev/kvm:/dev/kvm
         -v "$VM_DATA_DIR:/data"
         -v "$_CLOUD_INIT_USER_DATA:/cloud-init-userdata.yaml:ro"
@@ -208,11 +209,11 @@ CIEOF
     wait_for_guest_bootstrap "$SSH_PORT" "$LOGIN_USER" "$SSH_READY_TIMEOUT" "$HOST_DISTRO" || return 1
 
     # Generate and transfer bundled scripts
-    # Save K8S_VERSION: _generate_bundle sources variables.sh which resets it
+    # Keep K8S_VERSION across bundle generation
     local _saved_k8s_version="$K8S_VERSION"
     _SETUP_BUNDLE=$(mktemp /tmp/setup-k8s-generic-bundle.XXXXXX.sh)
     log_info "Generating bundled script..."
-    _generate_bundle "$SETUP_K8S_SCRIPT" "$_SETUP_BUNDLE" "all"
+    _generate_bundle "$SETUP_K8S_SCRIPT" "$_SETUP_BUNDLE"
     K8S_VERSION="$_saved_k8s_version"
     log_info "Transferring bundled script to VM..."
     vm_scp "$_SETUP_BUNDLE" "/tmp/setup-k8s.sh"
@@ -233,7 +234,7 @@ CIEOF
         setup_args+=" $extra_str"
     fi
 
-    local setup_cmd="bash /tmp/setup-k8s.sh ${setup_args} > /tmp/setup-k8s.log 2>&1; echo \$? > /tmp/setup-exit-code"
+    local setup_cmd="sh /tmp/setup-k8s.sh ${setup_args} > /tmp/setup-k8s.log 2>&1; echo \$? > /tmp/setup-exit-code"
     vm_ssh "nohup bash -c '${setup_cmd}' </dev/null >/dev/null 2>&1 &"
 
     if ! poll_vm_command vm_ssh "$container_name" /tmp/setup-exit-code /tmp/setup-k8s.log "$TIMEOUT_TOTAL"; then
@@ -347,7 +348,7 @@ CIEOF
 
     # === Phase 3: Cleanup with --distro generic ===
     log_info "Phase 3: Running setup-k8s.sh cleanup --force --distro generic ..."
-    local cleanup_cmd="bash /tmp/setup-k8s.sh cleanup --force --distro generic > /tmp/cleanup-k8s.log 2>&1; echo \$? > /tmp/cleanup-exit-code"
+    local cleanup_cmd="sh /tmp/setup-k8s.sh cleanup --force --distro generic > /tmp/cleanup-k8s.log 2>&1; echo \$? > /tmp/cleanup-exit-code"
     vm_ssh "nohup bash -c '${cleanup_cmd}' </dev/null >/dev/null 2>&1 &"
 
     if ! poll_vm_command vm_ssh "$container_name" /tmp/cleanup-exit-code /tmp/cleanup-k8s.log "$TIMEOUT_TOTAL"; then

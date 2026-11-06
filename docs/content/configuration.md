@@ -5,13 +5,13 @@
 containerd is the default runtime:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- init
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- init
 ```
 
 Use CRI-O:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   init --cri crio
 ```
 
@@ -22,7 +22,7 @@ Joining nodes must use the same CRI as the existing cluster.
 Pin a Kubernetes minor or patch version:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   init --kubernetes-version 1.33.2
 ```
 
@@ -39,7 +39,7 @@ curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh
 IPVS:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   init --proxy-mode ipvs
 ```
 
@@ -48,7 +48,7 @@ IPVS remains supported by this script for compatibility, but Kubernetes 1.35+ de
 nftables:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   init --proxy-mode nftables --kubernetes-version 1.31
 ```
 
@@ -61,14 +61,15 @@ By default, `setup-k8s` disables swap. This is required for Kubernetes versions 
 Starting with Kubernetes 1.28, the `NodeSwap` feature gate allows nodes to run with swap enabled. Use `--swap-enabled` to keep swap active and configure kubelet with `failSwapOn: false` and `memorySwap.swapBehavior: LimitedSwap`.
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   init --swap-enabled --kubernetes-version 1.32
 ```
 
 For remote deployment:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- \
+curl -fsSLO https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh
+sh setup-k8s.sh \
   deploy \
   --control-planes 10.0.0.1 \
   --workers 10.0.0.2 \
@@ -94,15 +95,25 @@ Downloaded components:
 Binaries are installed to `/usr/local/bin/`, and CNI plugins are installed to `/opt/cni/bin/`.
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   init --distro generic --kubernetes-version 1.32
 ```
 
 Override component versions with environment variables:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | \
-  sudo CONTAINERD_VERSION=2.0.4 RUNC_VERSION=1.2.5 sh -s -- init --distro generic
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | \
+  sudo CONTAINERD_VERSION=2.4.2 RUNC_VERSION=1.5.2 sh -s -- init --distro generic
+```
+
+Downloads are verified against the published sha256 checksums; an install stops if the checksum cannot be verified.
+
+## Pause image
+
+The container runtime is configured with the pause image of the installed kubeadm (`kubeadm config images list`). Set `PAUSE_IMAGE_VERSION` to override the tag:
+
+```bash
+sudo PAUSE_IMAGE_VERSION=3.10.2 sh setup-k8s.sh init
 ```
 
 Supported generic architectures are `amd64` and `arm64`.

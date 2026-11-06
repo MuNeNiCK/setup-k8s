@@ -94,6 +94,7 @@ _fo_start_vm() {
     docker run -d --rm \
         --name "$container_name" \
         --label "managed-by=k8s-ha-failover-test" \
+        --label "$TEST_OWNER_LABEL" \
         --network "$DOCKER_NETWORK" --ip "$static_ip" \
         --device /dev/kvm:/dev/kvm \
         -v "$vm_data_dir:/data" \
@@ -168,7 +169,7 @@ run_failover_test() {
     # Use CP1's Docker IP as control-plane-endpoint.
     # kube-vip manifest is still deployed via --ha-vip/--ha-interface.
     local deploy_cmd=(
-        bash "$SETUP_K8S_SCRIPT" deploy
+        sh "$HOST_BUNDLE" deploy
         --control-planes "$cp_list"
         --ha-vip "$_FO_HA_VIP"
         --ha-interface "$vm_iface"

@@ -223,7 +223,7 @@ renew_cluster() {
 
     # Step 1: Check SSH connectivity to all nodes
     log_info "Step 1: Checking SSH connectivity..."
-    if ! _init_remote_session "renew" "$DEPLOY_CONTROL_PLANES"; then
+    if ! remote_session_open "renew" "$DEPLOY_CONTROL_PLANES"; then
         return 1
     fi
 
@@ -240,17 +240,7 @@ renew_cluster() {
         log_info ""
         log_info "--- Node $_i/$cp_count: ${_NODE_HOST} ---"
 
-        local bundle_path
-        if ! bundle_path=$(_transfer_bundle_to_node "$_NODE_USER" "$_NODE_HOST" "renew"); then
-            fail_count=$((fail_count + 1)); IFS=','; continue
-        fi
-        local rdir; rdir=$(dirname "$bundle_path")
-
-        local sudo_pfx; sudo_pfx=$(_sudo_prefix "$_NODE_USER")
-        local cmd="${sudo_pfx}sh ${bundle_path} renew"
-        [ -n "$RENEW_PASSTHROUGH_ARGS" ] && cmd=$(_append_passthrough_to_cmd "$cmd" "$RENEW_PASSTHROUGH_ARGS")
-
-        if _run_remote_on_node "$_NODE_USER" "$_NODE_HOST" "cert renew" "$rdir" "$cmd"; then
+        if remote_run --forward "$RENEW_PASSTHROUGH_ARGS" "$node" "cert renew" renew; then
             success_count=$((success_count + 1))
         else
             log_error "Certificate renewal failed on ${_NODE_HOST}"
@@ -260,9 +250,7 @@ renew_cluster() {
     done
     IFS="$_old_ifs"
 
-    # Cleanup known_hosts
-    _teardown_session_known_hosts
-    _pop_cleanup
+    remote_session_close
 
     # Summary
     log_info ""
@@ -279,7 +267,7 @@ renew_cluster() {
     return 0
 }
 
-# === Renew argument parsing (moved from lib/validation.sh) ===
+# === Renew argument parsing ===
 
 # Help message for renew
 show_renew_help() {
@@ -404,4 +392,13 @@ validate_renew_deploy_args() {
     fi
 
     _validate_remote_node_args
+}
+
+# === Runner ===
+
+_run_renew() {
+    _run_dual_mode renew \
+        parse_renew_deploy_args validate_renew_deploy_args renew_dry_run renew_cluster \
+        "Local certificate renewal" parse_renew_local_args renew_dry_run renew_certs_local \
+        "$@"
 }

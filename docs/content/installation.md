@@ -4,34 +4,42 @@
 
 Download and run the installation script:
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- init
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- init
 ```
 
-Manual download and inspection:
+Manual download, checksum verification, and inspection:
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh -o setup-k8s.sh
+curl -fsSLO https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh
+curl -fsSLO https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh.sha256
+sha256sum -c setup-k8s.sh.sha256
 less setup-k8s.sh
-chmod +x setup-k8s.sh
-sudo ./setup-k8s.sh init
+sudo sh setup-k8s.sh init
 ```
+
+Pin a specific release by replacing `latest/download` with `download/<version>`:
+```bash
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/download/v0.1.0/setup-k8s.sh | sudo sh -s -- init
+```
+
+`setup-k8s.sh` is a single file that contains every module. Check the version with `sh setup-k8s.sh --version`.
 
 ## Cluster Initialization
 
 Basic setup with default containerd:
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- init
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- init
 ```
 
 Setup with CRI-O runtime:
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   init \
   --cri crio
 ```
 
 Advanced setup:
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   init \
   --kubernetes-version 1.29 \
   --cri containerd \
@@ -42,7 +50,7 @@ curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh
 
 Setup with IPVS mode for existing IPVS-based environments:
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   init \
   --proxy-mode ipvs \
   --pod-network-cidr 192.168.0.0/16
@@ -52,7 +60,7 @@ Kubernetes 1.35+ deprecates kube-proxy IPVS mode. Prefer nftables for new cluste
 
 Setup with nftables mode (requires K8s 1.29+):
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   init \
   --proxy-mode nftables \
   --kubernetes-version 1.31 \
@@ -69,7 +77,7 @@ kubeadm token create --print-join-command
 
 Join as a worker node:
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   join \
   --cri containerd \
   --join-token <token> \
@@ -79,7 +87,7 @@ curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh
 
 Join as a control-plane node (HA cluster):
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   join \
   --control-plane \
   --certificate-key <key> \
@@ -95,12 +103,12 @@ Note: The joining node must use the same CRI as the existing cluster.
 Before initializing or joining a cluster, you can run preflight checks to verify system requirements:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- preflight
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- preflight
 ```
 
 Check for join mode with specific options:
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   preflight \
   --mode join \
   --cri crio \
@@ -109,7 +117,7 @@ curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh
 
 Preview what checks will be performed:
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- preflight --dry-run
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- preflight --dry-run
 ```
 
 ## Certificate Renewal
@@ -118,11 +126,11 @@ Renew kubeadm-managed certificates before they expire (default: 1 year). See [Ce
 
 ```bash
 # Check certificate expiration
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   renew --check-only
 
 # Renew all certificates
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- renew
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- renew
 ```
 
 ## Prerequisites

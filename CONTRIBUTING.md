@@ -47,30 +47,41 @@ repository:
 
 | Path | Contents |
 |---|---|
-| `setup-k8s.sh` | Entry point: global flag parsing and subcommand dispatch |
-| `lib/` | Shared modules (validation, logging, SSH, bundling, kubeadm config, ...) |
-| `commands/` | Subcommand implementations (`init`, `join`, `deploy`, `upgrade`, ...) |
-| `distros/<family>/` | Per-distribution logic for `debian`, `rhel`, `suse`, `arch`, `alpine`, `generic` |
-| `test/unit/` | Unit tests (`run.sh` is the runner) |
+| `setup-k8s.sh` | Entry point: global flags and subcommand dispatch |
+| `scripts/build.sh` | Builds the single-file release bundle `dist/setup-k8s.sh` |
+| `lib/core/` | Module loading, defaults, logging, validation, distribution detection and per-distribution values, Kubernetes versions |
+| `lib/pkg/` | Package management interface and adapters (apt, dnf, zypper, apk, pacman) |
+| `lib/components/` | Installed components (Kubernetes packages, container runtimes, kube-vip, Helm/Kustomize, completion) |
+| `lib/node/` | Node configuration (kernel modules and sysctl, swap, kubeadm config) |
+| `lib/remote/` | SSH transport, sessions, and script transfer for remote subcommands |
+| `lib/cluster/` | Cluster operations (upgrade orchestration, etcd, health, state, diagnostics) |
+| `commands/` | Subcommands: argument parsing, help, dry-run, and execution |
+| `test/unit/` | bats-core unit tests, mirroring `lib/` and `commands/` |
 | `test/scenarios/` | VM-based end-to-end scenarios |
 | `docs/` | MkDocs documentation site |
 
 ## Coding guidelines
 
-- Runtime scripts (`setup-k8s.sh`, `lib/`, `commands/`, `distros/`) must be POSIX
+- Runtime scripts (`setup-k8s.sh`, `scripts/`, `lib/`, `commands/`) must be POSIX
   `sh`. They run under dash, ash, and busybox sh, so avoid bashisms
   (`[[ ]]`, arrays, `${var//}`, `source`, `pipefail`, ...). `local` is allowed;
   see `.shellcheckrc`.
-- Test code under `test/` is bash.
-- New `lib/` or `commands/` modules must be registered in `_LIB_MODULES` or
-  `_COMMAND_MODULES` in `lib/bootstrap.sh`. They are used by the bundled and
-  `curl | sh` execution modes.
-- Each distribution family implements the same entry points, which are called
-  via `_dispatch`:
-  `install_dependencies_<family>`, `setup_containerd_<family>`,
-  `setup_crio_<family>`, `setup_kubernetes_<family>`,
-  `upgrade_kubeadm_<family>`, `upgrade_kubelet_kubectl_<family>`, and
-  `cleanup_<family>`.
+- Test code under `test/` is bash (bats for unit tests).
+- New `lib/` or `commands/` modules must be added to `_MODULES` in
+  `lib/core/bootstrap.sh`. The list defines the source order for both a local
+  checkout and the single-file bundle built by `scripts/build.sh`.
+- Distribution names are known only by `lib/core/distro.sh`. It sets values
+  such as the package manager and the Kubernetes, containerd, and CRI-O
+  sources; other modules branch on those values, the package format, or
+  observed state (init system, missing files or modules), never on the
+  distribution name. Adding a distribution that uses an existing package
+  manager means adding it to `lib/core/distro.sh`.
+- Package operations go through `lib/pkg/pkg.sh` (`pkg_install`,
+  `pkg_repo_add`, ...). Package-manager specifics, including differences
+  between versions of the tool, belong in `lib/pkg/<manager>.sh`.
+- Behavior that depends on the Kubernetes version uses `k8s_supports <feature>`
+  with the minimum versions listed in `lib/core/k8s_version.sh`; do not
+  compare version numbers elsewhere.
 - Never log secrets such as join tokens, certificate keys, or SSH passwords.
 - When adding or changing an option, update the subcommand `--help` text, the
   global help in `setup-k8s.sh`, and `docs/content/reference.md`.
@@ -82,18 +93,24 @@ repository:
 CI uses ShellCheck 0.11.0 and fails on warnings:
 
 ```sh
-shellcheck -s sh -S warning setup-k8s.sh lib/*.sh commands/*.sh distros/*/*.sh
-shellcheck -s bash -S warning test/scenarios/*.sh test/unit/*.sh test/lib/*.sh
+shellcheck -s sh -S warning setup-k8s.sh scripts/*.sh lib/*/*.sh commands/*.sh
+shellcheck -s bash -S warning test/scenarios/*.sh test/lib/*.sh test/unit/helpers/*.bash
+shellcheck -S warning test/unit/*/*.bats
 ```
 
 ### Unit tests
 
+Unit tests use [bats-core](https://github.com/bats-core/bats-core) 1.14:
+
 ```sh
-bash test/unit/run.sh
+bats -r test/unit
 ```
 
-Every `test/unit/*.sh` file is sourced automatically, but each test function
-must also be called from `test/unit/run.sh`.
+Each test file loads `test/unit/helpers/common.bash`, which provides
+`load_modules` (sources every module, as the entry point does) and
+`fake_cmd` (puts a fake external command on `PATH` and records its calls in
+`fake_calls`). Prefer asserting on the commands a module runs over testing
+internal helper functions.
 
 ### VM scenario tests (recommended for behavior changes)
 
@@ -117,6 +134,18 @@ If you changed anything under `docs/`, check that the site builds:
 ```sh
 python -m pip install -r docs/requirements.txt
 mkdocs build --config-file docs/mkdocs.yml --strict
+```
+
+## Building and releasing
+
+`scripts/build.sh` writes the single-file bundle `dist/setup-k8s.sh` and its
+`.sha256`. Pushing a `v*` tag runs the Release workflow, which builds the
+bundle with the tag as its version and attaches both files to a GitHub
+release.
+
+```sh
+sh scripts/build.sh
+sh dist/setup-k8s.sh --version
 ```
 
 ## Changelog

@@ -179,3 +179,12 @@ status_dry_run() {
     fi
     log_info "=== End of dry-run (no changes made) ==="
 }
+
+# === Runner ===
+
+_run_status() {
+    parse_status_args "$@"
+    _dry_run_guard status_dry_run
+    status_local
+    exit $?
+}

@@ -107,54 +107,35 @@ _cleanup_cp_worker() {
     cleanup_ssh_key
 }
 
+# Label attached to every test VM container: the PID of the scenario process
+# that owns it. Containers whose owner is still running belong to a parallel
+# test run and are left alone.
+TEST_OWNER_LABEL="setup-k8s-test-owner=$$"
+
 # Stop orphaned containers by label (shared across test runners)
 # Usage: cleanup_orphaned_containers <label>
 cleanup_orphaned_containers() {
-    local label=$1
+    local label=$1 cid owner
     docker ps -q --filter "label=managed-by=$label" 2>/dev/null | while read -r cid; do
+        owner=$(docker inspect --format '{{index .Config.Labels "setup-k8s-test-owner"}}' "$cid" 2>/dev/null || true)
+        if [ -n "$owner" ] && [ "$owner" != "$$" ] && kill -0 "$owner" 2>/dev/null; then
+            continue
+        fi
         log_warn "Stopping orphaned container: $(docker inspect --format '{{.Name}}' "$cid" 2>/dev/null | tr -d '/')"
         docker stop "$cid" >/dev/null 2>&1 || true
     done
 }
 
-# Generate a self-contained bundle script for bundled test execution.
-# Usage: _generate_bundle <entry_script> <bundle_path> [include_mode]
-#   entry_script:  path to the entry script (setup-k8s.sh)
+# Generate the single-file bundle (same as the release asset) for test execution.
+# Usage: _generate_bundle <entry_script> <bundle_path>
+#   entry_script:  path to the entry script (setup-k8s.sh) in the project root
 #   bundle_path:   output file path
-#   include_mode:  "true"/"all" to include all distro modules, "cleanup" for cleanup-only
 _generate_bundle() {
-    local entry_script="$1" bundle_path="$2" include_mode="${3:-all}"
+    local entry_script="$1" bundle_path="$2"
     local project_root
     project_root="$(cd "$(dirname "$entry_script")" && pwd)"
-    local _had_k8s_version=0 _saved_k8s_version=""
-    if [ "${K8S_VERSION+x}" ]; then
-        _had_k8s_version=1
-        _saved_k8s_version="$K8S_VERSION"
-    fi
-
-    # Source bootstrap (provides _COMMON_MODULES), variables (provides
-    # BUNDLE_COMMON_MODULES), and bundle (provides _generate_bundle_core)
-    if ! type -t _generate_bundle_core &>/dev/null; then
-        # Save caller's EXIT trap (bootstrap.sh unconditionally sets its own)
-        local _saved_exit_trap
-        _saved_exit_trap=$(trap -p EXIT)
-        source "${project_root}/lib/bootstrap.sh"
-        source "${project_root}/lib/variables.sh"
-        source "${project_root}/lib/bundle.sh"
-        # Restore caller's EXIT trap (or clear bootstrap's if caller had none)
-        if [ -n "$_saved_exit_trap" ]; then
-            eval "$_saved_exit_trap"
-        else
-            trap - EXIT
-        fi
-    fi
-    if [ "$_had_k8s_version" -eq 1 ]; then
-        K8S_VERSION="$_saved_k8s_version"
-    else
-        unset K8S_VERSION
-    fi
-
-    _generate_bundle_core "$bundle_path" "$entry_script" "$include_mode" "$project_root"
+    sh "$project_root/scripts/build.sh" "$bundle_path" "${SETUP_K8S_TEST_VERSION:-test}" >/dev/null
+    rm -f "${bundle_path}.sha256"
 }
 
 # Resolve latest stable Kubernetes minor version from dl.k8s.io.
@@ -376,6 +357,7 @@ start_vm() {
     if ! docker run -d --rm \
         --name "$container_name" \
         --label "$label" \
+        --label "$TEST_OWNER_LABEL" \
         --network "$DOCKER_NETWORK" --ip "$static_ip" \
         --device /dev/kvm:/dev/kvm \
         -v "$vm_data_dir:/data" \
@@ -532,6 +514,10 @@ _test_preamble() {
     log_info "=== ${test_name} E2E Test ==="
     log_info "Distro: $distro"
     mkdir -p results/logs "$VM_DATA_DIR"
+    # Host-side commands (deploy, upgrade, remove, ...) run the same single-file
+    # bundle that is published as the release asset.
+    HOST_BUNDLE="$VM_DATA_DIR/setup-k8s-host-$$.sh"
+    _generate_bundle "$SETUP_K8S_SCRIPT" "$HOST_BUNDLE"
 }
 
 # Evaluate test result and handle cleanup/diagnostics.

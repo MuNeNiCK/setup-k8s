@@ -20,22 +20,21 @@ jobs:
           sudo cp shellcheck-v0.11.0/shellcheck /usr/local/bin/
           rm -rf shellcheck-v0.11.0
           shellcheck --version
-      - name: Run ShellCheck on entry scripts
-        run: shellcheck -s sh -S warning setup-k8s.sh
-      - name: Run ShellCheck on common modules
-        run: shellcheck -s sh -S warning lib/*.sh
-      - name: Run ShellCheck on command modules
-        run: shellcheck -s sh -S warning commands/*.sh
-      - name: Run ShellCheck on distro modules
-        run: shellcheck -s sh -S warning distros/**/*.sh
-      - name: Run ShellCheck on test runners
-        run: shellcheck -s bash -S warning test/scenarios/*.sh test/unit/run.sh test/lib/*.sh
-      - name: Run ShellCheck on unit test modules
-        run: shellcheck -s bash -S warning test/unit/*.sh
+      - name: Run ShellCheck on runtime scripts
+        run: shellcheck -s sh -S warning setup-k8s.sh scripts/*.sh lib/*/*.sh commands/*.sh
+      - name: Run ShellCheck on test scripts
+        run: shellcheck -s bash -S warning test/scenarios/*.sh test/lib/*.sh test/unit/helpers/*.bash
+      - name: Run ShellCheck on unit tests
+        run: shellcheck -S warning test/unit/*/*.bats
 
   unit-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install bats-core 1.14.0
+        run: |
+          git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+          sudo /tmp/bats-core/install.sh /usr/local
+          bats --version
       - name: Run unit tests
-        run: bash test/unit/run.sh
+        run: bats -r test/unit
