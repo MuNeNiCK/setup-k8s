@@ -127,7 +127,7 @@ setup-k8s does not change the SELinux mode. On RPM-based distributions it instal
 - Community repository is automatically enabled for Kubernetes packages
 - Check kubelet logs with `rc-service kubelet status` or `/var/log/kubelet.log`
 - `--ignore-preflight-errors=SystemVerification` is automatically added to kubeadm commands
-- Kubernetes comes from Alpine packages, so the available version depends on the Alpine release (for example, Kubernetes 1.34 on Alpine 3.23). Without `--kubernetes-version`, that version is used; requesting another version fails with the available one in the message
+- Kubernetes comes from Alpine packages, so the available version depends on the Alpine release (for example, Kubernetes 1.34 on Alpine 3.23 and 1.36 on Alpine 3.24). Without `--kubernetes-version`, that version is used; requesting another version fails with the available one in the message
 
 ### Arch Linux
 - Uses pacman and the official Arch repositories (kubeadm, kubelet, kubectl, containerd, cri-o)

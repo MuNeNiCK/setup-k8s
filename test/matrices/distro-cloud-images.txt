@@ -5,6 +5,7 @@ debian-13-cloud-amd64
 debian-12-cloud-amd64
 centos-stream-10-cloud-amd64
 centos-stream-9-cloud-amd64
+fedora-45-cloud-amd64
 fedora-44-cloud-amd64
 fedora-43-cloud-amd64
 opensuse-tumbleweed-cloud-amd64
@@ -15,4 +16,5 @@ alma-10-cloud-amd64
 alma-9-cloud-amd64
 oracle-9-cloud-amd64
 archlinux-cloud-amd64
+alpine-3.24-cloud-amd64
 alpine-3.23-cloud-amd64
