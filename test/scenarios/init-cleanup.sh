@@ -47,14 +47,11 @@ SSH_OPTS=("${SSH_BASE_OPTS[@]}")
 # Global cleanup state (must be module-level for EXIT trap)
 _VM_CONTAINER_NAME=""
 _WATCHDOG_PID=""
-_CLOUD_INIT_USER_DATA=""
 
 _e2e_cleanup_vm_container() {
     _cleanup_vm_container "$_WATCHDOG_PID" "$_VM_CONTAINER_NAME"
     _WATCHDOG_PID=""
     _VM_CONTAINER_NAME=""
-    rm -f "$_CLOUD_INIT_USER_DATA"
-    _CLOUD_INIT_USER_DATA=""
 }
 
 # Help message
@@ -175,27 +172,10 @@ run_vm_container() {
         -e "DISK_SIZE=$VM_DISK_SIZE"
     )
 
-    # Alpine: cloud image has no bash/sudo/openssh pre-installed
-    case "$distro" in
-        alpine-*)
-            _CLOUD_INIT_USER_DATA=$(mktemp /tmp/cloud-init-userdata.XXXXXX.yaml)
-            cat > "$_CLOUD_INIT_USER_DATA" <<'CIEOF'
-#cloud-config
-packages:
-  - bash
-  - ca-certificates
-  - curl
-  - sudo
-  - openssh
-runcmd:
-  - ["sh", "-c", "rc-update add sshd default && rc-service sshd start"]
-CIEOF
-            _docker_run_args+=(
-                -v "$_CLOUD_INIT_USER_DATA:/cloud-init-userdata.yaml:ro"
-                -e "CLOUD_INIT_USER_DATA=/cloud-init-userdata.yaml"
-            )
-            ;;
-    esac
+    # Distribution-specific arguments (e.g. Alpine cloud-init user-data)
+    local _distro_args=()
+    mapfile -t _distro_args < <(_vm_distro_run_args "$distro" "$VM_DATA_DIR")
+    _docker_run_args+=("${_distro_args[@]}")
 
     if [ -n "$VM_GUEST_IP6" ]; then
         _docker_run_args+=(-e "NETWORK_GUEST_IP6=$VM_GUEST_IP6")

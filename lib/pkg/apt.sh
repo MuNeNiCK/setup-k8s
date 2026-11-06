@@ -103,5 +103,8 @@ _pkg_apt_repo_add() {
 }
 
 _pkg_apt_repo_remove() {
-    rm -f "${_APT_SOURCES_DIR}/$1.list" "${_APT_KEYRING_DIR}/$1.gpg"
+    local id
+    for id in "$@"; do
+        rm -f "${_APT_SOURCES_DIR}/${id}.list" "${_APT_KEYRING_DIR}/${id}.gpg"
+    done
 }

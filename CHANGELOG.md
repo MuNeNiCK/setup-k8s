@@ -13,6 +13,11 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Added
 
+- `test/scenarios/legacy-upgrade.sh` sets a node up with an earlier
+  setup-k8s version and manages it with the current one (upgrade, cleanup,
+  new init).
+- `scripts/check-versions.sh` and a weekly workflow report outdated
+  component defaults; Dependabot updates GitHub Actions.
 - `--proxy-mode auto` (the new default): nftables on Kubernetes 1.33+ with
   Linux 5.13+, iptables otherwise. `preflight --proxy-mode auto` shows the
   resolved mode.
@@ -100,6 +105,12 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Fixed
 
+- Nodes set up by earlier setup-k8s versions can be upgraded and cleaned up:
+  versionlock entries on RHEL-family distributions (which blocked upgrades
+  and new installs) are removed, Arch AUR `*-bin` packages are replaced by
+  the official packages, and cleanup removes repository and key files with
+  the earlier names (`docker-ce.repo`, `kubernetes-apt-keyring.gpg`,
+  `crio-apt-keyring.gpg`).
 - Swap came back after a reboot when it was enabled by a systemd swap unit
   that is not in `/etc/fstab` (for example a swap file unit), so kubelet did
   not start. All systemd swap units now get a drop-in that keeps them from

@@ -138,7 +138,8 @@ containerd_install() {
 }
 
 containerd_cleanup() {
-    pkg_repo_remove docker 2>/dev/null || true
+    # docker-ce: repository file name of earlier setup-k8s versions (rpm)
+    pkg_repo_remove docker docker-ce 2>/dev/null || true
     pkg_repo_remove containers 2>/dev/null || true
     local bin
     for bin in containerd containerd-shim-runc-v2 ctr runc; do

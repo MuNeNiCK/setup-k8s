@@ -197,7 +197,8 @@ crio_remove() {
         # Only CRI-O itself; shared tools (conmon, crun, iptables-nft) may be
         # used by other software and are left to the package manager.
         pkg_remove cri-o cri-o-openrc cri-o-runc || rc=1
-        pkg_repo_remove cri-o 2>/dev/null || true
+        # crio-apt-keyring: key file name of earlier setup-k8s versions
+        pkg_repo_remove cri-o crio-apt-keyring 2>/dev/null || true
     fi
     [ -f /usr/local/bin/crio ] && had_binary=true
     for bin in crio conmon conmonrs crun crictl; do
