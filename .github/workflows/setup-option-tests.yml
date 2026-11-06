@@ -2,13 +2,25 @@ name: Setup Option Tests
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    branches: [main, develop]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
   pull_request:
-    branches: [main]
+    branches: [main, develop]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  # One run per branch; a newer push to develop replaces the running one,
+  # runs for main are never cancelled.
+  group: setup-option-tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   # PR smoke test: single Ubuntu 24.04 offline test for fast merge-time feedback
@@ -18,7 +30,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run PR smoke test (Ubuntu 24.04 offline)
         working-directory: test
@@ -28,7 +40,7 @@ jobs:
 
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: logs-pr-smoke-test
           path: |
@@ -110,7 +122,7 @@ jobs:
             setup_args: ""
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run setup-k8s option test
         working-directory: test
@@ -118,16 +130,12 @@ jobs:
           SETUP_ARGS: ${{ matrix.setup_args }}
           K8S_VERSION: ${{ matrix.k8s_version }}
           DISTRO: ${{ matrix.distro }}
-          TEST_MODE: ${{ matrix.test_mode || 'offline' }}
           VM_GUEST_IP6: ${{ matrix.guest_ip6 || '' }}
         run: |
           set -euo pipefail
-          # Use test_mode from matrix (defaults to offline)
-          mode_flag="--${TEST_MODE}"
-
-          k8s_flag=""
+          k8s_flag=()
           if [ -n "$K8S_VERSION" ]; then
-            k8s_flag="--k8s-version $K8S_VERSION"
+            k8s_flag=(--k8s-version "$K8S_VERSION")
           fi
 
           setup_flag=()
@@ -135,11 +143,11 @@ jobs:
             setup_flag=(--setup-args "$SETUP_ARGS")
           fi
 
-          ./scenarios/init-cleanup.sh $mode_flag $k8s_flag "${setup_flag[@]}" "$DISTRO"
+          ./scenarios/init-cleanup.sh --offline "${k8s_flag[@]}" "${setup_flag[@]}" "$DISTRO"
 
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: logs-${{ matrix.name }}
           path: |
