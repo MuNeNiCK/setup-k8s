@@ -92,7 +92,7 @@ remove_kubernetes_configs() {
 # Remove installed components (packages, repositories, binaries) and host
 # preparation artifacts, then verify that nothing is left.
 cleanup_installed_components() {
-    local rc=0 remaining=0
+    local rc=0
     k8s_remove || rc=1
     crio_remove || rc=1
     containerd_cleanup || rc=1
@@ -103,17 +103,59 @@ cleanup_installed_components() {
     system_cleanup
     _service_reload
 
-    if [ -n "${DISTRO_PKG:-}" ]; then
-        remaining=$(_verify_packages_removed pkg_installed kubeadm kubelet kubectl cri-o)
+    local left
+    left=$(_cleanup_leftovers)
+    log_info "Verifying cleanup..."
+    if [ -n "$left" ]; then
+        printf '%s\n' "$left" | while IFS= read -r item; do log_warn "  Still present: ${item}"; done
+        log_warn "Some components could not be removed. You may want to remove them manually."
+        return 1
     fi
-    for bin in kubeadm kubectl kubelet; do
-        if [ -f "/usr/local/bin/$bin" ]; then
-            log_warn "$bin still exists in /usr/local/bin"
-            remaining=1
+    log_info "No Kubernetes packages, binaries, package locks, repositories, or configuration remain."
+    return "$rc"
+}
+
+# Configuration roots checked by _cleanup_leftovers (overridable for tests)
+_CLEANUP_ETC="/etc"
+
+# Print what setup-k8s installs or configures and is still present, one item
+# per line. Uses its own checks (PATH lookups, package database queries,
+# lock lists, file names) rather than the result of the removal steps.
+_cleanup_leftovers() {
+    local name file
+    hash -r 2>/dev/null || true
+    for name in kubeadm kubelet kubectl crio; do
+        if command -v "$name" >/dev/null 2>&1; then
+            echo "binary $(command -v "$name")"
         fi
     done
-    _verify_cleanup "$remaining" /etc/default/kubelet /etc/sysconfig/kubelet || rc=1
-    return "$rc"
+    if [ -n "${DISTRO_PKG:-}" ]; then
+        # shellcheck disable=SC2086 # space-separated package names
+        for name in kubeadm kubelet kubectl cri-tools kubernetes-cni cri-o ${DISTRO_K8S_LEGACY_PKGS:-}; do
+            if pkg_installed "$name"; then echo "package ${name}"; fi
+        done
+    fi
+    if command -v apt-mark >/dev/null 2>&1; then
+        apt-mark showhold 2>/dev/null | grep -E '^(kube|cri-tools$|cri-o$)' | sed 's/^/hold /'
+    fi
+    if command -v dnf >/dev/null 2>&1 && dnf versionlock list >/dev/null 2>&1; then
+        dnf versionlock list 2>/dev/null | grep -o -E '(kubeadm|kubelet|kubectl|cri-tools|cri-o)' | sort -u | sed 's/^/versionlock /'
+    fi
+    if command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive locks 2>/dev/null | grep -o -E '\b(kubeadm|kubelet|kubectl|cri-tools|cri-o)\b' | sort -u | sed 's/^/lock /'
+    fi
+    for file in apt/sources.list.d/kubernetes.list apt/sources.list.d/cri-o.list apt/sources.list.d/docker.list \
+                apt/keyrings/kubernetes.gpg apt/keyrings/cri-o.gpg apt/keyrings/docker.gpg \
+                apt/keyrings/kubernetes-apt-keyring.gpg apt/keyrings/crio-apt-keyring.gpg \
+                yum.repos.d/kubernetes.repo yum.repos.d/cri-o.repo yum.repos.d/docker.repo \
+                yum.repos.d/docker-ce.repo yum.repos.d/containers.repo \
+                zypp/repos.d/kubernetes.repo zypp/repos.d/cri-o.repo zypp/repos.d/containers.repo \
+                default/kubelet sysconfig/kubelet systemd/system/kubelet.service init.d/kubelet; do
+        if [ -e "${_CLEANUP_ETC}/${file}" ]; then echo "file ${_CLEANUP_ETC}/${file}"; fi
+    done
+    for file in kubernetes systemd/system/kubelet.service.d; do
+        if [ -d "${_CLEANUP_ETC}/${file}" ]; then echo "directory ${_CLEANUP_ETC}/${file}"; fi
+    done
 }
 
 # Reset Kubernetes cluster state

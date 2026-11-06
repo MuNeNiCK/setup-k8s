@@ -61,36 +61,3 @@ _show_help_footer() {
     echo "${p}--help                  Display this help message"
 }
 
-# Check which packages remain installed after cleanup.
-# Usage: _verify_packages_removed <check_cmd> <pkg1> [pkg2] ...
-#   check_cmd: command that returns 0 if package is installed (receives pkg name as $1)
-#   Returns: 0 if none remain, 1 if some remain (also logs warnings)
-_verify_packages_removed() {
-    local _pkg_check_cmd="$1"; shift
-    local _remaining=0
-    for _pkg in "$@"; do
-        if eval "$_pkg_check_cmd '$_pkg'" >/dev/null 2>&1; then
-            log_warn "Package still installed: $_pkg"
-            _remaining=1
-        fi
-    done
-    echo "$_remaining"
-}
-
-# Unified cleanup verification: check remaining files and report.
-# Usage: _verify_cleanup <remaining_from_pkg_check> <file1> [file2] ...
-_verify_cleanup() {
-    local remaining="$1"; shift
-    log_info "Verifying cleanup..."
-    for file in "$@"; do
-        if [ -f "$file" ]; then
-            log_warn "File still exists: $file"
-            remaining=1
-        fi
-    done
-    if [ "$remaining" -ne 0 ]; then
-        log_warn "Some files or packages could not be removed. You may want to remove them manually."
-        return 1
-    fi
-    log_info "All specified components have been successfully removed."
-}
