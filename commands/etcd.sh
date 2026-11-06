@@ -262,12 +262,12 @@ backup_dry_run() {
 _backup_etcd_remote_callback() {
     local remote_snapshot="${_ETCD_BUNDLE_DIR}/etcd-snapshot.db"
 
-    log_info "Step 3: Executing backup on remote node..."
-    if ! _exec_etcd_remote "backup" "etcd backup" "$_ETCD_REMOTE_BUNDLE_PATH" --snapshot-path "$remote_snapshot"; then
+    log_info "Step 2: Executing backup on remote node..."
+    if ! _exec_etcd_remote "backup" "etcd backup" --snapshot-path "$remote_snapshot"; then
         return 1
     fi
 
-    log_info "Step 4: Downloading snapshot to $ETCD_SNAPSHOT_PATH..."
+    log_info "Step 3: Downloading snapshot to $ETCD_SNAPSHOT_PATH..."
     if [ "$_ETCD_REMOTE_USER" != "root" ]; then
         _deploy_ssh "$_ETCD_REMOTE_USER" "$_ETCD_REMOTE_HOST" "sudo -n chmod 644 '${remote_snapshot}'" >/dev/null 2>&1 || true
     fi
@@ -588,14 +588,14 @@ restore_dry_run() {
 _restore_etcd_remote_callback() {
     local remote_snapshot="${_ETCD_BUNDLE_DIR}/etcd-snapshot.db"
 
-    log_info "Step 3: Uploading snapshot to remote node..."
+    log_info "Step 2: Uploading snapshot to remote node..."
     if ! _deploy_scp "$ETCD_SNAPSHOT_PATH" "$_ETCD_REMOTE_USER" "$_ETCD_REMOTE_HOST" "$remote_snapshot"; then
         log_error "Failed to upload snapshot"
         return 1
     fi
 
-    log_info "Step 4: Executing restore on remote node..."
-    if ! _exec_etcd_remote "restore" "etcd restore" "$_ETCD_REMOTE_BUNDLE_PATH" --snapshot-path "$remote_snapshot"; then
+    log_info "Step 3: Executing restore on remote node..."
+    if ! _exec_etcd_remote "restore" "etcd restore" --snapshot-path "$remote_snapshot"; then
         return 1
     fi
 }

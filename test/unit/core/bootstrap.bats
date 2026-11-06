@@ -41,62 +41,6 @@ _case_csv_get() {
 }
 
 # ============================================================
-# Test: _append_passthrough_to_cmd
-# ============================================================
-_case_append_passthrough_to_cmd() {
-    echo "=== Test: _append_passthrough_to_cmd ==="
-    (
-        load_modules
-        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
-
-        # Empty args
-        local result
-        result=$(_append_passthrough_to_cmd "mycmd" "")
-        _assert_eq "passthrough empty" "mycmd" "$result"
-
-        # Single arg
-        result=$(_append_passthrough_to_cmd "mycmd" "--verbose")
-        local has_verbose="false"
-        echo "$result" | grep -q "verbose" && has_verbose="true"
-        _assert_eq "passthrough single" "true" "$has_verbose"
-
-        # Multiple args (newline-separated)
-        local args="--distro
-debian"
-        result=$(_append_passthrough_to_cmd "mycmd" "$args")
-        local has_distro="false"
-        echo "$result" | grep -q "distro" && has_distro="true"
-        _assert_eq "passthrough multi" "true" "$has_distro"
-    )
-}
-
-# ============================================================
-# Test: _append_passthrough_to_cmd_worker filters HA flags
-# ============================================================
-_case_append_passthrough_filtered() {
-    echo "=== Test: _append_passthrough_filtered filters specified flags ==="
-    (
-        load_modules
-        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
-
-        # HA-specific flags should be filtered out
-        local args="--ha-vip
-10.0.0.100
---verbose"
-        local result
-        result=$(_append_passthrough_filtered "mycmd" "$args" "--ha-vip --ha-interface")
-
-        local has_vip="false"
-        echo "$result" | grep -q "ha-vip" && has_vip="true"
-        _assert_eq "filtered passthrough filters --ha-vip" "false" "$has_vip"
-
-        local has_verbose="false"
-        echo "$result" | grep -q "verbose" && has_verbose="true"
-        _assert_eq "filtered passthrough keeps --verbose" "true" "$has_verbose"
-    )
-}
-
-# ============================================================
 # Test: _posix_shell_quote
 # ============================================================
 _case_posix_shell_quote() {
@@ -141,65 +85,6 @@ _case_posix_shell_quote_precise() {
         # Empty string
         result=$(_posix_shell_quote "")
         _assert_eq "quote empty" "'' " "$result"
-    )
-}
-
-# ============================================================
-# Test: _append_passthrough_to_cmd special chars
-# ============================================================
-_case_passthrough_special_chars() {
-    echo "=== Test: _append_passthrough_to_cmd special characters ==="
-    (
-        load_modules
-        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
-
-        # Arg with spaces
-        local args="--config
-/path/with spaces/file.yaml"
-        local result
-        result=$(_append_passthrough_to_cmd "cmd" "$args")
-        local has_config="false"
-        echo "$result" | grep -q "config" && has_config="true"
-        _assert_eq "passthrough special: has config" "true" "$has_config"
-        local has_quoted_path="false"
-        echo "$result" | grep -q "spaces" && has_quoted_path="true"
-        _assert_eq "passthrough special: path preserved" "true" "$has_quoted_path"
-    )
-}
-
-# ============================================================
-# Test: _append_passthrough_to_cmd_worker HA flag filtering (deep)
-# ============================================================
-_case_passthrough_filtered_ha_interface() {
-    echo "=== Test: _append_passthrough_filtered filters --ha-interface ==="
-    (
-        load_modules
-        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
-
-        local args="--ha-interface
-eth0
---ha-vip
-10.0.0.100
---version
-1.30.0"
-        local result
-        result=$(_append_passthrough_filtered "mycmd" "$args" "--ha-vip --ha-interface")
-
-        local has_interface="false"
-        echo "$result" | grep -q "ha-interface" && has_interface="true"
-        _assert_eq "filtered filters --ha-interface" "false" "$has_interface"
-
-        local has_vip="false"
-        echo "$result" | grep -q "ha-vip" && has_vip="true"
-        _assert_eq "filtered filters --ha-vip" "false" "$has_vip"
-
-        local has_version="false"
-        echo "$result" | grep -q "version" && has_version="true"
-        _assert_eq "filtered keeps --version" "true" "$has_version"
-
-        local has_1_30="false"
-        echo "$result" | grep -q "1.30.0" && has_1_30="true"
-        _assert_eq "filtered keeps version value" "true" "$has_1_30"
     )
 }
 
@@ -299,14 +184,6 @@ _case_csv_any() {
     _case_csv_get
 }
 
-@test "_append_passthrough_to_cmd" {
-    _case_append_passthrough_to_cmd
-}
-
-@test "_append_passthrough_filtered filters specified flags" {
-    _case_append_passthrough_filtered
-}
-
 @test "_posix_shell_quote" {
     _case_posix_shell_quote
 }
@@ -321,14 +198,6 @@ _case_csv_any() {
 
 @test "_posix_shell_quote precise output" {
     _case_posix_shell_quote_precise
-}
-
-@test "_append_passthrough_to_cmd special characters" {
-    _case_passthrough_special_chars
-}
-
-@test "_append_passthrough_filtered filters --ha-interface" {
-    _case_passthrough_filtered_ha_interface
 }
 
 @test "CSV helpers edge cases" {

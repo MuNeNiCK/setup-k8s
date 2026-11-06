@@ -132,11 +132,14 @@ _record_pre_upgrade_versions() {
     fi
 }
 
-# Attempt to rollback a failed node to the pre-upgrade version.
-# Usage: _rollback_node <user> <host> <node_name> <bundle_path> <pre_version>
+# Roll a failed node back to the pre-upgrade package versions.
+# The node runs "upgrade --rollback-to <version>", which reinstalls kubeadm,
+# kubelet, and kubectl at that version and restarts kubelet.
+# Usage: _rollback_node <node> <pre_version>
 _rollback_node() {
-    local user="$1" host="$2" _node_name="$3" bundle_path="$4" pre_version="$5"
-    local pfx; pfx=$(_sudo_prefix "$user")
+    local node="$1" pre_version="$2"
+    _parse_node_address "$node"
+    local host="$_NODE_HOST"
 
     if [ -z "$pre_version" ]; then
         log_warn "  [${host}] No pre-upgrade version recorded, cannot rollback"
@@ -144,23 +147,13 @@ _rollback_node() {
     fi
 
     log_warn "  [${host}] Attempting rollback to v${pre_version}..."
-
-    # Downgrade packages to pre-upgrade version
-    local rollback_cmd
-    rollback_cmd="${pfx}sh ${bundle_path} upgrade --kubernetes-version $(_posix_shell_quote "$pre_version")"
-    rollback_cmd=$(_append_passthrough_filtered "$rollback_cmd" "$UPGRADE_PASSTHROUGH_ARGS" "--kubernetes-version" "--skip-drain")
-
-    if _deploy_exec_remote "$user" "$host" "rollback" "$rollback_cmd"; then
+    if remote_run --forward "$UPGRADE_PASSTHROUGH_ARGS" --drop "--kubernetes-version --skip-drain" \
+        "$node" "rollback" upgrade --rollback-to "$pre_version"; then
         log_info "  [${host}] Rollback to v${pre_version} succeeded"
-
-        # Restart kubelet
-        _deploy_ssh "$user" "$host" "${pfx}systemctl daemon-reload && systemctl restart kubelet" >/dev/null 2>&1 || true
-
         return 0
-    else
-        log_error "  [${host}] Rollback failed. Manual intervention required."
-        return 1
     fi
+    log_error "  [${host}] Rollback failed. Manual intervention required."
+    return 1
 }
 
 # ============================================================
@@ -210,8 +203,6 @@ _upgrade_single_node() {
         return 0
     fi
 
-    local node_bundle
-    node_bundle="$(_bundle_dir_lookup "$node_host")/setup-k8s.sh"
     local node_sudo; node_sudo=$(_sudo_prefix "$node_user")
 
     local node_name
@@ -233,26 +224,33 @@ _upgrade_single_node() {
     # Pre-hook (e.g., worker admin.conf transfer)
     local _hook_data=""
     if [ -n "$pre_hook" ]; then
-        if ! _hook_data=$("$pre_hook" "$node_user" "$node_host" "$node_sudo" "$node_bundle"); then
+        if ! _hook_data=$("$pre_hook" "$node_user" "$node_host" "$node_sudo"); then
             return 1
         fi
     fi
 
-    local upgrade_cmd
-    upgrade_cmd="${node_sudo}${_hook_data:+env UPGRADE_ADMIN_CONF=${_hook_data} }sh ${node_bundle} upgrade --kubernetes-version $(_posix_shell_quote "$UPGRADE_TARGET_VERSION")"
+    # Remote command: upgrade --kubernetes-version <target> [--first-control-plane] [forwarded args]
+    set -- upgrade --kubernetes-version "$UPGRADE_TARGET_VERSION"
     if [ "$is_first_cp" = true ]; then
-        upgrade_cmd="${upgrade_cmd} --first-control-plane"
+        set -- "$@" --first-control-plane
     fi
-    upgrade_cmd=$(_append_passthrough_filtered "$upgrade_cmd" "$UPGRADE_PASSTHROUGH_ARGS" "--kubernetes-version" "--skip-drain")
+    local upgrade_rc=0
+    if [ -n "$_hook_data" ]; then
+        remote_run --env "UPGRADE_ADMIN_CONF=${_hook_data}" --forward "$UPGRADE_PASSTHROUGH_ARGS" \
+            --drop "--kubernetes-version --skip-drain" "$node" "upgrade ${state_label}" "$@" || upgrade_rc=1
+    else
+        remote_run --forward "$UPGRADE_PASSTHROUGH_ARGS" \
+            --drop "--kubernetes-version --skip-drain" "$node" "upgrade ${state_label}" "$@" || upgrade_rc=1
+    fi
 
-    if ! _deploy_exec_remote "$node_user" "$node_host" "upgrade ${state_label}" "$upgrade_cmd"; then
+    if [ "$upgrade_rc" -ne 0 ]; then
         log_error "Upgrade failed for ${node_host}."
         if [ "${COLLECT_DIAGNOSTICS:-false}" = true ]; then
             _collect_diagnostics "$node_user" "$node_host" "/tmp/setup-k8s-diag-upgrade-${state_label}-$(date +%s)" || true
         fi
         [ -n "$post_hook" ] && "$post_hook" "$node_user" "$node_host" "$node_sudo" "${_hook_data}" "cleanup" || true
         if [ "$UPGRADE_NO_ROLLBACK" != true ] && [ -n "${_PRE_UPGRADE_VERSION:-}" ]; then
-            _rollback_node "$node_user" "$node_host" "$node_name" "$node_bundle" "$_PRE_UPGRADE_VERSION" || true
+            _rollback_node "$node" "$_PRE_UPGRADE_VERSION" || true
             [ "$UPGRADE_SKIP_DRAIN" != true ] && _upgrade_uncordon_node "$cp1_user" "$cp1_host" "$node_name" || true
         fi
         return 1
@@ -338,14 +336,9 @@ upgrade_cluster() {
     # --- Step 1: SSH connectivity check ---
     _step=$((_step + 1))
     log_info "Step ${_step}: Checking SSH connectivity to all nodes..."
-    if ! _init_remote_session "upgrade" "$all_nodes"; then
-        return 1
-    fi
-
-    # --- Step 2: Generate and transfer bundle to all nodes ---
+    # --- Step 2: Transfer setup-k8s.sh to all nodes ---
     _step=$((_step + 1))
-    log_info "Step ${_step}: Generating and transferring bundle to all nodes..."
-    if ! _generate_and_transfer_bundle "upgrade"; then
+    if ! remote_session_open "upgrade" "$all_nodes"; then
         return 1
     fi
 
@@ -379,9 +372,8 @@ upgrade_cluster() {
             local step_count=0
             for _sv in $steps; do step_count=$((step_count + 1)); done
             log_info "Auto-step-upgrade: ${step_count} step(s) to reach v${final_target}"
-            # Clean up current bundle setup before stepping
-            _cleanup_remote_bundle_dirs
-            _pop_cleanup
+            # Each step opens its own session
+            remote_session_close
             # Step through each intermediate version using recursive calls
             UPGRADE_AUTO_STEP=false  # prevent recursion
             for step_version in $steps; do
@@ -439,8 +431,7 @@ upgrade_cluster() {
     if [ "$upgrade_failed" = true ]; then
         log_error "Control-plane upgrade failed. Check logs above for details."
         log_error "Some nodes may be in mixed-version state (this is allowed by K8s skew policy)."
-        _cleanup_remote_bundle_dirs
-        _pop_cleanup
+        remote_session_close
         return 1
     fi
 
@@ -472,9 +463,8 @@ upgrade_cluster() {
 
     # --- Step 9: Clean up remote bundle directories ---
     _step=$((_step + 1))
-    log_info "Step ${_step}: Cleaning up remote bundle directories..."
-    _cleanup_remote_bundle_dirs
-    _pop_cleanup
+    log_info "Step ${_step}: Cleaning up remote working directories..."
+    remote_session_close
 
     # --- Step 10: Summary ---
     log_info ""
@@ -489,10 +479,6 @@ upgrade_cluster() {
     fi
     log_info ""
     log_info "=========================="
-
-    # Clean up known_hosts
-    _teardown_session_known_hosts
-    _pop_cleanup
 
     if [ "$upgrade_failed" = true ]; then
         _state_set "status" "failed"

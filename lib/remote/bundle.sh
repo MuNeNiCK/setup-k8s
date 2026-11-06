@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Bundle module: deploy bundle generation, transfer, remote execution, and display helpers.
+# Script transfer to remote nodes, per-node working directories, and display helpers.
 # Depends on lib/remote/ssh.sh for SSH transport functions (_deploy_ssh, _deploy_scp, _deploy_exec_remote, etc.).
 
 # Module-level state for remote cleanup (must survive function scope for EXIT trap)
@@ -27,64 +27,6 @@ _bundle_dir_lookup() {
         fi
     done)
     echo "$_lookup_result"
-}
-
-# --- Passthrough args helpers ---
-
-# Append all passthrough args (newline-delimited) to a command string.
-# Outputs the modified command string to stdout (caller captures via $()).
-# Usage: cmd=$(_append_passthrough_to_cmd "$cmd" "$DEPLOY_PASSTHROUGH_ARGS")
-_append_passthrough_to_cmd() {
-    local _cmd="$1" _args_str="$2"
-    if [ -n "$_args_str" ]; then
-        local _pt_arg
-        while IFS= read -r _pt_arg; do
-            _cmd="${_cmd} $(_posix_shell_quote "$_pt_arg")"
-        done <<EOF
-$_args_str
-EOF
-    fi
-    printf '%s' "$_cmd"
-}
-
-# Append passthrough args, skipping specified flags (+ their values).
-# Usage: cmd=$(_append_passthrough_filtered "$cmd" "$args" "flag1 flag2 ..." ["bool_flag1 bool_flag2 ..."])
-#   Third arg: space-separated flags to skip (flag + next value are both skipped)
-#   Fourth arg (optional): space-separated boolean flags to skip (flag only, no value)
-_append_passthrough_filtered() {
-    local _cmd="$1" _args_str="$2" _skip_pairs="$3" _skip_flags="${4:-}"
-    if [ -n "$_args_str" ]; then
-        local _pt_arg _skip_next=false
-        while IFS= read -r _pt_arg; do
-            if [ "$_skip_next" = true ]; then
-                _skip_next=false
-                continue
-            fi
-            local _matched=false
-            for _sf in $_skip_pairs; do
-                if [ "$_pt_arg" = "$_sf" ]; then
-                    _matched=true
-                    _skip_next=true
-                    break
-                fi
-            done
-            if [ "$_matched" = false ]; then
-                for _sf in $_skip_flags; do
-                    if [ "$_pt_arg" = "$_sf" ]; then
-                        _matched=true
-                        break
-                    fi
-                done
-            fi
-            if [ "$_matched" = true ]; then
-                continue
-            fi
-            _cmd="${_cmd} $(_posix_shell_quote "$_pt_arg")"
-        done <<EOF
-$_args_str
-EOF
-    fi
-    printf '%s' "$_cmd"
 }
 
 # --- Bundle generation and transfer ---
@@ -161,36 +103,6 @@ _generate_and_transfer_bundle() {
     done
     rm -f "$bundle_path"
     log_info "Bundle transferred to all nodes"
-}
-
-# Transfer a bundle to a single node. Prints the remote bundle path to stdout.
-# Usage: bundle_path=$(_transfer_bundle_to_node <user> <host> [label])
-_transfer_bundle_to_node() {
-    local user="$1" host="$2" label="${3:-deploy}"
-    local bundle_path
-    bundle_path=$(mktemp "/tmp/setup-k8s-${label}-XXXXXX")
-    chmod 600 "$bundle_path"
-    generate_deploy_bundle "$bundle_path"
-    local rdir
-    if ! rdir=$(_create_remote_tmpdir "$user" "$host"); then
-        rm -f "$bundle_path"; return 1
-    fi
-    if ! _deploy_scp "$bundle_path" "$user" "$host" "${rdir}/setup-k8s.sh"; then
-        log_error "  [${host}] Failed to transfer bundle"
-        rm -f "$bundle_path"; return 1
-    fi
-    rm -f "$bundle_path"
-    echo "${rdir}/setup-k8s.sh"
-}
-
-# Execute a command on a remote node and clean up the bundle directory afterwards.
-# Usage: _run_remote_on_node <user> <host> <label> <rdir> <cmd>
-_run_remote_on_node() {
-    local user="$1" host="$2" label="$3" rdir="$4" cmd="$5"
-    local rc=0
-    _deploy_exec_remote "$user" "$host" "$label" "$cmd" || rc=1
-    _deploy_ssh "$user" "$host" "rm -rf '$rdir'" >/dev/null 2>&1 || true
-    return $rc
 }
 
 # Clean up remote bundle directories on all nodes.

@@ -8,7 +8,7 @@ The orchestrator does not need local root privileges. Remote nodes need SSH acce
 
 Run `setup-k8s.sh deploy` from your workstation or automation host. The script connects to each node over SSH, uploads itself to each node, initializes the first control-plane node, then joins the rest of the cluster.
 
-Remote subcommands (`deploy`, `remove`, and `upgrade`, `backup`, `restore`, `renew` with `--control-planes`) must be run from a downloaded file, because the script copies itself to the nodes. Running them via `curl ... | sh` prints the download instructions and exits.
+Remote subcommands that run setup-k8s on the nodes (`deploy`, and `upgrade`, `backup`, `restore`, `renew` with `--control-planes`) must be run from a downloaded file, because the script copies itself to the nodes. Running them via `curl ... | sh` prints the download instructions and exits.
 
 ```mermaid
 flowchart LR

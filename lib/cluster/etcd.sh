@@ -202,80 +202,38 @@ _ETCD_REMOTE_USER=""
 _ETCD_REMOTE_HOST=""
 _ETCD_BUNDLE_DIR=""
 
-_cleanup_etcd_bundle_dir() {
-    [ -n "${_ETCD_BUNDLE_DIR:-}" ] && \
-        _deploy_ssh "$_ETCD_REMOTE_USER" "$_ETCD_REMOTE_HOST" "rm -rf '$_ETCD_BUNDLE_DIR'" >/dev/null 2>&1 || true
-    _ETCD_BUNDLE_DIR=""
-}
-
-# Common setup for remote backup/restore: known_hosts, SSH check
-# Sets: _ETCD_REMOTE_USER, _ETCD_REMOTE_HOST
-_setup_etcd_remote() {
-    local node="$ETCD_CONTROL_PLANES"
-    _parse_node_address "$node"
+# Run a callback with a remote session on the target control-plane node.
+# Sets _ETCD_REMOTE_USER, _ETCD_REMOTE_HOST, and _ETCD_BUNDLE_DIR (the node's
+# working directory, used for snapshot transfers) for the callback.
+# Usage: _with_etcd_remote <label> <callback>
+_with_etcd_remote() {
+    local label="$1" callback="$2"
+    _parse_node_address "$ETCD_CONTROL_PLANES"
     _ETCD_REMOTE_USER="$_NODE_USER"
     _ETCD_REMOTE_HOST="$_NODE_HOST"
 
-    log_info "Step 1: Checking SSH connectivity..."
-    if ! _init_remote_session "etcd" "$node"; then
+    log_info "Step 1: Checking SSH connectivity and transferring setup-k8s.sh..."
+    if ! remote_session_open "$label" "$ETCD_CONTROL_PLANES"; then
         return 1
     fi
-}
-
-_teardown_etcd_remote() {
-    _cleanup_etcd_bundle_dir
-    if [ -n "${_ETCD_BUNDLE_DIR_CLEANUP_PUSHED:-}" ]; then
-        _pop_cleanup
-        _ETCD_BUNDLE_DIR_CLEANUP_PUSHED=""
-    fi
-    _teardown_session_known_hosts
-    _pop_cleanup
-    _ETCD_REMOTE_USER=""
-    _ETCD_REMOTE_HOST=""
-}
-
-# Run a callback with remote etcd setup/teardown orchestration.
-# Sets _ETCD_BUNDLE_DIR, _ETCD_REMOTE_BUNDLE_PATH for use by the callback.
-# Usage: _with_etcd_remote <label> <callback>
-_ETCD_REMOTE_BUNDLE_PATH=""
-_with_etcd_remote() {
-    local label="$1" callback="$2"
-
-    _setup_etcd_remote || return 1
-
-    log_info "Step 2: Generating and transferring bundle..."
-    local bundle_path
-    if ! bundle_path=$(_transfer_bundle_to_node "$_ETCD_REMOTE_USER" "$_ETCD_REMOTE_HOST" "etcd"); then
-        _teardown_etcd_remote; return 1
-    fi
-    _ETCD_BUNDLE_DIR=$(dirname "$bundle_path")
-    _ETCD_REMOTE_BUNDLE_PATH="$bundle_path"
-    _push_cleanup _cleanup_etcd_bundle_dir
-    _ETCD_BUNDLE_DIR_CLEANUP_PUSHED=1
+    _ETCD_BUNDLE_DIR=$(remote_node_dir "$ETCD_CONTROL_PLANES")
 
     local rc=0
     "$callback" || rc=1
 
-    _teardown_etcd_remote
+    remote_session_close
+    _ETCD_BUNDLE_DIR=""
+    _ETCD_REMOTE_USER=""
+    _ETCD_REMOTE_HOST=""
     return $rc
 }
 
-# Build and execute a remote etcd subcommand.
-# Uses _deploy_exec_remote directly (not _run_remote_on_node) because
-# backup/restore need the remote directory to persist for file downloads.
-# Usage: _exec_etcd_remote <subcommand> <label> <bundle_path> <extra_args...>
+# Run a backup/restore subcommand on the target node.
+# Usage: _exec_etcd_remote <subcommand> <label> [args...]
 _exec_etcd_remote() {
-    local subcmd="$1" label="$2" bundle_path="$3"; shift 3
-    local sudo_pfx; sudo_pfx=$(_sudo_prefix "$_ETCD_REMOTE_USER")
-    local cmd="${sudo_pfx}sh ${bundle_path} ${subcmd}"
-    for arg in "$@"; do
-        cmd="${cmd} $(_posix_shell_quote "$arg")"
-    done
-    if [ -n "$ETCD_PASSTHROUGH_ARGS" ]; then
-        cmd=$(_append_passthrough_to_cmd "$cmd" "$ETCD_PASSTHROUGH_ARGS")
-    fi
-
-    if ! _deploy_exec_remote "$_ETCD_REMOTE_USER" "$_ETCD_REMOTE_HOST" "$label" "$cmd"; then
+    local subcmd="$1" label="$2"
+    shift 2
+    if ! remote_run --forward "$ETCD_PASSTHROUGH_ARGS" "$ETCD_CONTROL_PLANES" "$label" "$subcmd" "$@"; then
         log_error "Remote ${subcmd} failed"
         return 1
     fi

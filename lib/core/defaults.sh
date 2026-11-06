@@ -73,6 +73,7 @@ UPGRADE_SKIP_DRAIN=false             # Skip drain/uncordon in remote mode
 UPGRADE_PASSTHROUGH_ARGS=""          # Arguments to forward to remote nodes
 UPGRADE_NO_ROLLBACK=false            # Disable automatic rollback on failure
 UPGRADE_AUTO_STEP=false              # Automatically step through minor versions
+UPGRADE_ROLLBACK_VERSION=""          # local: reinstall packages at this version (rollback)
 
 # Remove subcommand
 REMOVE_CONTROL_PLANES=""             # remove: CP node (user@ip)

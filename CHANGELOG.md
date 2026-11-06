@@ -29,9 +29,9 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
   (`releases/latest/download/setup-k8s.sh`) instead of being fetched from
   `raw/main`. `curl | sh` downloads one file; modules are no longer downloaded
   individually at runtime.
-- Remote subcommands (`deploy`, `remove`, and `upgrade` / `backup` / `restore`
-  / `renew` with `--control-planes`) must be run from a downloaded file. They
-  transfer that file to the nodes.
+- Remote subcommands that run setup-k8s on the nodes (`deploy`, and
+  `upgrade` / `backup` / `restore` / `renew` with `--control-planes`) must be
+  run from a downloaded file. They transfer that file to the nodes.
 - Global options (`--dry-run`, `--verbose`, `--quiet`, `--log-dir`,
   `--audit-syslog`, `--collect-diagnostics`, `--resume`) are handled by the
   entry point; all other options are passed unchanged to the subcommand. The

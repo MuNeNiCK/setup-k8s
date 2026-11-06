@@ -48,45 +48,6 @@ _case_download_binary_failure() {
 # Test: DEPLOY_REMOTE_TIMEOUT / DEPLOY_POLL_INTERVAL defaults
 # ============================================================
 # ============================================================
-# Test: _build_join_cmd
-# ============================================================
-_case_build_join_cmd() {
-    echo "=== Test: _build_join_cmd ==="
-    (
-        _load_deploy_test_modules
-
-        _JOIN_TOKEN="abcdef.0123456789abcdef"
-        _JOIN_ADDR="10.0.0.1:6443"
-        _JOIN_HASH="sha256:abc123"
-
-        local result
-        result=$(_build_join_cmd "sudo " "/tmp/setup-k8s.sh")
-
-        local has_join="false"
-        echo "$result" | grep -q "sudo sh /tmp/setup-k8s.sh join" && has_join="true"
-        _assert_eq "build_join_cmd has sudo+join" "true" "$has_join"
-
-        local has_token="false"
-        echo "$result" | grep -q "join-token" && has_token="true"
-        _assert_eq "build_join_cmd has token" "true" "$has_token"
-
-        local has_addr="false"
-        echo "$result" | grep -q "join-address" && has_addr="true"
-        _assert_eq "build_join_cmd has address" "true" "$has_addr"
-
-        local has_hash="false"
-        echo "$result" | grep -q "discovery-token-hash" && has_hash="true"
-        _assert_eq "build_join_cmd has hash" "true" "$has_hash"
-
-        # Without sudo
-        result=$(_build_join_cmd "" "/tmp/setup-k8s.sh")
-        local has_nosudo="false"
-        echo "$result" | grep -q "^sh /tmp/setup-k8s.sh join" && has_nosudo="true"
-        _assert_eq "build_join_cmd no sudo" "true" "$has_nosudo"
-    )
-}
-
-# ============================================================
 # Test: DEPLOY_REMOTE_TIMEOUT / DEPLOY_POLL_INTERVAL defaults
 # ============================================================
 _case_deploy_timeout_defaults() {
@@ -104,10 +65,6 @@ _case_deploy_timeout_defaults() {
 
 @test "_download_binary fails on invalid URL" {
     _case_download_binary_failure
-}
-
-@test "_build_join_cmd" {
-    _case_build_join_cmd
 }
 
 @test "DEPLOY_REMOTE_TIMEOUT / DEPLOY_POLL_INTERVAL defaults" {

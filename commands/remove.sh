@@ -86,7 +86,7 @@ remove_cluster() {
     # --- Step 1: SSH connectivity check ---
     _step=$((_step + 1))
     log_info "Step ${_step}: Checking SSH connectivity..."
-    if ! _init_remote_session "remove" "${REMOVE_CONTROL_PLANES},${REMOVE_NODES}"; then
+    if ! remote_session_open --no-transfer "remove" "${REMOVE_CONTROL_PLANES},${REMOVE_NODES}"; then
         return 1
     fi
 
@@ -164,9 +164,7 @@ remove_cluster() {
     log_info ""
     log_info "=========================="
 
-    # Clean up known_hosts
-    _teardown_session_known_hosts
-    _pop_cleanup
+    remote_session_close
 
     if [ "$remove_failed" = true ]; then
         _audit_log "remove" "failed" "failed=${failed_nodes}"
@@ -278,6 +276,12 @@ validate_remove_args() {
 
 # === Runner ===
 
+# remove runs kubectl/kubeadm over SSH and does not transfer the script, so
+# it also works when the script is read from stdin.
 _run_remove() {
-    _run_remote remove parse_remove_args validate_remove_args remove_dry_run remove_cluster "$@"
+    parse_remove_args "$@"
+    validate_remove_args
+    _dry_run_guard remove_dry_run
+    remove_cluster
+    exit $?
 }
