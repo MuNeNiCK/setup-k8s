@@ -53,12 +53,18 @@ Subcommand scenarios:
 
 ## GitHub Actions Coverage
 
-| Workflow | Coverage |
-| --- | --- |
-| `ShellCheck & Unit Tests` | Runs shellcheck and unit tests for local scripts. |
-| `Setup Option Tests` | Runs the setup/remove lifecycle across the setup option matrix. |
-| `Setup Distro Tests` | Runs the setup/remove lifecycle across the distro matrix. |
-| `Scenario Tests` | Runs join, preflight, deploy/remove, backup/restore, cert renew, upgrade, generic, and HA checks across the scenario matrix. |
+| Workflow | Runs on | Coverage |
+| --- | --- | --- |
+| `ShellCheck & Unit Tests` | pull requests and pushes to `main` and `develop` | ShellCheck, actionlint, and the bats unit tests. |
+| `Setup Option Tests` | pull requests to `main` and `develop` (Ubuntu 24.04 smoke test only); pushes to `main` and `develop` (full matrix) | The setup/remove lifecycle across the setup option matrix (Kubernetes 1.35-1.37). |
+| `Setup Distro Tests` | pushes to `main` and `develop`; weekly for `main` | The setup/remove lifecycle across `matrices/distro-cloud-images.txt`. |
+| `Scenario Tests` | pushes to `main` and `develop` | Join, preflight, deploy/remove, backup/restore, cert renew, upgrade, swap persistence, init options, generic, and HA checks. |
+| `docs` | pull requests and pushes to `main` that change `docs/` | Builds the site; deploys it from `main`. |
+| `Release` | `v*` tags | Builds and publishes the release asset. |
+
+The VM workflows skip pushes that only change documentation. A newer push to
+`develop` (or a pull request) cancels the running VM workflow of that branch;
+runs for `main` are not cancelled.
 
 ## Configuration
 

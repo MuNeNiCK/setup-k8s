@@ -63,6 +63,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Kubernetes 1.35-1.37 are the supported releases; an empty
+          # k8s_version installs the latest stable release.
           - name: ubuntu2404-default
             distro: ubuntu-24.04-cloud-amd64
             k8s_version: ""
@@ -71,9 +73,13 @@ jobs:
             distro: ubuntu-24.04-cloud-amd64
             k8s_version: ""
             setup_args: "--proxy-mode ipvs --cri crio"
-          - name: ubuntu2404-nftables-k130
+          - name: ubuntu2404-iptables-k135
             distro: ubuntu-24.04-cloud-amd64
-            k8s_version: "1.30"
+            k8s_version: "1.35"
+            setup_args: "--proxy-mode iptables"
+          - name: ubuntu2404-nftables-patch-version
+            distro: ubuntu-24.04-cloud-amd64
+            k8s_version: "1.36.5"
             setup_args: "--proxy-mode nftables"
           - name: ubuntu2404-helm-completion
             distro: ubuntu-24.04-cloud-amd64
@@ -106,20 +112,20 @@ jobs:
             setup_args: "--kubeadm-config-patch __KUBEADM_PATCH__"
           - name: ubuntu2404-swap-enabled
             distro: ubuntu-24.04-cloud-amd64
-            k8s_version: "1.32"
+            k8s_version: ""
             setup_args: "--swap-enabled"
-          - name: ubuntu2204-custom-k8s
+          - name: ubuntu2204-k136
             distro: ubuntu-22.04-cloud-amd64
-            k8s_version: "1.31"
+            k8s_version: "1.36"
             setup_args: "--install-helm false"
-          - name: ubuntu2204-cri-containerd-ipvs
+          - name: ubuntu2204-containerd-ipvs
             distro: ubuntu-22.04-cloud-amd64
             k8s_version: ""
             setup_args: "--proxy-mode ipvs --cri containerd"
-          - name: ubuntu2204-legacy-k128
-            distro: ubuntu-22.04-cloud-amd64
-            k8s_version: "1.28"
-            setup_args: ""
+          - name: ubuntu2604-crio-k135
+            distro: ubuntu-26.04-cloud-amd64
+            k8s_version: "1.35"
+            setup_args: "--cri crio"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
