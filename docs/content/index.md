@@ -10,7 +10,7 @@ It supports local single-node setup, manual node joins, SSH-driven multi-node de
 - Join worker and additional control-plane nodes.
 - Deploy a full cluster from one orchestrator host over SSH.
 - Use containerd or CRI-O.
-- Select kube-proxy mode: iptables, IPVS, or nftables.
+- Select kube-proxy mode: nftables or iptables automatically by Kubernetes and kernel version, or IPVS.
 - Configure IPv4, IPv6, or dual-stack networking.
 - Run preflight checks before changing nodes.
 - Upgrade clusters, renew certificates, back up etcd, restore etcd, and clean up nodes.

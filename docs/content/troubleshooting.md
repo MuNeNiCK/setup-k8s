@@ -32,6 +32,19 @@ kubectl get configmap -n kube-system kube-proxy -o yaml | grep mode
 sudo ipvsadm -Ln
 ```
 
+## kubelet does not start after a reboot (swap)
+
+kubelet exits at startup while swap is on (`running with swap on is not supported`). setup-k8s keeps swap off across reboots by commenting out fstab swap entries, adding a drop-in to every systemd swap unit (`/etc/systemd/system/<unit>.swap.d/90-setup-k8s-swap-off.conf`), and disabling zram swap.
+
+Swap that is enabled outside these mechanisms (for example `swapon` in a boot script) still comes back. Check:
+```bash
+swapon --show
+systemctl list-units --type=swap --all
+journalctl -u kubelet -b | grep -i swap
+```
+
+Nodes set up with an earlier version of setup-k8s may only have had fstab swap entries disabled; run `sudo swapoff -a` and disable the remaining swap unit (`sudo systemctl mask <unit>` or a drop-in as above), or rerun `init` after `cleanup`.
+
 ## nftables Mode Issues
 - Check kernel module availability:
 ```bash
@@ -41,7 +54,7 @@ lsmod | grep nf_tables
 ```bash
 which nft
 ```
-- Check kernel version (>= 3.13 required):
+- Check kernel version (kube-proxy nftables mode requires >= 5.13):
 ```bash
 uname -r
 ```
@@ -49,10 +62,11 @@ uname -r
 ```bash
 sudo nft list ruleset
 ```
-- Check Kubernetes version supports nftables (>= 1.29):
+- Check the mode kube-proxy runs in (with the default `--proxy-mode auto`, `init` prints the selected mode):
 ```bash
-kubectl version --short
+kubectl -n kube-system get configmap kube-proxy -o jsonpath='{.data.config\.conf}' | grep '^mode'
 ```
+- If a CNI plugin or tool requires iptables rules, reinstall the node with `--proxy-mode iptables`.
 - If NodePort services are not accessible:
   - nftables mode only allows NodePort on default IPs
   - Use the node's primary IP address, not 127.0.0.1

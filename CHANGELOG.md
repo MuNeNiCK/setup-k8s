@@ -13,6 +13,21 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Added
 
+- `--proxy-mode auto` (the new default): nftables on Kubernetes 1.33+ with
+  Linux 5.13+, iptables otherwise. `preflight --proxy-mode auto` shows the
+  resolved mode.
+- `--kubernetes-version` accepts an exact patch version (`1.37.2`) for
+  `init`, `join`, and `deploy`; the control plane is pinned to the installed
+  kubeadm version.
+- `--prerelease` installs the next Kubernetes release from the prerelease
+  channels of pkgs.k8s.io and isv:cri-o.
+- `--image-repository REPO` pulls control-plane and pause images from a
+  mirror.
+- `--kubeadm-patches DIR` passes kubeadm patches to `init`, `join`, and
+  `upgrade`; `deploy` and remote `upgrade` copy the directory to every node.
+- `preflight` reports user namespace support for Pods and the SELinuxMount
+  behavior of Kubernetes 1.37+ (information only).
+- `test/scenarios/swap-reboot.sh` checks that swap stays off across reboots.
 - `LICENSE` (Apache License 2.0).
 - `CHANGELOG.md` to track notable changes.
 - `CONTRIBUTING.md` describing the branching model, development requirements,
@@ -29,6 +44,22 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Changed
 
+- kube-proxy runs in nftables mode by default where the node supports it (see
+  `--proxy-mode auto`); use `--proxy-mode iptables` for the previous default.
+- containerd 1.x: `preflight` fails for Kubernetes 1.38+ (the first release
+  without kubelet support for containerd 1.7) and warns for earlier versions.
+  The previous check assumed 1.36.
+- `--swap-enabled` requires Kubernetes 1.30+ (NodeSwap is disabled by default
+  in 1.28 and 1.29).
+- Default versions for `--distro generic`: containerd 2.3.7, runc 1.5.2, CNI
+  plugins 1.9.1. kube-vip v1.3.1 (manifest uses `vip_subnet` and
+  `vip_nodename`).
+- Helm 4.3.1 and Kustomize 5.8.3 are installed as pinned release binaries
+  with sha256 verification (`HELM_VERSION`, `KUSTOMIZE_VERSION`) instead of
+  running upstream install scripts (Kustomize's from the `master` branch).
+- runc downloads are verified against the published checksums.
+- `--distro generic` (and `--prerelease`, whose channel has no cri-tools
+  package) installs crictl from the cri-tools GitHub release.
 - The script is distributed as a GitHub release asset
   (`releases/latest/download/setup-k8s.sh`) instead of being fetched from
   `raw/main`. `curl | sh` downloads one file; modules are no longer downloaded
@@ -69,6 +100,10 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Fixed
 
+- Swap came back after a reboot when it was enabled by a systemd swap unit
+  that is not in `/etc/fstab` (for example a swap file unit), so kubelet did
+  not start. All systemd swap units now get a drop-in that keeps them from
+  starting; `cleanup` removes it.
 - CRI-O installation on RHEL-family and SUSE distributions (the
   pkgs.k8s.io CRI-O repository is no longer served).
 - Automatic upgrade rollback, which was always rejected as a downgrade.

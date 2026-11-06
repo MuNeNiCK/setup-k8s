@@ -41,7 +41,7 @@ Advanced setup:
 ```bash
 curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   init \
-  --kubernetes-version 1.29 \
+  --kubernetes-version 1.37.2 \
   --cri containerd \
   --pod-network-cidr 192.168.0.0/16 \
   --apiserver-advertise-address 192.168.1.10 \
@@ -58,12 +58,11 @@ curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-
 
 Kubernetes 1.35+ deprecates kube-proxy IPVS mode. Prefer nftables for new clusters.
 
-Setup with nftables mode (requires K8s 1.29+):
+The default proxy mode `auto` uses nftables on Kubernetes 1.33+ with Linux 5.13+ and iptables otherwise. Force iptables for CNI plugins or tools that expect iptables rules:
 ```bash
 curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   init \
-  --proxy-mode nftables \
-  --kubernetes-version 1.31 \
+  --proxy-mode iptables \
   --pod-network-cidr 192.168.0.0/16
 ```
 

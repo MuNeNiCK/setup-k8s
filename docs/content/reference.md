@@ -47,12 +47,15 @@ These options apply to all subcommands. They are handled by the entry point and 
 | Option | Description | Default | Example |
 |--------|-------------|---------|---------|
 | `--cri RUNTIME` | Container runtime (containerd or crio) | `containerd` | `--cri crio` |
-| `--proxy-mode MODE` | Kube-proxy mode (iptables, ipvs, or nftables; ipvs is deprecated in Kubernetes 1.35+) | `iptables` | `--proxy-mode nftables` |
+| `--proxy-mode MODE` | Kube-proxy mode: `auto` (nftables on Kubernetes 1.33+ with Linux 5.13+, otherwise iptables), `nftables`, `iptables`, or `ipvs` (deprecated in Kubernetes 1.35+) | `auto` | `--proxy-mode nftables` |
 | `--pod-network-cidr CIDR` | Pod network CIDR (IPv4, IPv6, or dual-stack comma-separated) | — | `--pod-network-cidr 10.244.0.0/16,fd00:10:244::/48` |
 | `--apiserver-advertise-address ADDR` | API server advertise address | — | `--apiserver-advertise-address 192.168.1.10` |
 | `--control-plane-endpoint ENDPOINT` | Control plane endpoint | — | `--control-plane-endpoint cluster.example.com` |
 | `--service-cidr CIDR` | Service CIDR (IPv4, IPv6, or dual-stack comma-separated) | — | `--service-cidr 10.96.0.0/12,fd00:20::/108` |
-| `--kubernetes-version VER` | Kubernetes version | — | `--kubernetes-version 1.29` |
+| `--kubernetes-version VER` | Kubernetes version: MAJOR.MINOR (latest patch) or MAJOR.MINOR.PATCH (pinned) | latest stable | `--kubernetes-version 1.37.2` |
+| `--prerelease` | Install the next release from the prerelease channels (pkgs.k8s.io, isv:cri-o) | — | `--prerelease` |
+| `--image-repository REPO` | Pull control-plane images from REPO instead of registry.k8s.io | — | `--image-repository registry.example.com/k8s` |
+| `--kubeadm-patches DIR` | Apply kubeadm patches from DIR (`kubeadm --patches`); with `deploy`, a local directory copied to every node | — | `--kubeadm-patches ./patches` |
 | `--join-token TOKEN` | Join token (join only) | — | `--join-token abcdef.1234567890abcdef` |
 | `--join-address ADDR` | Control plane address (join only) | — | `--join-address 192.168.1.10:6443` |
 | `--discovery-token-hash HASH` | Discovery token hash (join only) | — | `--discovery-token-hash sha256:abc...` |
@@ -61,7 +64,7 @@ These options apply to all subcommands. They are handled by the entry point and 
 | `--ha` | Enable HA mode with kube-vip (init only) | — | `--ha` |
 | `--ha-vip ADDRESS` | VIP address (required when --ha is set) | — | `--ha-vip 192.168.1.100` |
 | `--ha-interface IFACE` | Network interface for VIP | auto-detect | `--ha-interface eth0` |
-| `--swap-enabled` | Keep swap enabled (K8s 1.28+, NodeSwap LimitedSwap) | — | `--swap-enabled` |
+| `--swap-enabled` | Keep swap enabled (Kubernetes 1.30+, NodeSwap LimitedSwap) | — | `--swap-enabled` |
 | `--enable-completion BOOL` | Enable shell completion setup | `true` | `--enable-completion false` |
 | `--completion-shells LIST` | Shells to configure (auto, bash, zsh, fish, or comma-separated) | `auto` | `--completion-shells bash,zsh` |
 | `--install-helm BOOL` | Install Helm package manager | `false` | `--install-helm true` |
@@ -86,7 +89,7 @@ These options are shared across all remote subcommands: `deploy`, `upgrade`, `re
 
 ### Deploy Options
 
-Options specific to the `deploy` subcommand. Init/join options like `--cri`, `--proxy-mode`, `--kubernetes-version`, `--pod-network-cidr`, `--service-cidr`, and `--control-plane-endpoint` are passed through to remote nodes.
+Options specific to the `deploy` subcommand. Init/join options like `--cri`, `--proxy-mode`, `--kubernetes-version`, `--prerelease`, `--image-repository`, `--pod-network-cidr`, `--service-cidr`, and `--control-plane-endpoint` are passed through to remote nodes; `--kubeadm-patches` copies the local directory to every node.
 
 | Option | Description | Default | Example |
 |--------|-------------|---------|---------|
@@ -119,6 +122,7 @@ Options for the `upgrade` subcommand when orchestrating remotely via SSH.
 | `--kubernetes-version VER` | Target version in MAJOR.MINOR.PATCH format | — (required) | `--kubernetes-version 1.33.2` |
 | `--skip-drain` | Skip drain/uncordon for all nodes | — | `--skip-drain` |
 | `--no-rollback` | Disable automatic rollback on upgrade failure | — | `--no-rollback` |
+| `--kubeadm-patches DIR` | Apply kubeadm patches from DIR during the upgrade (remote mode: local directory copied to every node) | — | `--kubeadm-patches ./patches` |
 | `--rollback-to VER` | Local mode: reinstall kubeadm, kubelet, and kubectl at VER after a failed upgrade (instead of `--kubernetes-version`) | — | `--rollback-to 1.36.6` |
 | `--auto-step-upgrade` | Automatically step through intermediate minor versions (e.g., 1.31 → 1.32 → 1.33) | — | `--auto-step-upgrade` |
 
@@ -206,11 +210,11 @@ Options for the `preflight` subcommand. Runs locally with root privileges to ver
 |--------|-------------|---------|---------|
 | `--mode MODE` | Check mode (`init` or `join`) | `init` | `--mode join` |
 | `--cri RUNTIME` | Container runtime to check (`containerd` or `crio`) | `containerd` | `--cri crio` |
-| `--proxy-mode MODE` | Proxy mode to check (`iptables`, `ipvs`, or `nftables`) | `iptables` | `--proxy-mode ipvs` |
-| `--kubernetes-version VER` | Target Kubernetes minor version for compatibility checks | — | `--kubernetes-version 1.36` |
+| `--proxy-mode MODE` | Proxy mode to check (`auto`, `iptables`, `ipvs`, or `nftables`) | `auto` | `--proxy-mode ipvs` |
+| `--kubernetes-version VER` | Target Kubernetes version for compatibility checks | — | `--kubernetes-version 1.38` |
 | `--preflight-strict` | Treat warnings as failures (exit non-zero on any warning) | — | `--preflight-strict` |
 
-Checks performed: CPU count (>= 2), memory (>= 1700 MB), disk space, required port availability, kernel modules, IPv4 forwarding, CRI installation, containerd v2 readiness for Kubernetes 1.36+, swap state, cgroups v2, SELinux state, AppArmor state, unattended upgrades detection, existing cluster detection (init only), and network connectivity.
+Checks performed: CPU count (>= 2), memory (>= 1700 MB), disk space, required port availability, kernel modules, IPv4 forwarding, CRI installation, containerd 2 readiness (fails when the target Kubernetes version no longer supports containerd 1.x, which is 1.38+; warns otherwise), swap state, cgroups v2, SELinux mode and user namespace support (info), AppArmor state, unattended upgrades detection, existing cluster detection (init only), and network connectivity. With `--proxy-mode auto`, the checks use the mode `auto` resolves to on the node.
 
 ### Cleanup Options
 
