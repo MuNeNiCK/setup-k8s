@@ -107,11 +107,20 @@ _cleanup_cp_worker() {
     cleanup_ssh_key
 }
 
+# Label attached to every test VM container: the PID of the scenario process
+# that owns it. Containers whose owner is still running belong to a parallel
+# test run and are left alone.
+TEST_OWNER_LABEL="setup-k8s-test-owner=$$"
+
 # Stop orphaned containers by label (shared across test runners)
 # Usage: cleanup_orphaned_containers <label>
 cleanup_orphaned_containers() {
-    local label=$1
+    local label=$1 cid owner
     docker ps -q --filter "label=managed-by=$label" 2>/dev/null | while read -r cid; do
+        owner=$(docker inspect --format '{{index .Config.Labels "setup-k8s-test-owner"}}' "$cid" 2>/dev/null || true)
+        if [ -n "$owner" ] && [ "$owner" != "$$" ] && kill -0 "$owner" 2>/dev/null; then
+            continue
+        fi
         log_warn "Stopping orphaned container: $(docker inspect --format '{{.Name}}' "$cid" 2>/dev/null | tr -d '/')"
         docker stop "$cid" >/dev/null 2>&1 || true
     done
@@ -348,6 +357,7 @@ start_vm() {
     if ! docker run -d --rm \
         --name "$container_name" \
         --label "$label" \
+        --label "$TEST_OWNER_LABEL" \
         --network "$DOCKER_NETWORK" --ip "$static_ip" \
         --device /dev/kvm:/dev/kvm \
         -v "$vm_data_dir:/data" \

@@ -182,6 +182,7 @@ CIEOF
         docker run -d --rm
         --name "$container_name"
         --label "managed-by=k8s-test-runner"
+        --label "$TEST_OWNER_LABEL"
         --device /dev/kvm:/dev/kvm
         -v "$VM_DATA_DIR:/data"
         -v "$_CLOUD_INIT_USER_DATA:/cloud-init-userdata.yaml:ro"

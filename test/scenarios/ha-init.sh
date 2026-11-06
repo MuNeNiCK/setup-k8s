@@ -100,6 +100,7 @@ run_ha_test() {
     docker run -d --rm \
         --name "$container_name" \
         --label "managed-by=k8s-ha-test" \
+        --label "$TEST_OWNER_LABEL" \
         --device /dev/kvm:/dev/kvm \
         -v "$VM_DATA_DIR:/data" \
         -p "${SSH_PORT}:2222" \

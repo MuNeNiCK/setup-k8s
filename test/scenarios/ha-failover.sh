@@ -94,6 +94,7 @@ _fo_start_vm() {
     docker run -d --rm \
         --name "$container_name" \
         --label "managed-by=k8s-ha-failover-test" \
+        --label "$TEST_OWNER_LABEL" \
         --network "$DOCKER_NETWORK" --ip "$static_ip" \
         --device /dev/kvm:/dev/kvm \
         -v "$vm_data_dir:/data" \
