@@ -139,8 +139,15 @@ When a change affects a specific distribution family or subcommand, run the
 matching scenario on that distribution.
 
 On GitHub, pull requests run ShellCheck, actionlint, the unit tests, and an
-Ubuntu 24.04 smoke test. The full VM matrices run after merging into
-`develop` (and again for `main`); see [test/README.md](test/README.md).
+Ubuntu 24.04 smoke test. These four are required to merge into `main` and
+`develop` (enable auto-merge on the pull request to merge once they pass).
+The full VM matrices run after merging into `develop` (and again for `main`);
+see [test/README.md](test/README.md).
+
+Dependabot proposes GitHub Actions updates against `develop`. A weekly
+workflow compares the component defaults in `lib/core/defaults.sh` with
+upstream releases (`scripts/check-versions.sh`) and keeps an issue labeled
+`dependencies` open while updates are available.
 
 ### Documentation
 

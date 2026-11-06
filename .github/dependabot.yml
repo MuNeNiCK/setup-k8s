@@ -1,0 +1,13 @@
+# Updates for the GitHub Actions used by the workflows (pinned by commit SHA).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore
