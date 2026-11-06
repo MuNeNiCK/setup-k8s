@@ -32,6 +32,8 @@ jobs:
             command: ./scenarios/cert-renew.sh --distro ubuntu-24.04-cloud-amd64
           - name: swap-reboot
             command: ./scenarios/swap-reboot.sh --distro ubuntu-24.04-cloud-amd64
+          - name: options
+            command: ./scenarios/options.sh --distro ubuntu-24.04-cloud-amd64
           - name: upgrade
             command: ./scenarios/upgrade.sh --distro ubuntu-24.04-cloud-amd64
           - name: upgrade-skip-drain

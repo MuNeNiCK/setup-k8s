@@ -33,7 +33,7 @@ VM_CPUS="${VM_CPUS:-4}"
 VM_DISK_SIZE="${VM_DISK_SIZE:-40G}"
 
 TIMEOUT_TOTAL=1200
-SSH_READY_TIMEOUT=300
+SSH_READY_TIMEOUT="${SSH_READY_TIMEOUT:-300}"
 
 # SSH settings
 SSH_KEY_DIR=""
@@ -124,6 +124,9 @@ run_failover_test() {
     log_info "Docker network: $DOCKER_NETWORK ($DOCKER_SUBNET)"
     mkdir -p results/logs "$VM_DATA_DIR"
     test_validate_runner_distro "$DISTRO" || return 1
+    # deploy runs on the host with the same single-file bundle as the release asset
+    HOST_BUNDLE="$VM_DATA_DIR/setup-k8s-host-$$.sh"
+    _generate_bundle "$SETUP_K8S_SCRIPT" "$HOST_BUNDLE"
 
     cleanup_orphaned_containers "k8s-ha-failover-test"
     trap '_fo_cleanup_all' EXIT INT TERM HUP
