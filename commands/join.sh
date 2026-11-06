@@ -26,6 +26,9 @@ join_cluster() {
     if [ "${JOIN_AS_CONTROL_PLANE:-false}" = true ]; then
         set -- "$@" --control-plane --certificate-key "$CERTIFICATE_KEY"
     fi
+    if [ -n "${KUBEADM_PATCHES_DIR:-}" ]; then
+        set -- "$@" --patches "$KUBEADM_PATCHES_DIR"
+    fi
 
     local join_exit=0
     # shellcheck disable=SC2046 # intentional word splitting

@@ -88,3 +88,50 @@ node 1.36.6" ]
     run rollback_node_local
     [ "$status" -ne 0 ]
 }
+
+@test "remote_send_dir copies a directory to every node of the session" {
+    # Run the transfer locally: scp copies, ssh runs the command with sh.
+    _deploy_scp() { cp "$1" "$4"; }
+    _deploy_ssh() { local cmd="$3"; cmd="${cmd#sudo -n }"; echo "$2" >> "$RUNS"; eval "$cmd"; }
+    local a="$BATS_TEST_TMPDIR/node-a" b="$BATS_TEST_TMPDIR/node-b" dir="$BATS_TEST_TMPDIR/patches"
+    mkdir -p "$a" "$b" "$dir"
+    _DEPLOY_NODE_BUNDLE_DIRS=""
+    _bundle_dir_set 10.0.0.1 "$a"
+    _bundle_dir_set 10.0.0.2 "$b"
+    echo "spec: {}" > "$dir/kube-apiserver+strategic.yaml"
+    _DEPLOY_ALL_NODES="10.0.0.1,admin@10.0.0.2"
+
+    remote_send_dir "$dir" kubeadm-patches
+
+    cmp "$dir/kube-apiserver+strategic.yaml" "$a/kubeadm-patches/kube-apiserver+strategic.yaml"
+    cmp "$dir/kube-apiserver+strategic.yaml" "$b/kubeadm-patches/kube-apiserver+strategic.yaml"
+    [ ! -e "$a/kubeadm-patches.tar" ]
+    [ "$(cat "$RUNS")" = "10.0.0.1
+10.0.0.2" ]
+}
+
+@test "deploy passes each node its own copy of the kubeadm patches" {
+    KUBEADM_PATCHES_DIR="$BATS_TEST_TMPDIR/patches"
+    DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_pair "" --ha-vip 10.0.0.100)
+    _deploy_remote_run "--ha-vip --ha-interface" admin@10.0.0.2 "join worker" join --join-token abc
+    [ "$(cut -d'|' -f3 "$RUNS")" = "sudo -n sh '/tmp/sk-b/setup-k8s.sh' 'join' '--join-token' 'abc' '--kubeadm-patches' '/tmp/sk-b/kubeadm-patches' " ]
+}
+
+@test "deploy forwards the cluster's kube-proxy mode to joining nodes" {
+    remote_exec() { printf 'apiVersion: kubeproxy.config.k8s.io/v1alpha1\nmode: nftables\n'; }
+    DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_pair "" --cri crio)
+    _deploy_pin_proxy_mode 10.0.0.1
+    remote_run --forward "$DEPLOY_PASSTHROUGH_ARGS" 10.0.0.2 "join worker" join
+    [ "$(cut -d'|' -f3 "$RUNS")" = "sh '/tmp/sk-b/setup-k8s.sh' 'join' '--cri' 'crio' '--proxy-mode' 'nftables' " ]
+
+    # An explicit --proxy-mode is kept; an empty mode is kube-proxy's iptables default
+    DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_pair "" --proxy-mode ipvs)
+    _deploy_pin_proxy_mode 10.0.0.1
+    [ "$DEPLOY_PASSTHROUGH_ARGS" = "--proxy-mode
+ipvs" ]
+    remote_exec() { printf 'mode: ""\n'; }
+    DEPLOY_PASSTHROUGH_ARGS=""
+    _deploy_pin_proxy_mode 10.0.0.1
+    [ "$DEPLOY_PASSTHROUGH_ARGS" = "--proxy-mode
+iptables" ]
+}

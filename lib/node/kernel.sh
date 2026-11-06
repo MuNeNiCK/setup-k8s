@@ -1,5 +1,42 @@
 #!/bin/sh
 
+# === kube-proxy mode ===
+
+# Minimum kernel for kube-proxy nftables mode (upstream requirement)
+_NFTABLES_MIN_KERNEL="5.13"
+
+# Print the kube-proxy mode for --proxy-mode auto: nftables when the
+# Kubernetes version has nftables GA and the kernel supports it, iptables
+# otherwise. An empty version means "assume a current release".
+# Usage: _resolve_auto_proxy_mode [k8s_version]
+_resolve_auto_proxy_mode() {
+    local version="${1:-}"
+    if [ -n "$version" ] && ! k8s_supports nftables-ga "$version"; then
+        echo iptables
+        return 0
+    fi
+    if ! _kernel_version_ge "$_NFTABLES_MIN_KERNEL"; then
+        echo iptables
+        return 0
+    fi
+    if ! modprobe -n nf_tables >/dev/null 2>&1 && [ ! -d /sys/module/nf_tables ]; then
+        echo iptables
+        return 0
+    fi
+    echo nftables
+}
+
+# Resolve PROXY_MODE=auto (requires K8S_VERSION).
+resolve_proxy_mode() {
+    if [ "$PROXY_MODE" = auto ]; then
+        PROXY_MODE=$(_resolve_auto_proxy_mode "$K8S_VERSION")
+        log_info "Proxy mode auto: using ${PROXY_MODE} (Kubernetes ${K8S_VERSION}, kernel $(_kernel_release))"
+        if [ "${ACTION:-}" = join ]; then
+            log_info "  kube-proxy runs in the cluster's mode; pass --proxy-mode if it differs from ${PROXY_MODE}"
+        fi
+    fi
+}
+
 # === Node dependencies ===
 
 # Commands that must exist when no package manager is available.
@@ -36,8 +73,6 @@ install_node_dependencies() {
         log_info "br_netfilter not available — installing ${DISTRO_KMOD_PKG}..."
         pkg_install "$DISTRO_KMOD_PKG" || return 1
     fi
-
-    install_proxy_mode_packages
 }
 
 # Install proxy-mode-specific packages (IPVS or nftables) for PROXY_MODE.
@@ -235,15 +270,10 @@ check_nftables_availability() {
         nftables_available=false
     fi
 
-    # Check kernel version (nftables requires >= 3.13, recommended >= 4.14)
-    local kernel_major kernel_minor
-    kernel_major=$(uname -r | cut -d. -f1)
-    kernel_minor=$(uname -r | cut -d. -f2)
-    if [ "$kernel_major" -lt 3 ] || { [ "$kernel_major" -eq 3 ] && [ "$kernel_minor" -lt 13 ]; }; then
-        log_warn "Kernel version too old for nftables (requires >= 3.13)"
+    # kube-proxy nftables mode requires kernel 5.13 or later
+    if ! _kernel_version_ge "$_NFTABLES_MIN_KERNEL"; then
+        log_warn "Kernel $(_kernel_release) is too old for kube-proxy nftables mode (requires >= ${_NFTABLES_MIN_KERNEL})"
         nftables_available=false
-    elif [ "$kernel_major" -lt 4 ] || { [ "$kernel_major" -eq 4 ] && [ "$kernel_minor" -lt 14 ]; }; then
-        log_warn "Kernel version ${kernel_major}.${kernel_minor} may have limited nftables support (>= 4.14 recommended)"
     fi
 
     if [ "$nftables_available" = false ]; then

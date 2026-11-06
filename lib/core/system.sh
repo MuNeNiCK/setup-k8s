@@ -17,6 +17,23 @@ _detect_arch() {
     esac
 }
 
+# Kernel release to inspect (overridable for tests)
+_kernel_release() { uname -r; }
+
+# Succeed when the running kernel is at least MAJOR.MINOR.
+# Usage: _kernel_version_ge <major.minor>
+_kernel_version_ge() {
+    local rel major minor want_major want_minor
+    rel=$(_kernel_release)
+    major=$(echo "$rel" | cut -d. -f1)
+    minor=$(echo "$rel" | cut -d. -f2 | sed 's/[^0-9].*//')
+    want_major="${1%%.*}"
+    want_minor="${1#*.}"
+    case "$major$minor" in *[!0-9]*|"") return 1 ;; esac
+    [ "$major" -gt "$want_major" ] && return 0
+    [ "$major" -eq "$want_major" ] && [ "${minor:-0}" -ge "$want_minor" ]
+}
+
 _detect_init_system() {
     if command -v systemctl >/dev/null 2>&1 && systemctl --version >/dev/null 2>&1; then
         echo "systemd"

@@ -132,3 +132,33 @@ setup() {
     _configure_kubelet_node_ip
     grep -qx 'KUBELET_EXTRA_ARGS="--node-ip=10.0.0.5"' "$BATS_TEST_TMPDIR/sysconfig/kubelet"
 }
+
+@test "prerelease installs Kubernetes packages without cri-tools and adds crictl" {
+    DISTRO_PKG=apt DISTRO_K8S_SOURCE=pkgs K8S_VERSION=1.38 K8S_PRERELEASE=true
+    _k8s_remove_conflicting_packages() { :; }
+    _k8s_repo_add() { echo "repo $1" >> "$CALLS"; }
+    pkg_install() { echo "install $*" >> "$CALLS"; }
+    _crictl_install_binary() { echo "crictl $1" >> "$CALLS"; }
+    _enable_and_start_kubelet() { :; }
+    fake_cmd kubeadm
+    k8s_install
+    grep -qx 'install --hold --repo kubernetes kubelet=1.38 kubeadm=1.38 kubectl=1.38' "$CALLS"
+    grep -qx 'crictl 1.38' "$CALLS"
+}
+
+@test "crictl comes from the cri-tools release of the minor or the previous minor" {
+    _detect_arch() { echo amd64; }
+    cat > "$FAKE_BIN/curl" <<FAKE
+#!/bin/sh
+echo "curl \$*" >> "$FAKE_LOG"
+case "\$*" in
+    *v1.38.0*) exit 22 ;;
+esac
+exit 0
+FAKE
+    chmod +x "$FAKE_BIN/curl"
+    _download_with_checksum() { echo "download $1 $3" >> "$CALLS"; : > "$2"; }
+    tar() { echo "tar $*" >> "$CALLS"; }
+    _crictl_install_binary 1.38 2>/dev/null || true
+    grep -qx 'download https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.37.0/crictl-v1.37.0-linux-amd64.tar.gz https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.37.0/crictl-v1.37.0-linux-amd64.tar.gz.sha256' "$CALLS"
+}

@@ -14,7 +14,9 @@
 _crio_from_isv() {
     local series base
     series=$(_k8s_minor_version "$K8S_VERSION")
-    base="https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v${series}"
+    local channel=stable
+    [ "${K8S_PRERELEASE:-false}" = true ] && channel=prerelease
+    base="https://download.opensuse.org/repositories/isv:/cri-o:/${channel}:/v${series}"
     case "$(pkg_format)" in
         deb) pkg_repo_add cri-o "${base}/deb/" "${base}/deb/Release.key" || return 1 ;;
         rpm) pkg_repo_add cri-o "${base}/rpm/" "${base}/rpm/repodata/repomd.xml.key" || return 1 ;;

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# shellcheck disable=SC2034 # tests set globals read by the modules under test
 # Ported from test/unit/test_kubeadm.sh
 
 setup() {
@@ -134,4 +135,88 @@ _case_generate_kubeadm_config_patch() {
 
 @test "generate_kubeadm_config with config patch" {
     _case_generate_kubeadm_config_patch
+}
+
+# --- kubernetesVersion, imageRepository, patches ---
+
+_fake_kubeadm_version() {
+    cat > "$FAKE_BIN/kubeadm" <<'FAKE'
+#!/bin/sh
+case "$*" in
+    "version -o short") echo v1.37.2 ;;
+    *) exit 1 ;;
+esac
+FAKE
+    chmod +x "$FAKE_BIN/kubeadm"
+}
+
+@test "kubeadm config pins the installed version and sets image repository and patches" {
+    load_modules; quiet_logs
+    _fake_kubeadm_version
+    K8S_VERSION=1.37 PROXY_MODE=nftables CRI=containerd
+    KUBEADM_IMAGE_REPOSITORY="mirror.example.com/k8s"
+    KUBEADM_PATCHES_DIR="/etc/setup-k8s/patches"
+    local cfg
+    cfg=$(generate_kubeadm_config)
+    grep -qx "kubernetesVersion: 'v1.37.2'" "$cfg"
+    grep -qx "imageRepository: 'mirror.example.com/k8s'" "$cfg"
+    grep -A1 -x 'patches:' "$cfg" | grep -qx "  directory: '/etc/setup-k8s/patches'"
+    # patches belongs to InitConfiguration (before the ClusterConfiguration document)
+    [ "$(grep -n -x 'patches:' "$cfg" | cut -d: -f1)" -lt "$(grep -n 'kind: ClusterConfiguration' "$cfg" | cut -d: -f1)" ]
+    rm -f "$cfg"
+}
+
+@test "kubeadm config omits image repository and patches by default" {
+    load_modules; quiet_logs
+    _fake_kubeadm_version
+    # shellcheck disable=SC2034 # read by generate_kubeadm_config
+    K8S_VERSION=1.37 PROXY_MODE=iptables CRI=containerd
+    local cfg
+    cfg=$(generate_kubeadm_config)
+    if grep -q -e '^imageRepository:' -e '^patches:' "$cfg"; then return 1; fi
+    grep -qx "kubernetesVersion: 'v1.37.2'" "$cfg"
+    rm -f "$cfg"
+}
+
+@test "parse_setup_args accepts patch versions, prerelease, image repository, and patches" {
+    load_modules; quiet_logs
+    local dir="$BATS_TEST_TMPDIR/patches"
+    mkdir -p "$dir"
+    parse_setup_args --kubernetes-version 1.37.2 --prerelease --image-repository mirror.example.com/k8s --kubeadm-patches "$dir"
+    [ "$K8S_VERSION" = 1.37 ]
+    [ "$K8S_PATCH_VERSION" = 1.37.2 ]
+    [ "$K8S_PRERELEASE" = true ]
+    [ "$KUBEADM_IMAGE_REPOSITORY" = mirror.example.com/k8s ]
+    [ "$KUBEADM_PATCHES_DIR" = "$dir" ]
+    run parse_setup_args --kubernetes-version 1.37.2.1
+    [ "$status" -ne 0 ]
+    run parse_setup_args --kubeadm-patches "$BATS_TEST_TMPDIR/missing"
+    [ "$status" -ne 0 ]
+}
+
+@test "the requested patch version is installed and used for binaries" {
+    load_modules; quiet_logs
+    K8S_PATCH_VERSION=1.37.2
+    [ "$(_resolve_k8s_patch_version 1.37)" = 1.37.2 ]
+}
+
+@test "prerelease uses the prerelease repository and version markers" {
+    load_modules; quiet_logs
+    CALLS="$BATS_TEST_TMPDIR/calls"
+    pkg_repo_add() { echo "repo $*" >> "$CALLS"; }
+    K8S_PRERELEASE=true
+    DISTRO_PKG=apt
+    _k8s_repo_add 1.38
+    grep -q 'https://pkgs.k8s.io/core:/prerelease:/v1.38/' "$CALLS"
+    fake_cmd curl 0 v1.38.0-beta.1
+    [ "$(_resolve_k8s_patch_version 1.38)" = 1.38.0-beta.1 ]
+    fake_calls | grep -q 'https://dl.k8s.io/release/latest-1.38.txt'
+}
+
+@test "--prerelease is rejected with distribution Kubernetes packages" {
+    load_modules; quiet_logs
+    # shellcheck disable=SC2034 # read by determine_k8s_version
+    K8S_PRERELEASE=true DISTRO_K8S_SOURCE=distro K8S_VERSION=1.34
+    run determine_k8s_version
+    [ "$status" -ne 0 ]
 }

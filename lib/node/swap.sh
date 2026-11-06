@@ -1,49 +1,125 @@
 #!/bin/sh
 
-# Disable swap
-disable_swap() {
-    log_info "Disabling swap..."
-    swapoff -a
-    # Backup fstab before modifying swap entries (for cleanup restoration)
-    if grep -q '^[^#].*[[:space:]]swap[[:space:]]' /etc/fstab; then
-        cp /etc/fstab /etc/fstab.pre-k8s
-    fi
-    # Match swap entries with any whitespace (spaces or tabs) and skip already-commented lines
-    sed -i '/^[^#].*[[:space:]]swap[[:space:]]/ s/^/#/' /etc/fstab
+# Swap must stay off across reboots, otherwise kubelet (failSwapOn) exits at
+# boot. Swap is activated at boot from /etc/fstab and from systemd .swap
+# units that are not in fstab (units installed by packages or the
+# administrator, cloud images, GPT auto-discovery). swapoff alone only lasts
+# until the next boot, so fstab entries are commented out and every systemd
+# swap unit gets a drop-in that prevents it from starting. (systemctl mask
+# does not work for units whose file is in /etc/systemd/system, the usual
+# place for administrator-created swap units.) Changes are recorded so that
+# cleanup restores exactly what was changed.
+
+# Files changed by disable_swap (overridable for tests)
+_FSTAB_FILE="/etc/fstab"
+_SYSTEMD_UNIT_DIR="/etc/systemd/system"
+_SWAP_UNITS_MARKER="/var/lib/setup-k8s-swap-units-disabled"
+_SWAP_DROPIN_NAME="90-setup-k8s-swap-off.conf"
+
+# Print the names of systemd swap units (one per line), excluding zram units
+# (handled by disable_zram_swap): units that are loaded or enabled.
+_systemd_swap_units() {
+    {
+        systemctl list-units --type=swap --all --plain --no-legend 2>/dev/null | awk '{print $1}'
+        systemctl list-unit-files --type=swap --plain --no-legend 2>/dev/null | awk '$2 == "enabled" {print $1}'
+    } | grep -v '^dev-zram' | grep '\.swap$' | sort -u
 }
 
-# Restore swap entries in /etc/fstab during cleanup
+# Prevent every systemd swap unit from starting at boot.
+_block_systemd_swap_units() {
+    [ "$(_detect_init_system)" = "systemd" ] || return 0
+    local unit dir
+    _systemd_swap_units | while IFS= read -r unit; do
+        [ -n "$unit" ] || continue
+        dir="${_SYSTEMD_UNIT_DIR}/${unit}.d"
+        [ -f "${dir}/${_SWAP_DROPIN_NAME}" ] && continue
+        log_info "Disabling swap unit $unit at boot (drop-in ${dir}/${_SWAP_DROPIN_NAME})..."
+        mkdir -p "$dir"
+        cat > "${dir}/${_SWAP_DROPIN_NAME}" <<'DROPIN'
+# Written by setup-k8s: kubelet requires swap to be off.
+# Removed by "setup-k8s.sh cleanup".
+[Unit]
+ConditionPathExists=/nonexistent/setup-k8s-keeps-swap-off
+DROPIN
+        mkdir -p "$(dirname "$_SWAP_UNITS_MARKER")"
+        echo "$unit" >> "$_SWAP_UNITS_MARKER"
+        systemctl stop "$unit" >/dev/null 2>&1 || true
+    done
+}
+
+# Disable swap now and for future boots
+disable_swap() {
+    log_info "Disabling swap..."
+    # Backup fstab before modifying swap entries (for cleanup restoration)
+    if grep -q '^[^#].*[[:space:]]swap[[:space:]]' "$_FSTAB_FILE"; then
+        cp "$_FSTAB_FILE" "${_FSTAB_FILE}.pre-k8s"
+    fi
+    # Match swap entries with any whitespace (spaces or tabs) and skip already-commented lines
+    sed -i '/^[^#].*[[:space:]]swap[[:space:]]/ s/^/#/' "$_FSTAB_FILE"
+    _block_systemd_swap_units
+    swapoff -a
+    if [ "$(_detect_init_system)" = "systemd" ]; then
+        # Regenerate units from the edited fstab
+        systemctl daemon-reload 2>/dev/null || true
+    fi
+}
+
+# Remove the drop-ins written by disable_swap.
+# Prints "true" when at least one unit was restored.
+_unblock_systemd_swap_units() {
+    local unit restored=false
+    if [ -f "$_SWAP_UNITS_MARKER" ]; then
+        while IFS= read -r unit; do
+            [ -n "$unit" ] || continue
+            log_info "Re-enabling swap unit $unit (disabled by setup-k8s)..."
+            rm -f "${_SYSTEMD_UNIT_DIR}/${unit}.d/${_SWAP_DROPIN_NAME}"
+            rmdir "${_SYSTEMD_UNIT_DIR}/${unit}.d" 2>/dev/null || true
+            restored=true
+        done < "$_SWAP_UNITS_MARKER"
+        rm -f "$_SWAP_UNITS_MARKER"
+    fi
+    echo "$restored"
+}
+
+# Restore swap disabled by disable_swap (fstab entries and systemd units)
 restore_fstab_swap() {
     log_info "Restoring swap entries in /etc/fstab..."
     local swap_restored=false
-    if [ -f /etc/fstab.pre-k8s ]; then
+    if [ "$(_detect_init_system)" = "systemd" ] && [ "$(_unblock_systemd_swap_units)" = true ]; then
+        swap_restored=true
+    fi
+    if [ -f "${_FSTAB_FILE}.pre-k8s" ]; then
         # Merge only swap-related lines from backup into current fstab.
         # This avoids overwriting legitimate admin changes made after setup.
         local swap_lines
-        swap_lines=$(grep '[[:space:]]swap[[:space:]]' /etc/fstab.pre-k8s | grep -v '^#' || true)
+        swap_lines=$(grep '[[:space:]]swap[[:space:]]' "${_FSTAB_FILE}.pre-k8s" | grep -v '^#' || true)
         if [ -n "$swap_lines" ]; then
             # Remove our commented-out swap lines and insert originals (deduplicated)
-            sed -i '/^#.*[[:space:]]swap[[:space:]]/d' /etc/fstab
+            sed -i '/^#.*[[:space:]]swap[[:space:]]/d' "$_FSTAB_FILE"
             echo "$swap_lines" | while IFS= read -r line; do
-                if ! grep -qF "$line" /etc/fstab; then
-                    echo "$line" >> /etc/fstab
+                if ! grep -qF "$line" "$_FSTAB_FILE"; then
+                    echo "$line" >> "$_FSTAB_FILE"
                 fi
             done
             log_info "Swap entries restored from backup (merged into current /etc/fstab)"
             swap_restored=true
         fi
-        rm -f /etc/fstab.pre-k8s
+        rm -f "${_FSTAB_FILE}.pre-k8s"
     else
         # No backup found: cannot safely determine which swap lines were commented
         # by this tool vs. pre-existing user comments. Log a warning instead of
         # blindly uncommenting all swap lines.
-        if grep -q '^#.*[[:space:]]swap[[:space:]]' /etc/fstab; then
-            log_warn "No fstab backup found (/etc/fstab.pre-k8s). Cannot safely restore swap entries."
+        if grep -q '^#.*[[:space:]]swap[[:space:]]' "$_FSTAB_FILE"; then
+            log_warn "No fstab backup found (${_FSTAB_FILE}.pre-k8s). Cannot safely restore swap entries."
             log_warn "If swap was disabled by this tool, manually uncomment swap lines in /etc/fstab."
         fi
     fi
-    # Re-enable swap only if we actually restored fstab entries
+    # Re-enable swap only if we actually restored something
     if [ "$swap_restored" = true ]; then
+        if [ "$(_detect_init_system)" = "systemd" ]; then
+            systemctl daemon-reload 2>/dev/null || true
+            systemctl start swap.target 2>/dev/null || true
+        fi
         if ! swapon -a 2>/dev/null; then
             log_warn "swapon -a failed; some swap devices may not be re-enabled"
         fi

@@ -52,9 +52,13 @@ spec:
       value: "true"
     - name: port
       value: "6443"
+    - name: vip_nodename
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.nodeName
     - name: vip_interface
       value: "${iface}"
-    - name: vip_cidr
+    - name: vip_subnet
       value: "$(_is_ipv6 "$vip" && echo "128" || echo "32")"
     - name: cp_enable
       value: "true"

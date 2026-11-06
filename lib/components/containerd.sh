@@ -43,24 +43,11 @@ _containerd_from_obs() {
 # --- release binaries ---
 
 _install_runc_binary() {
-    local arch base tmp_sums expected
+    local arch base
     arch=$(_detect_arch)
     base="https://github.com/opencontainers/runc/releases/download/v${RUNC_VERSION}"
-    _download_binary "${base}/runc.${arch}" /usr/local/bin/runc || return 1
-    tmp_sums=$(mktemp)
-    if ! curl -fsSL --retry 3 --retry-delay 2 -o "$tmp_sums" "${base}/runc.sha256sum"; then
-        rm -f "$tmp_sums" /usr/local/bin/runc
-        log_error "Failed to download runc checksums"
-        return 1
-    fi
-    expected=$(awk -v f="runc.${arch}" '$2 == f || $2 == "*"f {print $1; exit}' "$tmp_sums")
-    rm -f "$tmp_sums"
-    if [ -z "$expected" ] || [ "$expected" != "$(sha256sum /usr/local/bin/runc | awk '{print $1}')" ]; then
-        rm -f /usr/local/bin/runc
-        log_error "Checksum mismatch for runc"
-        return 1
-    fi
-    log_info "Checksum verified: runc"
+    _download_with_checksum "${base}/runc.${arch}" /usr/local/bin/runc "${base}/runc.sha256sum" "runc.${arch}" || return 1
+    chmod +x /usr/local/bin/runc
 }
 
 _install_containerd_binary() {

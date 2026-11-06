@@ -14,6 +14,9 @@
 #       for non-root users) and wait for it. --forward appends the
 #       newline-separated ARGS (as collected by _passthrough_add_*); flags in
 #       --drop are removed from them together with their values.
+#   remote_send_dir <local_dir> <name>
+#       Copy a local directory to <node working dir>/<name> on every node of
+#       the session.
 #   remote_exec <node> <command>
 #       Run a shell command on <node> as root and print its output.
 #   remote_session_close
@@ -59,6 +62,35 @@ remote_session_close() {
 remote_node_dir() {
     _parse_node_address "$1"
     _bundle_dir_lookup "$_NODE_HOST"
+}
+
+_remote_send_dir_to_node() {
+    local node="$1" dir rdir
+    _parse_node_address "$node"
+    rdir=$(_bundle_dir_lookup "$_NODE_HOST")
+    if [ -z "$rdir" ]; then
+        log_error "[$_NODE_HOST] no working directory (remote_session_open not called for this node)"
+        return 1
+    fi
+    log_info "  Transferring ${_REMOTE_SEND_NAME} to ${_NODE_HOST}..."
+    _deploy_scp "$_REMOTE_SEND_TAR" "$_NODE_USER" "$_NODE_HOST" "${rdir}/${_REMOTE_SEND_NAME}.tar" || return 1
+    dir="${rdir}/${_REMOTE_SEND_NAME}"
+    _deploy_ssh "$_NODE_USER" "$_NODE_HOST" \
+        "$(_sudo_prefix "$_NODE_USER")sh -c $(_posix_shell_quote "mkdir -p '$dir' && tar -xf '${dir}.tar' -C '$dir' && rm -f '${dir}.tar'")"
+}
+
+remote_send_dir() {
+    local local_dir="$1" rc=0
+    _REMOTE_SEND_NAME="$2"
+    _REMOTE_SEND_TAR=$(mktemp /tmp/setup-k8s-send-XXXXXX)
+    if ! tar -C "$local_dir" -cf "$_REMOTE_SEND_TAR" .; then
+        rm -f "$_REMOTE_SEND_TAR"
+        log_error "Failed to archive $local_dir"
+        return 1
+    fi
+    _csv_for_each "$_DEPLOY_ALL_NODES" _remote_send_dir_to_node || rc=1
+    rm -f "$_REMOTE_SEND_TAR"
+    return "$rc"
 }
 
 remote_exec() {

@@ -42,6 +42,13 @@ _kubelet_api_version() {
     echo "$api_ver"
 }
 
+# Print "--patches DIR" when KUBEADM_PATCHES_DIR is set.
+_kubeadm_patches_args() {
+    if [ -n "${KUBEADM_PATCHES_DIR:-}" ]; then
+        printf -- '--patches %s' "$KUBEADM_PATCHES_DIR"
+    fi
+}
+
 _yaml_quote() {
     printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
 }
@@ -89,12 +96,28 @@ nodeRegistration:
 EOF
     fi
 
+    if [ -n "${KUBEADM_PATCHES_DIR:-}" ]; then
+        echo "patches:" >> "$config_file"
+        echo "  directory: $(_yaml_quote "$KUBEADM_PATCHES_DIR")" >> "$config_file"
+    fi
+
     # ClusterConfiguration
     cat >> "$config_file" <<EOF
 ---
 apiVersion: $kubeadm_api
 kind: ClusterConfiguration
 EOF
+
+    # Control plane at the version of the installed kubeadm (instead of
+    # kubeadm looking up the latest patch release on the internet)
+    local kubeadm_version
+    kubeadm_version=$(kubeadm version -o short 2>/dev/null) || kubeadm_version=""
+    if [ -n "$kubeadm_version" ]; then
+        echo "kubernetesVersion: $(_yaml_quote "$kubeadm_version")" >> "$config_file"
+    fi
+    if [ -n "${KUBEADM_IMAGE_REPOSITORY:-}" ]; then
+        echo "imageRepository: $(_yaml_quote "$KUBEADM_IMAGE_REPOSITORY")" >> "$config_file"
+    fi
 
     if [ -n "$POD_CIDR" ] || [ -n "$SERVICE_CIDR" ]; then
         echo "networking:" >> "$config_file"
