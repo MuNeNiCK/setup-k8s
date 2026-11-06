@@ -244,39 +244,6 @@ test_cleanup_handlers() {
 }
 
 # ============================================================
-# Test: _validate_shell_module error cases
-# ============================================================
-test_validate_shell_module() {
-    echo "=== Test: _validate_shell_module error cases ==="
-    (
-        . "$PROJECT_ROOT/lib/bootstrap.sh" >/dev/null 2>&1 || true
-
-        # Empty file
-        local tmpfile
-        tmpfile=$(mktemp /tmp/test-module-XXXXXX)
-        : > "$tmpfile"  # empty
-        local result=0
-        _validate_shell_module "$tmpfile" 2>/dev/null || result=$?
-        _assert_ne "_validate_shell_module rejects empty file" "0" "$result"
-
-        # Non-shell file
-        echo "NOT A SHELL SCRIPT" > "$tmpfile"
-        result=0
-        _validate_shell_module "$tmpfile" 2>/dev/null || result=$?
-        _assert_ne "_validate_shell_module rejects non-shell" "0" "$result"
-
-        # Valid shell file
-        echo "#!/bin/sh" > "$tmpfile"
-        echo "echo hello" >> "$tmpfile"
-        result=0
-        _validate_shell_module "$tmpfile" 2>/dev/null || result=$?
-        _assert_eq "_validate_shell_module accepts valid shell" "0" "$result"
-
-        rm -f "$tmpfile"
-    )
-}
-
-# ============================================================
 # Test: CSV helpers edge cases
 # ============================================================
 test_csv_edge_cases() {

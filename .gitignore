@@ -12,3 +12,6 @@ site/
 # OS
 .DS_Store
 Thumbs.db
+
+# Build output
+dist/

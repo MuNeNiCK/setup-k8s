@@ -131,7 +131,7 @@ run_ha_test() {
     setup_bundle=$(mktemp /tmp/setup-k8s-ha-bundle.XXXXXX.sh)
     log_info "Generating bundled script..."
     local _saved_k8s_version="$K8S_VERSION"
-    _generate_bundle "$SETUP_K8S_SCRIPT" "$setup_bundle" "all"
+    _generate_bundle "$SETUP_K8S_SCRIPT" "$setup_bundle"
     K8S_VERSION="$_saved_k8s_version"
 
     log_info "Transferring script to VM..."
@@ -159,7 +159,7 @@ run_ha_test() {
         log_info "Running: setup-k8s.sh init $ha_args"
     fi
 
-    local ha_init_cmd="bash /tmp/setup-k8s.sh init"
+    local ha_init_cmd="sh /tmp/setup-k8s.sh init"
     [ -n "$k8s_version_flag" ] && ha_init_cmd+=" $(printf '%q' "$k8s_version_flag") $(printf '%q' "$k8s_version_val")"
     ha_init_cmd+=" $ha_args > /tmp/setup-k8s.log 2>&1; echo \$? > /tmp/setup-exit-code"
     vm_ssh "nohup bash -c '${ha_init_cmd}' </dev/null >/dev/null 2>&1 &"
@@ -294,7 +294,7 @@ run_ha_test() {
     # Phase 3: Cleanup
     # ===================================================================
     log_info "=== Phase 3: Cleanup ==="
-    vm_ssh "nohup bash -c 'bash /tmp/setup-k8s.sh cleanup --force > /tmp/cleanup-k8s.log 2>&1; echo \$? > /tmp/cleanup-exit-code' </dev/null >/dev/null 2>&1 &"
+    vm_ssh "nohup bash -c 'sh /tmp/setup-k8s.sh cleanup --force > /tmp/cleanup-k8s.log 2>&1; echo \$? > /tmp/cleanup-exit-code' </dev/null >/dev/null 2>&1 &"
 
     local cleanup_exit_code
     if ! poll_vm_command vm_ssh "$container_name" /tmp/cleanup-exit-code /tmp/cleanup-k8s.log "$TIMEOUT_TOTAL"; then

@@ -42,13 +42,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - name: Run setup-k8s test (online)
+      - name: Run setup-k8s test
         working-directory: test
         env:
           BASH_DEBUG: '0'
         run: |
           set -euo pipefail
-          ./scenarios/init-cleanup.sh --online ${{ matrix.distro }}
+          ./scenarios/init-cleanup.sh ${{ matrix.distro }}
 
       - name: Upload logs
         if: always()

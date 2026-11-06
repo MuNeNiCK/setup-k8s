@@ -120,9 +120,6 @@ DEPLOY_REMOTE_TIMEOUT="${DEPLOY_REMOTE_TIMEOUT:-600}"
 # Polling interval for remote operations (seconds)
 DEPLOY_POLL_INTERVAL="${DEPLOY_POLL_INTERVAL:-10}"
 
-# Bundle module list: bootstrap + _COMMON_MODULES (defined in bootstrap.sh)
-BUNDLE_COMMON_MODULES="bootstrap ${_COMMON_MODULES:-}"
-
 # Resume support
 RESUME_ENABLED=false  # Resume from a previous interrupted operation
 

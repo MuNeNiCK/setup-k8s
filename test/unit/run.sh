@@ -224,12 +224,6 @@ test_compute_upgrade_steps_defined
 
 # --- state ---
 # --- module set completeness ---
-test_module_set_setup
-test_module_set_cleanup
-test_module_set_upgrade_local
-test_module_set_upgrade_remote
-test_module_set_etcd_local
-test_module_set_deploy_remote
 
 test_state_functions_defined
 test_state_set_get
@@ -250,7 +244,6 @@ test_detect_distro_family_mapping
 test_has_cgroupv2
 test_completion_functions_defined
 test_cleanup_handlers
-test_validate_shell_module
 test_csv_any
 
 # --- deep logic tests ---

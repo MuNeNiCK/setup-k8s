@@ -6,7 +6,9 @@ The orchestrator does not need local root privileges. Remote nodes need SSH acce
 
 ## Deployment model
 
-Run `setup-k8s.sh deploy` from your workstation or automation host. The script connects to each node over SSH, uploads a self-contained bundle, initializes the first control-plane node, then joins the rest of the cluster.
+Run `setup-k8s.sh deploy` from your workstation or automation host. The script connects to each node over SSH, uploads itself to each node, initializes the first control-plane node, then joins the rest of the cluster.
+
+Remote subcommands (`deploy`, `remove`, and `upgrade`, `backup`, `restore`, `renew` with `--control-planes`) must be run from a downloaded file, because the script copies itself to the nodes. Running them via `curl ... | sh` prints the download instructions and exits.
 
 ```mermaid
 flowchart LR
@@ -37,7 +39,8 @@ flowchart LR
 ## Basic deployment
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- \
+curl -fsSLO https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh
+sh setup-k8s.sh \
   deploy \
   --control-planes root@192.168.1.10 \
   --workers root@192.168.1.11,root@192.168.1.12 \
@@ -47,8 +50,8 @@ curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -
 ## How it works
 
 1. Checks SSH connectivity and sudo access.
-2. Generates a self-contained setup bundle.
-3. Transfers the bundle to each node.
+2. Prepares the script to transfer (the downloaded file itself, or a bundle built from a source checkout).
+3. Transfers it to each node.
 4. Initializes the first control-plane node.
 5. Joins additional control-plane nodes when configured.
 6. Joins workers in parallel.
@@ -59,7 +62,8 @@ curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -
 Pass `--ha-vip` with multiple control-plane nodes:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- \
+curl -fsSLO https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh
+sh setup-k8s.sh \
   deploy \
   --control-planes root@192.168.1.10,root@192.168.1.11,root@192.168.1.12 \
   --workers root@192.168.1.20 \

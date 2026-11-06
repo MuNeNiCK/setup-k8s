@@ -141,7 +141,7 @@ run_upgrade_test() {
     # ===================================================================
     log_info "=== Phase 1: Deploy cluster with v${FROM_VERSION} ==="
     local deploy_cmd=(
-        bash "$SETUP_K8S_SCRIPT" deploy
+        sh "$HOST_BUNDLE" deploy
         --control-planes "$CP_DOCKER_IP"
         --workers "$WORKER_DOCKER_IP"
         --ssh-user root
@@ -172,7 +172,7 @@ run_upgrade_test() {
     # ===================================================================
     log_info "=== Phase 2: Upgrade cluster to v${TO_VERSION} ==="
     local upgrade_cmd=(
-        bash "$SETUP_K8S_SCRIPT" upgrade
+        sh "$HOST_BUNDLE" upgrade
         --control-planes "$CP_DOCKER_IP"
         --workers "$WORKER_DOCKER_IP"
         --ssh-user root

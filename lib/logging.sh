@@ -92,10 +92,3 @@ _audit_log() {
 
     log_debug "$entry"
 }
-
-# Auto-initialize file logging if LOG_DIR is set (e.g. via --log-dir global flag).
-# This runs when the module is sourced, so it works regardless of which action
-# path loaded logging.sh.
-if [ -n "${LOG_DIR:-}" ] && [ -z "${_LOG_FILE:-}" ]; then
-    _init_file_logging "$LOG_DIR"
-fi

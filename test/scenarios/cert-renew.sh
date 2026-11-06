@@ -86,7 +86,7 @@ run_renew_test() {
     # ===================================================================
     log_info "=== Phase 1: Deploy single-node cluster ==="
     local deploy_cmd=(
-        bash "$SETUP_K8S_SCRIPT" deploy
+        sh "$HOST_BUNDLE" deploy
         --control-planes "$CP_DOCKER_IP"
         --ssh-user root
         --ssh-port 2222
@@ -118,7 +118,7 @@ run_renew_test() {
     # ===================================================================
     log_info "=== Phase 2: renew --check-only (remote mode) ==="
     local check_cmd=(
-        bash "$SETUP_K8S_SCRIPT" renew
+        sh "$HOST_BUNDLE" renew
         --control-planes "$CP_DOCKER_IP"
         --ssh-user root
         --ssh-port 2222
@@ -136,7 +136,7 @@ run_renew_test() {
     # ===================================================================
     log_info "=== Phase 3: renew all certificates (remote mode) ==="
     local renew_all_cmd=(
-        bash "$SETUP_K8S_SCRIPT" renew
+        sh "$HOST_BUNDLE" renew
         --control-planes "$CP_DOCKER_IP"
         --ssh-user root
         --ssh-port 2222
@@ -161,7 +161,7 @@ run_renew_test() {
     log_info "=== Phase 4: renew specific certificates (remote mode) ==="
     local specific_certs="apiserver,front-proxy-client"
     local renew_specific_cmd=(
-        bash "$SETUP_K8S_SCRIPT" renew
+        sh "$HOST_BUNDLE" renew
         --control-planes "$CP_DOCKER_IP"
         --ssh-user root
         --ssh-port 2222

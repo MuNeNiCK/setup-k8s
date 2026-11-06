@@ -21,7 +21,7 @@ jobs:
           rm -rf shellcheck-v0.11.0
           shellcheck --version
       - name: Run ShellCheck on entry scripts
-        run: shellcheck -s sh -S warning setup-k8s.sh
+        run: shellcheck -s sh -S warning setup-k8s.sh scripts/*.sh
       - name: Run ShellCheck on common modules
         run: shellcheck -s sh -S warning lib/*.sh
       - name: Run ShellCheck on command modules

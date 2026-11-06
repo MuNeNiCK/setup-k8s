@@ -211,7 +211,7 @@ test_help_contains_swap() {
     echo "=== Test: help text contains --swap-enabled ==="
     (
         local help_out
-        help_out=$(bash "$PROJECT_ROOT/setup-k8s.sh" --help 2>&1)
+        help_out=$(bash "$PROJECT_ROOT/setup-k8s.sh" init --help 2>&1)
         local has_swap="false"
         if echo "$help_out" | grep -q -- '--swap-enabled'; then has_swap="true"; fi
         _assert_eq "help contains --swap-enabled" "true" "$has_swap"

@@ -2,6 +2,53 @@
 
 # === Setup argument parsing (init/join) ===
 
+# Help message for init/join
+show_setup_help() {
+    cat <<'EOF'
+Usage: setup-k8s.sh init [options]
+       setup-k8s.sh join --join-token TOKEN --join-address ADDR --discovery-token-hash HASH [options]
+
+Initialize a new cluster on this node (init) or join this node to an existing
+cluster (join). Must be run as root.
+
+Options (init and join):
+  --cri RUNTIME             Container runtime: containerd or crio (default: containerd)
+  --proxy-mode MODE         kube-proxy mode: iptables, ipvs, or nftables (default: iptables)
+  --kubernetes-version VER  Kubernetes minor version, e.g. 1.37 (default: latest stable)
+  --kubelet-node-ip IP      Set the kubelet node IP
+  --swap-enabled            Keep swap enabled (NodeSwap, LimitedSwap)
+  --distro FAMILY           Override distro family detection (debian, rhel, suse, arch, alpine, generic)
+  --enable-completion BOOL  Set up shell completion (default: true)
+  --completion-shells LIST  Shells to configure: auto, bash, zsh, fish, or a comma-separated list
+  --install-helm BOOL       Install Helm (default: false)
+  --install-kustomize BOOL  Install Kustomize (default: false)
+
+Options (init):
+  --pod-network-cidr CIDR             Pod network CIDR (e.g. 192.168.0.0/16)
+  --service-cidr CIDR                 Service CIDR (e.g. 10.96.0.0/12)
+  --apiserver-advertise-address ADDR  API server advertise address
+  --control-plane-endpoint ENDPOINT   Control plane endpoint
+  --api-server-extra-sans LIST        Extra SANs for the API server certificate (comma-separated)
+  --kubeadm-config-patch FILE         Append a kubeadm config file to the generated config
+  --ha                                Enable HA mode with kube-vip (requires --ha-vip)
+  --ha-vip ADDRESS                    Virtual IP address for HA
+  --ha-interface IFACE                Network interface for the VIP (auto-detected if omitted)
+
+Options (join):
+  --join-token TOKEN            Join token
+  --join-address ADDR           Control plane address (host:port)
+  --discovery-token-hash HASH   Discovery token CA cert hash (sha256:...)
+  --control-plane               Join as a control-plane node (HA)
+  --certificate-key KEY         Certificate key for control-plane join
+  --ha-vip ADDRESS              Virtual IP address (with --control-plane)
+  --ha-interface IFACE          Network interface for the VIP
+
+Global options such as --dry-run, --verbose and --log-dir are listed in
+'setup-k8s.sh --help'.
+EOF
+    exit "${1:-0}"
+}
+
 # Parse command line arguments for setup
 parse_setup_args() {
     while [ $# -gt 0 ]; do

@@ -98,7 +98,7 @@ run_deploy_test() {
     # --- Step 6: Run deploy ---
     log_info "=== Running deploy ==="
     local deploy_cmd=(
-        bash "$SETUP_K8S_SCRIPT" deploy
+        sh "$HOST_BUNDLE" deploy
         --control-planes "$CP_DOCKER_IP"
         --workers "$WORKER_DOCKER_IP"
         --ssh-user root
@@ -209,7 +209,7 @@ run_deploy_test() {
     remove_log_file="results/logs/remove-${DISTRO}-$(date +%Y%m%d-%H%M%S).log"
 
     local remove_cmd=(
-        bash "$SETUP_K8S_SCRIPT" remove
+        sh "$HOST_BUNDLE" remove
         --control-planes "root@${CP_DOCKER_IP}"
         --workers "root@${WORKER_DOCKER_IP}"
         --force

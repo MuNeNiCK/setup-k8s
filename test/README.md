@@ -27,8 +27,12 @@ cd test
 ./scenarios/init-cleanup.sh --help
 ./scenarios/init-cleanup.sh ubuntu-24.04-cloud-amd64
 ./scenarios/init-cleanup.sh --all
-./scenarios/init-cleanup.sh --online ubuntu-24.04-cloud-amd64
+./scenarios/init-cleanup.sh --online ubuntu-24.04-cloud-amd64   # uses the published release asset
 ```
+
+By default scenarios build the single-file bundle with `scripts/build.sh` and
+run it with `sh` on the VMs; host-side commands (deploy, upgrade, remove, ...)
+run the same bundle.
 
 Subcommand scenarios:
 

@@ -89,74 +89,60 @@ EOF
 
 # --- Bundle generation and transfer ---
 
-# Generate a self-contained bundle script for standalone execution.
-# Usage: _generate_bundle_core <bundle_path> <entry_script> [include_mode] [script_dir]
-#   bundle_path:   output file path
-#   entry_script:  path to the entry script (setup-k8s.sh)
-#   include_mode:  "all" (default), "cleanup" (cleanup modules only)
-#   script_dir:    project root (default: derived from entry_script location)
+# Generate a self-contained bundle (all modules + entry script) from a
+# project checkout. Used by scripts/build.sh and by remote subcommands run
+# from a checkout.
+# Usage: _generate_bundle_core <bundle_path> <project_root> [version]
 _generate_bundle_core() {
-    local bundle_path="$1"
-    local entry_script="$2"
-    local include_mode="${3:-all}"
-    local script_dir="${4:-$(cd "$(dirname "$entry_script")" && pwd)}"
+    local bundle_path="$1" root="$2" version="${3:-dev}"
+    local _f _rel
 
     {
         echo "#!/bin/sh"
         echo "set -eu"
         echo "BUNDLED_MODE=true"
+        echo "SETUP_K8S_VERSION='${version}'"
         echo ""
-
-        # Include all lib and command modules
-        # shellcheck disable=SC2086  # intentional word splitting on space-separated list
-        for module in $BUNDLE_COMMON_MODULES; do
-            if [ -f "$script_dir/lib/${module}.sh" ]; then
-                echo "# === lib/${module}.sh ==="
-                cat "$script_dir/lib/${module}.sh"
-                echo ""
-            elif [ -f "$script_dir/commands/${module}.sh" ]; then
-                echo "# === commands/${module}.sh ==="
-                cat "$script_dir/commands/${module}.sh"
-                echo ""
-            fi
+        _module_files "$root" | while IFS= read -r _f; do
+            _rel="${_f#"$root"/}"
+            echo "# === ${_rel} ==="
+            awk '!/^source.*SCRIPT_DIR/ && !/^\. .*SCRIPT_DIR/ && !/^SCRIPT_DIR=/' "$_f"
+            echo ""
         done
-
-        # Include distro modules
-        for distro_dir in "$script_dir/distros/"*/; do
-            [ -d "$distro_dir" ] || continue
-            local distro_name
-            distro_name=$(basename "$distro_dir")
-            if [ "$include_mode" = "cleanup" ]; then
-                if [ -f "$distro_dir/cleanup.sh" ]; then
-                    echo "# === distros/${distro_name}/cleanup.sh ==="
-                    awk '!/^source.*SCRIPT_DIR/ && !/^\. .*SCRIPT_DIR/ && !/^SCRIPT_DIR=/' "$distro_dir/cleanup.sh"
-                    echo ""
-                fi
-            else
-                echo "# === distros/${distro_name} modules ==="
-                for module_file in "$distro_dir"*.sh; do
-                    if [ -f "$module_file" ]; then
-                        echo "# === $(basename "$module_file") ==="
-                        awk '!/^source.*SCRIPT_DIR/ && !/^\. .*SCRIPT_DIR/ && !/^SCRIPT_DIR=/' "$module_file"
-                        echo ""
-                    fi
-                done
-            fi
-        done
-
-        # Include entry script (without shebang)
-        echo "# === Main $(basename "$entry_script") ==="
-        tail -n +2 "$entry_script"
+        echo "# === setup-k8s.sh ==="
+        tail -n +2 "$root/setup-k8s.sh"
     } > "$bundle_path"
 
     chmod +x "$bundle_path"
 }
 
-# Generate a self-contained bundle script for remote execution
+# Print instructions and exit when a remote subcommand cannot transfer the
+# running script (the script was read from stdin, e.g. `curl ... | sh`).
+# Usage: _require_transferable_script <subcommand>
+_require_transferable_script() {
+    if [ "${BUNDLED_MODE:-false}" = true ] && [ -z "${_SELF_PATH:-}" ]; then
+        log_error "'$1' with remote nodes must be run from a downloaded file,"
+        log_error "because the script is transferred to each node:"
+        log_error "  curl -fsSLO ${SETUP_K8S_RELEASE_URL}"
+        log_error "  sh setup-k8s.sh $1 ..."
+        exit 1
+    fi
+}
+
+# Write the script to transfer to remote nodes.
+# From a bundle: copy the running file. From a checkout: build a bundle.
+# Usage: generate_deploy_bundle <bundle_path>
 generate_deploy_bundle() {
     local bundle_path="$1"
-    local script_dir="${SCRIPT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
-    _generate_bundle_core "$bundle_path" "$script_dir/setup-k8s.sh" "all" "$script_dir"
+    if [ "${BUNDLED_MODE:-false}" = true ]; then
+        if [ -z "${_SELF_PATH:-}" ]; then
+            log_error "Cannot locate the running script to transfer to remote nodes"
+            return 1
+        fi
+        cp "$_SELF_PATH" "$bundle_path"
+    else
+        _generate_bundle_core "$bundle_path" "$SCRIPT_DIR" "${SETUP_K8S_VERSION:-dev}"
+    fi
 }
 
 # Generate bundle, transfer to all nodes, and register cleanup handler.

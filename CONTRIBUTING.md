@@ -62,9 +62,9 @@ repository:
   (`[[ ]]`, arrays, `${var//}`, `source`, `pipefail`, ...). `local` is allowed;
   see `.shellcheckrc`.
 - Test code under `test/` is bash.
-- New `lib/` or `commands/` modules must be registered in `_LIB_MODULES` or
-  `_COMMAND_MODULES` in `lib/bootstrap.sh`. They are used by the bundled and
-  `curl | sh` execution modes.
+- New `lib/` or `commands/` modules must be added to `_MODULES` in
+  `lib/bootstrap.sh`. The list defines the source order for both a local
+  checkout and the single-file bundle built by `scripts/build.sh`.
 - Each distribution family implements the same entry points, which are called
   via `_dispatch`:
   `install_dependencies_<family>`, `setup_containerd_<family>`,
@@ -117,6 +117,18 @@ If you changed anything under `docs/`, check that the site builds:
 ```sh
 python -m pip install -r docs/requirements.txt
 mkdocs build --config-file docs/mkdocs.yml --strict
+```
+
+## Building and releasing
+
+`scripts/build.sh` writes the single-file bundle `dist/setup-k8s.sh` and its
+`.sha256`. Pushing a `v*` tag runs the Release workflow, which builds the
+bundle with the tag as its version and attaches both files to a GitHub
+release.
+
+```sh
+sh scripts/build.sh
+sh dist/setup-k8s.sh --version
 ```
 
 ## Changelog
