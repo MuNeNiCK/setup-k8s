@@ -186,7 +186,11 @@ FAKE
     : > "$CALLS"
     _k8s_remove_binaries() { :; }
     k8s_remove
-    grep -q '^remove kubeadm kubelet kubectl kubelet-openrc kubeadm-bin kubelet-bin kubectl-bin$' "$CALLS"
+    grep -q '^remove kubeadm kubelet kubectl crictl cni-plugins kubelet-openrc kubeadm-bin kubelet-bin kubectl-bin$' "$CALLS"
+    # --preserve-cni keeps the CNI plugins package
+    : > "$CALLS"
+    PRESERVE_CNI=true k8s_remove
+    grep -q '^remove kubeadm kubelet kubectl crictl kubelet-openrc kubeadm-bin kubelet-bin kubectl-bin$' "$CALLS"
 }
 
 @test "cleanup also removes repository files of earlier versions" {

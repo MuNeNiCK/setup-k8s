@@ -72,6 +72,25 @@ _init_file_logging() {
 #   operation: e.g., deploy, upgrade, remove, backup, restore, renew
 #   outcome:   e.g., started, completed, failed
 #   details:   optional free-form details
+# Audit records of a local command: _audit_start records "started" and, when
+# the script exits before _audit_done, "failed" with the exit status.
+_AUDIT_OP=""
+_audit_start() {
+    _AUDIT_OP="$1"
+    _audit_log "$1" started "${2:-}"
+    _push_cleanup _audit_exit_handler
+}
+_audit_done() {
+    [ -n "$_AUDIT_OP" ] || return 0
+    _audit_log "$_AUDIT_OP" completed "${1:-}"
+    _AUDIT_OP=""
+}
+_audit_exit_handler() {
+    [ -n "$_AUDIT_OP" ] || return 0
+    _audit_log "$_AUDIT_OP" failed "exit=${_EXIT_STATUS:-unknown}"
+    _AUDIT_OP=""
+}
+
 _audit_log() {
     local operation="$1" outcome="$2" details="${3:-}"
     local ts

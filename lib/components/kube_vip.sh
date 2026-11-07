@@ -99,6 +99,26 @@ KVEOF
 }
 
 # Remove pre-added VIP on failure
+# Release the VIP of the kube-vip static pod on this node, if assigned.
+# kube-vip does not remove it when the pod is stopped (cleanup, reset).
+# Usage: kube_vip_release [manifest]
+kube_vip_release() {
+    local manifest="${1:-/etc/kubernetes/manifests/kube-vip.yaml}" vip iface prefix
+    [ -f "$manifest" ] || return 0
+    vip=$(awk '/- name: address$/ { getline; sub(/.*value: *"?/, ""); sub(/".*/, ""); print; exit }' "$manifest")
+    iface=$(awk '/- name: vip_interface$/ { getline; sub(/.*value: *"?/, ""); sub(/".*/, ""); print; exit }' "$manifest")
+    [ -n "$vip" ] && [ -n "$iface" ] || return 0
+    prefix=32
+    _is_ipv6 "$vip" && prefix=128
+    if ip addr show dev "$iface" 2>/dev/null | grep -qF " ${vip}/"; then
+        log_info "Releasing the VIP ${vip} from ${iface}..."
+        if ! ip addr del "${vip}/${prefix}" dev "$iface"; then
+            log_error "Failed to remove the VIP ${vip} from ${iface}"
+            return 1
+        fi
+    fi
+}
+
 _rollback_vip() {
     local vip="$HA_VIP_ADDRESS"
     local iface="$HA_VIP_INTERFACE"

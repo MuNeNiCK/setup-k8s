@@ -130,8 +130,8 @@ _cleanup_leftovers() {
         fi
     done
     if [ -n "${DISTRO_PKG:-}" ]; then
-        # shellcheck disable=SC2086 # space-separated package names
-        for name in kubeadm kubelet kubectl cri-tools kubernetes-cni cri-o ${DISTRO_K8S_LEGACY_PKGS:-}; do
+        # shellcheck disable=SC2046 # space-separated package names
+        for name in $(printf '%s\n' kubeadm kubelet kubectl cri-tools kubernetes-cni cri-o $(k8s_distro_installed_pkgs) | awk '!seen[$0]++'); do
             if pkg_installed "$name"; then echo "package ${name}"; fi
         done
     fi
@@ -160,6 +160,8 @@ _cleanup_leftovers() {
 
 # Reset Kubernetes cluster state
 reset_kubernetes_cluster() {
+    # Before kubeadm reset removes the manifest that names the VIP
+    kube_vip_release || return 1
     if command -v kubeadm >/dev/null 2>&1; then
         log_info "Resetting kubeadm cluster state..."
         if ! kubeadm reset -f; then
@@ -297,6 +299,7 @@ _run_cleanup() {
     _ensure_distro_detected
     _dry_run_guard cleanup_dry_run
     confirm_cleanup
+    _audit_start cleanup
 
     CLEANUP_ERRORS=0
     log_info "Starting Kubernetes cleanup..."
@@ -327,6 +330,7 @@ _run_cleanup() {
         log_error "Cleanup finished with $CLEANUP_ERRORS error(s). Check the output above for details."
         exit 1
     fi
+    _audit_done
     log_info "Cleanup complete! Please reboot the system for all changes to take effect."
     exit 0
 }

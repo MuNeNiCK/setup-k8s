@@ -409,10 +409,13 @@ validate_upgrade_deploy_args() {
 _upgrade_node_local_main() {
     _ensure_distro_detected
     if [ -n "$UPGRADE_ROLLBACK_VERSION" ]; then
-        rollback_node_local
+        _audit_start rollback "version=${UPGRADE_ROLLBACK_VERSION}"
+        rollback_node_local || return 1
     else
-        upgrade_node_local
+        _audit_start upgrade "version=${UPGRADE_TARGET_VERSION}"
+        upgrade_node_local || return 1
     fi
+    _audit_done
 }
 
 _run_upgrade() {

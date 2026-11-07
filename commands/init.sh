@@ -386,6 +386,7 @@ _run_setup() {
     validate_swap_enabled
     validate_ha_args
 
+    _audit_start "$ACTION" "version=${K8S_VERSION} cri=${CRI} proxy=${PROXY_MODE}"
     log_info "Starting Kubernetes initialization script..."
     log_info "Action: ${ACTION}"
     log_info "Container Runtime: ${CRI}"
@@ -436,6 +437,7 @@ _run_setup() {
     setup_helm
     setup_kustomize
     setup_k8s_shell_completion
+    _audit_done
     log_info "Setup completed successfully!"
 }
 

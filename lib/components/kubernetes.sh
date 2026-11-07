@@ -333,6 +333,17 @@ k8s_upgrade_node() {
     esac
 }
 
+# Distribution packages a "distro" install puts on the node (and earlier
+# setup-k8s versions did); cni-plugins is kept with --preserve-cni.
+k8s_distro_installed_pkgs() {
+    local pkg out=""
+    for pkg in $_K8S_CORE_PKGS ${DISTRO_K8S_PKGS:-} kubelet-openrc ${DISTRO_K8S_LEGACY_PKGS:-}; do
+        [ "$pkg" = cni-plugins ] && [ "${PRESERVE_CNI:-false}" = true ] && continue
+        case " $out " in *" $pkg "*) ;; *) out="${out}${out:+ }${pkg}" ;; esac
+    done
+    echo "$out"
+}
+
 k8s_remove() {
     log_info "Removing Kubernetes packages..."
     local rc=0
@@ -343,8 +354,8 @@ k8s_remove() {
             pkg_repo_remove kubernetes kubernetes-apt-keyring
             ;;
         distro)
-            # shellcheck disable=SC2086 # space-separated package names
-            pkg_remove $_K8S_CORE_PKGS kubelet-openrc ${DISTRO_K8S_LEGACY_PKGS:-} || rc=1
+            # shellcheck disable=SC2046 # space-separated package names
+            pkg_remove $(k8s_distro_installed_pkgs) || rc=1
             ;;
     esac
     # Binaries may exist from a binary install on any distribution

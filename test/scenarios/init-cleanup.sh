@@ -333,8 +333,9 @@ PATCH"
     # What the setup arguments asked for
     local options_ok=false
     if [ "$api_responsive" = "true" ]; then
+        # setup_extra_args_str holds printf %q-quoted words
         local -a _verify_args=()
-        read -r -a _verify_args <<<"$setup_extra_args_str"
+        eval "_verify_args=(${setup_extra_args_str})"
         if verify_setup vm_ssh "$distro" "$k8s_version_val" "${_verify_args[@]}"; then
             options_ok=true
         fi

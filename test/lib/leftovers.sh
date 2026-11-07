@@ -18,12 +18,12 @@ if command -v rpm >/dev/null 2>&1; then
     done
 fi
 if command -v pacman >/dev/null 2>&1; then
-    for p in kubeadm kubelet kubectl kubeadm-bin kubelet-bin kubectl-bin cri-o; do
+    for p in kubeadm kubelet kubectl crictl cni-plugins kubeadm-bin kubelet-bin kubectl-bin cri-o; do
         pacman -Qq 2>/dev/null | grep -qxF "$p" && echo "package:$p"
     done
 fi
 if command -v apk >/dev/null 2>&1; then
-    for p in kubeadm kubelet kubectl kubelet-openrc cri-o; do
+    for p in kubeadm kubelet kubectl kubelet-openrc cri-tools cni-plugins cri-o; do
         apk info -e "$p" >/dev/null 2>&1 && echo "package:$p"
     done
 fi

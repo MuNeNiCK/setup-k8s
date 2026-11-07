@@ -97,7 +97,7 @@ Options specific to the `deploy` subcommand. Init/join options like `--cri`, `--
 | `--workers IPs` | Comma-separated worker nodes (user@ip or ip) | — | `--workers 10.0.0.3,10.0.0.4` |
 | `--ha-vip ADDRESS` | VIP for HA (required when >1 control-plane) | — | `--ha-vip 10.0.0.100` |
 | `--ha-interface IFACE` | Network interface for VIP | auto-detect | `--ha-interface eth0` |
-| `--kubeadm-config-patch FILE` | Extra kubeadm config YAML to append (merged as additional `---` document) | — | `--kubeadm-config-patch custom.yaml` |
+| `--kubeadm-config-patch FILE` | Extra kubeadm config YAML: documents of a generated kind replace its top-level fields, others are added (see [Configuration](configuration.md#kubeadm-configuration)) | — | `--kubeadm-config-patch custom.yaml` |
 | `--api-server-extra-sans NAMES` | Additional SANs for the API server certificate (comma-separated) | — | `--api-server-extra-sans lb.example.com,10.0.0.200` |
 | `--kubelet-node-ip IP` | Set kubelet `--node-ip` on all nodes | — | `--kubelet-node-ip 10.0.0.1` |
 

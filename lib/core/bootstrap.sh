@@ -121,6 +121,8 @@ _pop_cleanup() {
 }
 
 _run_cleanup_handlers() {
+    # Exit status of the script, for the handlers (e.g. audit records)
+    _EXIT_STATUS=$?
     # Run handlers in reverse order (LIFO)
     if [ -n "$_EXIT_CLEANUP_HANDLERS" ]; then
         _reversed=$(printf '%s\n' "$_EXIT_CLEANUP_HANDLERS" | awk '{a[NR]=$0}END{for(i=NR;i>=1;i--)print a[i]}')

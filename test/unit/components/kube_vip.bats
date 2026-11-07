@@ -212,3 +212,17 @@ _case_generate_kube_vip_manifest_ipv6() {
 @test "_generate_kube_vip_manifest IPv6" {
     _case_generate_kube_vip_manifest_ipv6
 }
+
+@test "cleanup releases the VIP named in the kube-vip manifest" {
+    load_modules; quiet_logs
+    manifest="$BATS_TEST_TMPDIR/kube-vip.yaml"
+    _generate_kube_vip_manifest 10.0.0.100 eth0 ghcr.io/kube-vip/kube-vip:v1.3.1 /etc/kubernetes/admin.conf > "$manifest"
+    fake_cmd ip 0 "    inet 10.0.0.100/32 scope global eth0"
+    kube_vip_release "$manifest"
+    fake_calls | grep -qx 'ip addr del 10.0.0.100/32 dev eth0'
+    # Not assigned: nothing to remove
+    : > "$FAKE_LOG"
+    fake_cmd ip 0 "    inet 10.0.0.10/24 scope global eth0"
+    kube_vip_release "$manifest"
+    if fake_calls | grep -q 'addr del'; then return 1; fi
+}
