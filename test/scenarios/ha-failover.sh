@@ -208,7 +208,9 @@ run_failover_test() {
     log_file="results/logs/ha-failover-${DISTRO}-$(date +%Y%m%d-%H%M%S).log"
 
     local deploy_exit_code=0
-    if timeout "$TIMEOUT_TOTAL" "${deploy_cmd[@]}" 2>&1 | tee "$log_file"; then
+    local host_dir
+    host_dir=$(host_workdir)
+    if (cd "$host_dir" && timeout "$TIMEOUT_TOTAL" "${deploy_cmd[@]}") 2>&1 | tee "$log_file"; then
         deploy_exit_code=0
     else
         deploy_exit_code=$?

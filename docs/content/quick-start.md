@@ -43,6 +43,7 @@ sh setup-k8s.sh \
   deploy \
   --control-planes root@192.168.1.10 \
   --workers root@192.168.1.11,root@192.168.1.12
+kubectl --kubeconfig ./kubeconfig get nodes   # saved by deploy
 ```
 
 ## Deploy an HA cluster

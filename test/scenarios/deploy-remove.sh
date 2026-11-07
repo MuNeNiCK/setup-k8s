@@ -114,6 +114,17 @@ run_deploy_test() {
 
     local deploy_exit_code=0
     run_with_timeout deploy_exit_code "$log_file" "${deploy_cmd[@]}"
+
+    # deploy saves the admin kubeconfig in its working directory
+    local kubeconfig_file
+    kubeconfig_file="$(host_workdir)/kubeconfig"
+    if [ -f "$kubeconfig_file" ] && [ "$(stat -c %a "$kubeconfig_file")" = 600 ] \
+        && grep -q '^kind: Config' "$kubeconfig_file" && grep -q 'client-certificate-data:' "$kubeconfig_file"; then
+        log_success "CHECK: deploy saved the admin kubeconfig (mode 600)"
+    else
+        log_error "CHECK: deploy did not save a usable admin kubeconfig at ${kubeconfig_file}"
+        deploy_exit_code=1
+    fi
     if [ "$deploy_exit_code" -eq 124 ]; then
         log_info "=== TIMEOUT DIAGNOSTICS ==="
         log_info "CP container status:"
