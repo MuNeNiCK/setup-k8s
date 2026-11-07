@@ -74,7 +74,7 @@ _case_deploy_timeout_defaults() {
 
 @test "deploy saves the admin kubeconfig of the first control plane (mode 600)" {
     load_modules; quiet_logs
-    cd "$BATS_TEST_TMPDIR"
+    cd "$BATS_TEST_TMPDIR" || return 1
     _deploy_ssh() { case "$3" in "sudo -n cat /etc/kubernetes/admin.conf") printf 'apiVersion: v1\nkind: Config\nclusters: []\n' ;; *) return 1 ;; esac; }
     _deploy_save_kubeconfig ubuntu 10.0.0.1
     grep -qx 'kind: Config' kubeconfig
@@ -86,12 +86,65 @@ _case_deploy_timeout_defaults() {
     [ "$status" -ne 0 ] && [ ! -e kubeconfig ]
 }
 
-@test "deploy refuses to start when ./kubeconfig exists" {
+# Fake cluster for deploy_cluster. EXISTING=true: the first control plane
+# runs a cluster whose nodes are listed in $MEMBERS; runs are recorded in $RUNS.
+_fake_deploy() {
     load_modules
-    cd "$BATS_TEST_TMPDIR"
+    cd "$BATS_TEST_TMPDIR" || return 1
+    RUNS="$BATS_TEST_TMPDIR/runs"; : > "$RUNS"
+    remote_session_open() { :; }
+    remote_session_close() { :; }
+    _audit_log() { :; }
+    _extract_join_info() { _JOIN_TOKEN=t _JOIN_ADDR=10.0.0.1:6443 _JOIN_HASH=h _CERT_KEY=k; }
+    _deploy_pin_proxy_mode() { :; }
+    _verify_deployed_cluster() { :; }
+    _deploy_save_kubeconfig() { :; }
+    sleep() { :; }
+    remote_exec() {
+        case "$2" in
+            "test -f /etc/kubernetes/admin.conf") [ "${EXISTING:-false}" = true ] ;;
+            *readyz*) [ "${API_UP:-true}" = true ] ;;
+        esac
+    }
+    _get_node_name() { case " ${MEMBERS:-} " in *" $3 "*) echo "n-$3"; return 0 ;; esac; return 1; }
+    _deploy_remote_run() { _parse_node_address "$2"; echo "$3 $_NODE_HOST" >> "$RUNS"; }
+    DEPLOY_SSH_USER=root
+}
+
+@test "a new cluster: init on the first control plane, joins for the others" {
+    _fake_deploy
+    DEPLOY_CONTROL_PLANES=10.0.0.1 DEPLOY_WORKERS=10.0.0.11,10.0.0.12
+    run deploy_cluster
+    [ "$status" -eq 0 ]
+    [ "$(sort "$RUNS")" = "$(printf '%s\n' 'join worker 10.0.0.11' 'join worker 10.0.0.12' 'kubeadm init 10.0.0.1')" ]
+}
+
+@test "a rerun on an existing cluster joins only the nodes not in it" {
+    _fake_deploy
+    EXISTING=true MEMBERS="10.0.0.1 10.0.0.2 10.0.0.11"
+    DEPLOY_CONTROL_PLANES=10.0.0.1,10.0.0.2,10.0.0.3 DEPLOY_WORKERS=10.0.0.11,10.0.0.12
+    DEPLOY_PASSTHROUGH_ARGS=$(printf '%s\n%s' --ha-vip 10.0.0.100)
+    touch kubeconfig
+    run deploy_cluster
+    [ "$status" -eq 0 ]
+    [ "$(sort "$RUNS")" = "$(printf '%s\n' 'join control-plane 10.0.0.3' 'join worker 10.0.0.12')" ]
+}
+
+@test "a new cluster is not deployed over an existing ./kubeconfig" {
+    _fake_deploy
     touch kubeconfig
     DEPLOY_CONTROL_PLANES=10.0.0.1
-    run validate_deploy_args
+    run deploy_cluster
     [ "$status" -ne 0 ]
     [[ "$output" == *"./kubeconfig already exists"* ]]
+    [ ! -s "$RUNS" ]
+}
+
+@test "an initialized control plane whose API server does not answer stops the deploy" {
+    _fake_deploy
+    EXISTING=true API_UP=false
+    DEPLOY_CONTROL_PLANES=10.0.0.1 DEPLOY_WORKERS=10.0.0.11
+    run deploy_cluster
+    [ "$status" -ne 0 ]
+    [ ! -s "$RUNS" ]
 }

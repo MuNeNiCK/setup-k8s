@@ -58,7 +58,27 @@ sh setup-k8s.sh \
 7. Runs health checks after deployment.
 8. Saves the admin kubeconfig of the first control plane to `./kubeconfig`
    (mode 600) on the orchestrator: `kubectl --kubeconfig ./kubeconfig get nodes`.
-   deploy does not start when `./kubeconfig` already exists.
+   A new cluster is not deployed when `./kubeconfig` already exists.
+
+## Add nodes
+
+Run `deploy` again with the extended node lists. When the first control
+plane already runs a cluster, deploy does not initialize it again: it joins
+the listed nodes that are not in the cluster yet (found by address or
+hostname) and leaves the others alone. Nodes missing from the lists are not
+removed (use `remove`), and existing nodes keep their version (use
+`upgrade`).
+
+```bash
+# initially: --workers 192.168.1.11
+sh setup-k8s.sh deploy \
+  --control-planes root@192.168.1.10 \
+  --workers root@192.168.1.11,root@192.168.1.12
+```
+
+Pass the same cluster options as for the initial deploy (for example `--cri`
+and `--ha-vip`); the joining nodes use them. The admin kubeconfig is saved
+again to `./kubeconfig`.
 
 ## HA deployment
 

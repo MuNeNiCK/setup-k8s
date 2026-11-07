@@ -97,10 +97,11 @@ run_deploy_test() {
 
     # --- Step 6: Run deploy ---
     log_info "=== Running deploy ==="
+    # First the control plane alone; the worker is added by running deploy
+    # again with the extended node list
     local deploy_cmd=(
         sh "$HOST_BUNDLE" deploy
         --control-planes "$CP_DOCKER_IP"
-        --workers "$WORKER_DOCKER_IP"
         --ssh-user root
         --ssh-port 2222
         --ssh-key "$SSH_KEY_DIR/id_test"
@@ -112,8 +113,13 @@ run_deploy_test() {
     [ -n "$DEPLOY_PROXY_MODE" ] && deploy_cmd+=(--proxy-mode "$DEPLOY_PROXY_MODE")
     log_info "Command: ${deploy_cmd[*]}"
 
-    local deploy_exit_code=0
+    local deploy_exit_code=0 rerun_exit_code=0
     run_with_timeout deploy_exit_code "$log_file" "${deploy_cmd[@]}"
+
+    # A marker object: it must survive the rerun (no second init)
+    vm_ssh_root "$_CP_SSH_PORT" "kubectl --kubeconfig=/etc/kubernetes/admin.conf create configmap deploy-rerun-marker --from-literal=k=v" >/dev/null 2>&1 || true
+    log_info "=== Running deploy again with the worker added ==="
+    run_with_timeout rerun_exit_code "$log_file" "${deploy_cmd[@]}" --workers "$WORKER_DOCKER_IP"
 
     # deploy saves the admin kubeconfig in its working directory
     local kubeconfig_file
@@ -141,11 +147,17 @@ run_deploy_test() {
 
     local all_pass=true
 
-    # Check 1: deploy exit code = 0
-    if [ "$deploy_exit_code" -eq 0 ]; then
-        log_success "CHECK 1: deploy exit code = 0"
+    # Check 1: deploy exit code = 0 (first run and rerun)
+    if [ "$deploy_exit_code" -eq 0 ] && [ "$rerun_exit_code" -eq 0 ]; then
+        log_success "CHECK 1: deploy exit code = 0 (first run and rerun adding the worker)"
     else
-        log_error "CHECK 1: deploy exit code = $deploy_exit_code"
+        log_error "CHECK 1: deploy exit codes = $deploy_exit_code (first run), $rerun_exit_code (rerun)"
+        all_pass=false
+    fi
+    if [ "$(vm_ssh_root "$_CP_SSH_PORT" "kubectl --kubeconfig=/etc/kubernetes/admin.conf get configmap deploy-rerun-marker -o jsonpath='{.data.k}'" 2>/dev/null)" = v ]; then
+        log_success "CHECK 1b: the rerun kept the cluster (no second init)"
+    else
+        log_error "CHECK 1b: the marker created before the rerun is gone (cluster initialized again?)"
         all_pass=false
     fi
 
