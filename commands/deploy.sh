@@ -16,6 +16,39 @@
 # Where deploy saves the admin kubeconfig (current directory)
 DEPLOY_KUBECONFIG_PATH="./kubeconfig"
 
+# Does the first control plane already run a cluster? Prints "new" or
+# "existing"; fails when the node is initialized but its API server does not
+# answer (adding nodes needs it; init would break it).
+# Usage: _deploy_cluster_state <node>
+_deploy_cluster_state() {
+    local i=0
+    if ! remote_exec "$1" "test -f /etc/kubernetes/admin.conf" >/dev/null 2>&1; then
+        echo new
+        return 0
+    fi
+    while [ "$i" -lt 12 ]; do
+        if remote_exec "$1" "kubectl --kubeconfig=/etc/kubernetes/admin.conf get --raw /readyz" >/dev/null 2>&1; then
+            echo existing
+            return 0
+        fi
+        i=$((i + 1))
+        sleep 5
+    done
+    log_error "$1 is set up as a control plane, but its API server does not answer"
+    return 1
+}
+
+# Is <node> already a node of the cluster? 0 = yes, 1 = no; exits the
+# deploy on 2 (node list unreadable).
+# Usage: _deploy_is_member <cp_user> <cp_host> <node>
+_deploy_is_member() {
+    local rc=0
+    _parse_node_address "$3"
+    _get_node_name "$1" "$2" "$_NODE_HOST" >/dev/null || rc=$?
+    [ "$rc" -eq 2 ] && return 2
+    return "$rc"
+}
+
 # Save admin.conf of the first control plane to DEPLOY_KUBECONFIG_PATH
 # (mode 600; read with sudo for non-root SSH users).
 # Usage: _deploy_save_kubeconfig <user> <host>
@@ -184,7 +217,25 @@ deploy_cluster() {
     _parse_node_address "$cp0"
     local cp1_user="$_NODE_USER" cp1_host="$_NODE_HOST"
 
-    if ! _state_is_step_done "init_cp"; then
+    # A rerun on an existing cluster adds the nodes that are not in it yet
+    local cluster_state
+    if ! cluster_state=$(_deploy_cluster_state "$cp0"); then
+        remote_session_close
+        return 1
+    fi
+    if [ "$cluster_state" = existing ]; then
+        log_info "${cp1_host} already runs a cluster: adding the listed nodes that are not in it"
+    elif [ -e "$DEPLOY_KUBECONFIG_PATH" ] && [ "${RESUME_ENABLED:-false}" != true ]; then
+        # A new cluster: never overwrite a kubeconfig of another cluster
+        log_error "${DEPLOY_KUBECONFIG_PATH} already exists; deploy saves the new cluster's admin kubeconfig there"
+        log_error "  Move it away or run deploy from another directory"
+        remote_session_close
+        return 1
+    fi
+
+    if [ "$cluster_state" = existing ]; then
+        log_info "Step ${_step}/${total_steps}: Initializing first control-plane... (skipped, existing cluster)"
+    elif ! _state_is_step_done "init_cp"; then
         log_info "Step ${_step}/${total_steps}: Initializing first control-plane..."
 
         # Transfer kubeadm config patch file to remote if specified
@@ -246,6 +297,17 @@ deploy_cluster() {
                 _i=$((_i + 1))
                 continue
             fi
+            local member_rc=0
+            _deploy_is_member "$cp1_user" "$cp1_host" "$node" || member_rc=$?
+            if [ "$member_rc" -eq 2 ]; then
+                log_error "Could not read the node list from ${cp1_host}"
+                return 1
+            elif [ "$member_rc" -eq 0 ]; then
+                log_info "  [${_NODE_HOST}] Already in the cluster"
+                _i=$((_i + 1))
+                continue
+            fi
+            _parse_node_address "$node"
 
             if ! _deploy_remote_run "" "$node" "join control-plane" \
                 join --token "$_JOIN_TOKEN" --join-address "$_JOIN_ADDR" --discovery-token-ca-cert-hash "$_JOIN_HASH" \
@@ -277,6 +339,17 @@ deploy_cluster() {
 
             if _state_is_step_done "join_worker_${w_host}"; then
                 log_info "  [${w_host}] Worker join... (skipped, resumed)"
+                _i=$((_i + 1))
+                continue
+            fi
+            local member_rc=0
+            _deploy_is_member "$cp1_user" "$cp1_host" "$node" || member_rc=$?
+            if [ "$member_rc" -eq 2 ]; then
+                log_error "Could not read the node list from ${cp1_host}"
+                worker_failed=true
+                break
+            elif [ "$member_rc" -eq 0 ]; then
+                log_info "  [${w_host}] Already in the cluster"
                 _i=$((_i + 1))
                 continue
             fi
@@ -367,6 +440,9 @@ show_deploy_help() {
     echo "Usage: $0 deploy [options]"
     echo ""
     echo "Deploy a Kubernetes cluster across remote nodes via SSH."
+    echo ""
+    echo "When the first control plane already runs a cluster, deploy adds the listed"
+    echo "nodes that are not in it yet (rerun it with the extended node lists)."
     echo ""
     echo "Required:"
     echo "  --control-planes IPs    Comma-separated list of control-plane nodes (user@ip or ip)"
@@ -475,12 +551,6 @@ validate_deploy_args() {
     # --control-planes is required
     if [ -z "$DEPLOY_CONTROL_PLANES" ]; then
         log_error "--control-planes is required for deploy"
-        exit 1
-    fi
-    # The admin kubeconfig is saved here at the end; never overwrite one
-    if [ -e "$DEPLOY_KUBECONFIG_PATH" ] && [ "${RESUME_ENABLED:-false}" != true ]; then
-        log_error "${DEPLOY_KUBECONFIG_PATH} already exists; deploy saves the admin kubeconfig there"
-        log_error "  Move it away or run deploy from another directory"
         exit 1
     fi
 

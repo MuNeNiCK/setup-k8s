@@ -253,7 +253,7 @@ initialize_cluster() {
 
     # Deploy kube-vip before kubeadm init if HA is enabled
     if [ "$HA_ENABLED" = true ]; then
-        deploy_kube_vip
+        deploy_kube_vip || return 1
     fi
 
     _configure_kubelet_node_ip

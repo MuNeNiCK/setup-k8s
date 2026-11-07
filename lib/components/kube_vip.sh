@@ -119,6 +119,21 @@ kube_vip_release() {
     fi
 }
 
+# Pull the kube-vip image, retrying transient registry errors.
+# Usage: _kube_vip_pull <pull command...>
+_kube_vip_pull() {
+    local attempt=1
+    until "$@"; do
+        if [ "$attempt" -ge 3 ]; then
+            log_error "Failed to pull the kube-vip image after ${attempt} attempts"
+            return 1
+        fi
+        log_warn "Pulling the kube-vip image failed (attempt ${attempt}/3); retrying in $((attempt * 10))s..."
+        sleep $((attempt * 10))
+        attempt=$((attempt + 1))
+    done
+}
+
 _rollback_vip() {
     local vip="$HA_VIP_ADDRESS"
     local iface="$HA_VIP_INTERFACE"
@@ -175,10 +190,10 @@ deploy_kube_vip() {
     # Pull image based on CRI
     if [ "$CRI" = "crio" ]; then
         log_info "Pulling kube-vip image via crictl..."
-        crictl pull "$kube_vip_image"
+        _kube_vip_pull crictl pull "$kube_vip_image" || return 1
     else
         log_info "Pulling kube-vip image via ctr..."
-        ctr image pull "$kube_vip_image"
+        _kube_vip_pull ctr image pull "$kube_vip_image" || return 1
     fi
 
     # Generate manifest from unified template (same for all CRIs)

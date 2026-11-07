@@ -13,9 +13,12 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Added
 
+- Running `deploy` again on an existing cluster adds the listed nodes that
+  are not in it yet (control planes and workers); the others are left alone.
 - `deploy` saves the admin kubeconfig to `./kubeconfig` (mode 600) on the
   machine it runs on, read with sudo for non-root SSH users (the printed
-  `scp` command failed for them). It does not start when the file exists.
+  `scp` command failed for them). A new cluster is not deployed when the file
+  exists.
 - HTTP proxy support: `--http-proxy`, `--https-proxy`, `--no-proxy` for
   `init`, `join`, `deploy`, and `upgrade` (default: the proxy environment
   variables). The proxy is used for downloads and the package manager and

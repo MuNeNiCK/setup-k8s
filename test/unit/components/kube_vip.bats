@@ -226,3 +226,15 @@ _case_generate_kube_vip_manifest_ipv6() {
     kube_vip_release "$manifest"
     if fake_calls | grep -q 'addr del'; then return 1; fi
 }
+
+@test "the kube-vip image pull is retried and fails after three attempts" {
+    load_modules; quiet_logs
+    sleep() { :; }
+    TRIES="$BATS_TEST_TMPDIR/tries"; : > "$TRIES"
+    puller() { echo x >> "$TRIES"; [ "$(wc -l < "$TRIES")" -ge "${OK_AT:-99}" ]; }
+    OK_AT=2 _kube_vip_pull puller
+    : > "$TRIES"
+    run _kube_vip_pull puller
+    [ "$status" -ne 0 ]
+    [ "$(wc -l < "$TRIES")" -eq 3 ]
+}

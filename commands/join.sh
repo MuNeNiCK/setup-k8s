@@ -10,7 +10,7 @@ join_cluster() {
     # Deploy kube-vip on additional control-plane nodes
     # Skip VIP pre-add to avoid conflicts with the existing VIP leader
     if [ "${JOIN_AS_CONTROL_PLANE:-false}" = true ] && [ -n "$HA_VIP_ADDRESS" ]; then
-        deploy_kube_vip --skip-vip-preadd
+        deploy_kube_vip --skip-vip-preadd || return 1
     fi
 
     _configure_kubelet_node_ip
