@@ -113,7 +113,7 @@ verify_setup() {
         minor=$(echo "$server" | cut -d. -f2)
         want_mode=iptables
         # Same rule as setup-k8s: Kubernetes 1.33+, kernel 5.13+, nf_tables available
-        if [ "${minor:-0}" -ge 33 ] && printf '%s\n%s\n' "5.13" "$kernel" | sort -V | head -n 1 | grep -qx '5.13' \
+        if [ "${minor:-0}" -ge 33 ] && awk -v k="$kernel" 'BEGIN { split(k, v, /[.-]/); exit !(v[1] > 5 || (v[1] == 5 && v[2] >= 13)) }' \
             && _vr "modprobe -n nf_tables || test -d /sys/module/nf_tables"; then
             want_mode=nftables
         fi

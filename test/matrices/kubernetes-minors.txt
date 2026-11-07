@@ -1,0 +1,8 @@
+# Kubernetes minor versions setup-k8s supports and tests (oldest first).
+# The option matrix (.github/workflows/setup-option-tests.yml) covers each of
+# them. scripts/check-upstream.sh opens an issue when a newer minor is
+# released, when a prerelease of the next minor is available, and when a
+# listed minor approaches or reaches its end of life.
+1.35
+1.36
+1.37

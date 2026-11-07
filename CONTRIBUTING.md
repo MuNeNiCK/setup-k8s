@@ -145,9 +145,20 @@ The full VM matrices run after merging into `develop` (and again for `main`);
 see [test/README.md](test/README.md).
 
 Dependabot proposes GitHub Actions updates against `develop`. A weekly
-workflow compares the component defaults in `lib/core/defaults.sh` with
-upstream releases (`scripts/check-versions.sh`) and keeps an issue labeled
-`dependencies` open while updates are available.
+workflow (`.github/workflows/upstream-check.yml`) opens an issue labeled
+`upstream` for each upstream change that needs action, and closes it once the
+change is handled:
+
+- a new Kubernetes minor (newer than `test/matrices/kubernetes-minors.txt`)
+  or a prerelease of the next minor, with the availability of the
+  pkgs.k8s.io, CRI-O, and cri-tools releases for it
+- a tested Kubernetes minor or distribution within 60 days of its end of life
+- a component default in `lib/core/defaults.sh` with a newer release
+  (patch, minor, or major), and a newer containerd minor
+- a newer release of a tested distribution in the image catalog, or a test
+  image missing from it
+
+Run `sh scripts/check-upstream.sh` to see the current findings.
 
 ### Documentation
 

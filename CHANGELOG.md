@@ -16,8 +16,11 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 - `test/scenarios/legacy-upgrade.sh` sets a node up with an earlier
   setup-k8s version and manages it with the current one (upgrade, cleanup,
   new init).
-- `scripts/check-versions.sh` and a weekly workflow report outdated
-  component defaults; Dependabot updates GitHub Actions.
+- A weekly upstream check (`scripts/check-upstream.sh`) opens an issue for
+  each upstream change that needs action: new Kubernetes minors and
+  prereleases, end of life of tested Kubernetes minors and distributions,
+  component updates (patch, minor, major), and new distribution releases.
+  Dependabot updates GitHub Actions.
 - `--proxy-mode auto` (the new default): nftables on Kubernetes 1.33+ with
   Linux 5.13+, iptables otherwise. `preflight --proxy-mode auto` shows the
   resolved mode.
