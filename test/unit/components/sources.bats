@@ -258,3 +258,18 @@ FAKE
     _crio_selinux_module_install
     if fake_calls | grep -q 'semodule -i'; then return 1; fi
 }
+
+@test "CRI-O uses runc on cgroups v1 (crun cannot set device permissions there)" {
+    _CRIO_CONF_DIR="$BATS_TEST_TMPDIR/crio.conf.d"
+    k8s_pause_image() { echo registry.k8s.io/pause:3.10.2; }
+    fake_cmd runc
+    _has_cgroupv2() { return 1; }
+    _write_crio_config 02-kubernetes.conf systemd
+    f="$_CRIO_CONF_DIR/02-kubernetes.conf"
+    grep -qx 'default_runtime = "runc"' "$f"
+    grep -qx '\[crio.runtime.runtimes.runc\]' "$f"
+    grep -q '^runtime_path = ".*runc"$' "$f"
+    _has_cgroupv2() { return 0; }
+    _write_crio_config 02-kubernetes.conf systemd
+    if grep -q 'default_runtime' "$f"; then return 1; fi
+}
