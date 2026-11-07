@@ -85,6 +85,7 @@ upgrade_node_local() {
     # shellcheck disable=SC2034 # K8S_VERSION used by distro functions for repo URLs
     K8S_VERSION="$minor_version"
 
+    kubeadm_prepare_node_patches "$UPGRADE_TARGET_VERSION" || return 1
     log_info "Upgrading node (role: $role) from v${current_version} to v${UPGRADE_TARGET_VERSION}..."
 
     # 1. Upgrade kubeadm package

@@ -147,14 +147,7 @@ determine_k8s_version() {
     fi
 
     if ! _has_cgroupv2 && k8s_supports cgroupv2-required; then
-        local min max_supported
-        min=$(k8s_feature_min cgroupv2-required)
-        max_supported="${min%%.*}.$(( ${min#*.} - 1 ))"
-        log_error "Kubernetes ${K8S_VERSION} requires cgroups v2, but this system uses cgroups v1."
-        log_error "  Distro: ${DISTRO_NAME:-unknown} ${DISTRO_VERSION:-unknown}"
-        log_error "  Options:"
-        log_error "    1. Migrate to cgroups v2 (recommended)"
-        log_error "    2. Use --kubernetes-version ${max_supported} (last version supporting cgroups v1)"
-        return 1
+        log_warn "This node uses cgroups v1, which Kubernetes ${K8S_VERSION} has deprecated; kubelet runs with failCgroupV1: false."
+        log_warn "  Migrate the node to cgroups v2: a later Kubernetes release removes cgroups v1 support."
     fi
 }

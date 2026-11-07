@@ -10,17 +10,16 @@ Rows dated 2026-11-06 or later were verified with Kubernetes v1.37.2 after the p
 | Ubuntu | 22.04 LTS | 2026-06-09 | Tested | |
 | Debian | 13 (Trixie) | 2026-11-06 | Tested | |
 | Debian | 12 (Bookworm) | 2026-06-09 | Tested | |
-| Debian | 11 (Bullseye) | 2026-06-09 | Partial | Regular support ended 2026-08-31 (LTS only); no longer tested in CI |
 | RHEL | 9 | - | Untested | Subscription required |
 | RHEL | 8 | - | Untested | Subscription required |
 | CentOS Stream | 10 | 2026-06-09 | Tested | |
 | CentOS Stream | 9 | 2026-06-09 | Tested | |
 | Rocky Linux | 10 | 2026-06-09 | Tested | |
 | Rocky Linux | 9 | 2026-11-07 | Tested | Verified with CRI-O |
-| Rocky Linux | 8 | 2026-06-09 | Partial | cgroups v1 only; requires Kubernetes 1.34 or earlier (no longer supported upstream) |
+| Rocky Linux | 8 | 2026-11-07 | Tested | cgroups v1 (see [cgroups v1](#cgroups-v1)) |
 | AlmaLinux | 10 | 2026-06-09 | Tested | |
 | AlmaLinux | 9 | 2026-06-09 | Tested | |
-| AlmaLinux | 8 | 2026-06-09 | Partial | cgroups v1 only; requires Kubernetes 1.34 or earlier (no longer supported upstream) |
+| AlmaLinux | 8 | 2026-11-07 | Tested | cgroups v1 (see [cgroups v1](#cgroups-v1)) |
 | Oracle Linux | 9 | 2026-06-09 | Tested | |
 | Fedora | 45 | 2026-11-07 | Tested | Verified with containerd and CRI-O |
 | Fedora | 44 | 2026-11-06 | Tested | |
@@ -50,13 +49,22 @@ On Alpine and Arch the Kubernetes version is the one the distribution ships; it 
 ## Status legend
 
 - Tested: fully tested and working.
-- Partial: works with some limitations or manual steps.
 - Failed: not working or major issues.
 - Untested: not yet tested.
 
 ## Notes
 
-Kubernetes 1.35+ fails on cgroups v1 by default. Use `--kubernetes-version 1.34` or earlier on distributions limited to cgroups v1, or migrate the node to cgroups v2.
+## cgroups v1
+
+Kubernetes 1.35 deprecated cgroups v1: kubelet does not start on a cgroups v1
+node by default. On such nodes (Rocky Linux 8, AlmaLinux 8), setup-k8s sets
+`failCgroupV1: false` for kubelet (a kubeadm patch for this node, applied on
+`init`, `join`, and `upgrade`) and warns. A later Kubernetes release removes
+cgroups v1 support; migrate the nodes to cgroups v2 or to a newer release of
+the distribution before then.
+
+A distribution is listed while the distribution itself supports the release
+(for Rocky Linux 8 and AlmaLinux 8, maintenance support until 2029).
 
 ## CRI-O and SELinux
 

@@ -11,8 +11,10 @@ opensuse-tumbleweed-cloud-amd64
 opensuse-leap-16.0-cloud-amd64
 rocky-10-cloud-amd64
 rocky-9-cloud-amd64
+rocky-8-cloud-amd64  # eol: extended (maintenance support until 2029; cgroups v1)
 alma-10-cloud-amd64
 alma-9-cloud-amd64
+alma-8-cloud-amd64   # eol: extended (maintenance support until 2029; cgroups v1)
 oracle-9-cloud-amd64
 archlinux-cloud-amd64
 alpine-3.24-cloud-amd64

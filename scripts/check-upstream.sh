@@ -283,20 +283,21 @@ EOF
 
 # --- Distributions ---
 
-# Catalog images as TSV: id name version release_type status eol_standard
+# Catalog images as TSV: id name version release_type status eol_standard eol_extended
 catalog_tsv() {
     awk '
-        function out() { if (id != "") printf "%s\t%s\t%s\t%s\t%s\t%s\n", id, name, ver, rtype, status, eol }
+        function out() { if (id != "") printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", id, name, ver, rtype, status, eol, ext }
         function val(s) { sub(/^[^:]*:[ ]*/, "", s); gsub(/^["'\'']|["'\'']$/, "", s); if (s == "null") s = ""; return s }
         /^images:/ { on = 1; next }
         !on { next }
-        /^- id:/ { out(); id = val($0); name = ver = rtype = status = eol = ""; ineol = 0; next }
+        /^- id:/ { out(); id = val($0); name = ver = rtype = status = eol = ext = ""; ineol = 0; next }
         /^  name:/ { name = val($0); ineol = 0; next }
         /^  version:/ { ver = val($0); ineol = 0; next }
         /^  release_type:/ { rtype = val($0); ineol = 0; next }
         /^  status:/ { status = val($0); ineol = 0; next }
         /^  eol:/ { ineol = 1; next }
         /^    standard:/ { if (ineol) eol = val($0); next }
+        /^    extended:/ { if (ineol) ext = val($0); next }
         /^  [a-z_]+:/ { ineol = 0 }
         END { out() }'
 }
@@ -307,7 +308,10 @@ check_distros() {
     catalog=$(printf '%s\n' "$raw" | catalog_tsv)
     [ -n "$catalog" ] || die "no images found in $CATALOG_URL"
     printf '%s\n' "$catalog" > "$WORK/catalog.tsv"
-    list_file test/matrices/distro-cloud-images.txt > "$WORK/matrix.txt"
+    # "id<TAB>extended" for images whose support ends with the extended date
+    # (annotated "# eol: extended" in the matrix), otherwise "id<TAB>"
+    sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$ROOT/test/matrices/distro-cloud-images.txt" \
+        | awk '{ printf "%s\t%s\n", $1, ($0 ~ /#[[:space:]]*eol:[[:space:]]*extended/ ? "extended" : "") }' > "$WORK/matrix.txt"
 
     # Lines: missing ID | eol ID NAME DATE STATUS DAYS | new ID NAME NEWEST
     awk -F'\t' -v warn="$WARN_DAYS" -v today="$TODAY" '
@@ -318,12 +322,13 @@ check_distros() {
             for (i = 1; i <= 3; i++) { if (a[i]+0 > b[i]+0) return 1; if (a[i]+0 < b[i]+0) return 0 }
             return 0 }
         function stem(id, v,   i) { i = index(id, v); return i ? substr(id, 1, i - 1) "{v}" substr(id, i + length(v)) : "" }
-        FNR == NR { tested[$1] = 1; order[++n] = $1; next }
-        { name[$1] = $2; ver[$1] = $3; rtype[$1] = $4; status[$1] = $5; eol[$1] = $6; all[++m] = $1 }
+        FNR == NR { tested[$1] = 1; order[++n] = $1; useext[$1] = ($2 == "extended"); next }
+        { name[$1] = $2; ver[$1] = $3; rtype[$1] = $4; status[$1] = $5; eol[$1] = $6; ext[$1] = $7; all[++m] = $1 }
         END {
             for (i = 1; i <= n; i++) {
                 id = order[i]
                 if (!(id in name)) { print "missing\t" id; continue }
+                if (useext[id] && ext[id] != "") { eol[id] = ext[id]; if (status[id] == "eol-extended") status[id] = "supported" }
                 d = (eol[id] != "") ? day(eol[id]) - day(today) : 99999
                 if (status[id] ~ /^eol/ || d <= warn)
                     printf "eol\t%s\t%s\t%s\t%s\t%d\n", id, name[id], (eol[id] != "" ? eol[id] : "-"), status[id], d
