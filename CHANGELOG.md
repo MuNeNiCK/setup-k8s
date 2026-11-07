@@ -68,7 +68,8 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 - Kubernetes 1.35+ runs on cgroups v1 nodes (Rocky Linux 8, AlmaLinux 8):
   setup-k8s sets kubelet `failCgroupV1: false` there and warns, instead of
-  refusing to install. Rocky Linux 8 and AlmaLinux 8 are tested again;
+  refusing to install (and CRI-O uses runc there: crun cannot set device
+  permissions on cgroups v1). Rocky Linux 8 and AlmaLinux 8 are tested again;
   Debian 11 (end of regular support) is no longer listed.
 - Fedora 43 (end of life 2026-12-01) is no longer tested.
 - The full VM matrices run for pull requests into `main` (before a release)

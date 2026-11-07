@@ -59,7 +59,9 @@ On Alpine and Arch the Kubernetes version is the one the distribution ships; it 
 Kubernetes 1.35 deprecated cgroups v1: kubelet does not start on a cgroups v1
 node by default. On such nodes (Rocky Linux 8, AlmaLinux 8), setup-k8s sets
 `failCgroupV1: false` for kubelet (a kubeadm patch for this node, applied on
-`init`, `join`, and `upgrade`) and warns. A later Kubernetes release removes
+`init`, `join`, and `upgrade`) and warns. With CRI-O, it selects the runc
+runtime there (`99-setup-k8s-cgroupv1.conf`), as crun cannot set device
+permissions on cgroups v1. A later Kubernetes release removes
 cgroups v1 support; migrate the nodes to cgroups v2 or to a newer release of
 the distribution before then.
 
