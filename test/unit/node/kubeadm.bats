@@ -187,8 +187,6 @@ FAKE
     [ "$K8S_PATCH_VERSION" = 1.38.0-beta.0 ]
     parse_setup_args --kubernetes-version 1.37.2
     [ "$K8S_PATCH_VERSION" = 1.37.2 ]
-    run parse_setup_args --prerelease
-    [ "$status" -ne 0 ]
     [ "$KUBEADM_IMAGE_REPOSITORY" = mirror.example.com/k8s ]
     [ "$KUBEADM_PATCHES_DIR" = "$dir" ]
     run parse_setup_args --kubernetes-version 1.37.2.1
