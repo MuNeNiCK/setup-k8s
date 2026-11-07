@@ -13,6 +13,25 @@
 # --- Main Orchestration ---
 
 # Show dry-run deployment plan
+# Where deploy saves the admin kubeconfig (current directory)
+DEPLOY_KUBECONFIG_PATH="./kubeconfig"
+
+# Save admin.conf of the first control plane to DEPLOY_KUBECONFIG_PATH
+# (mode 600; read with sudo for non-root SSH users).
+# Usage: _deploy_save_kubeconfig <user> <host>
+_deploy_save_kubeconfig() {
+    local user="$1" host="$2" pfx tmp
+    pfx=$(_sudo_prefix "$user")
+    tmp="${DEPLOY_KUBECONFIG_PATH}.tmp.$$"
+    if ! (umask 077; _deploy_ssh "$user" "$host" "${pfx}cat /etc/kubernetes/admin.conf" > "$tmp") \
+        || ! grep -q '^kind: Config' "$tmp"; then
+        rm -f "$tmp"
+        log_error "Could not read /etc/kubernetes/admin.conf from ${host}"
+        return 1
+    fi
+    mv "$tmp" "$DEPLOY_KUBECONFIG_PATH"
+}
+
 deploy_dry_run() {
     log_info "=== Deploy Dry-Run Plan ==="
     log_info ""
@@ -308,21 +327,20 @@ deploy_cluster() {
         log_info ""
     fi
 
-    # Retrieve kubeconfig from first CP
-    local scp_display="scp"
-    [ "$DEPLOY_SSH_PORT" != "22" ] && scp_display="$scp_display -P $DEPLOY_SSH_PORT"
-    [ -n "$DEPLOY_SSH_KEY" ] && scp_display="$scp_display -i $DEPLOY_SSH_KEY"
-    # shellcheck disable=SC2088  # tilde is intentional display text, not expanded
-    scp_display="$scp_display ${cp1_user}@${cp1_host}:/etc/kubernetes/admin.conf ~/.kube/config"
-    log_info "To access the cluster from this machine:"
-    log_info "  ${scp_display}"
+    # Admin kubeconfig of the first control plane, for this machine
+    local kubeconfig_ok=true
+    if _deploy_save_kubeconfig "$cp1_user" "$cp1_host"; then
+        log_info "Admin kubeconfig: ${DEPLOY_KUBECONFIG_PATH}"
+        log_info "  kubectl --kubeconfig ${DEPLOY_KUBECONFIG_PATH} get nodes"
+    else
+        kubeconfig_ok=false
+    fi
     log_info ""
     log_info "Next steps:"
     log_info "  1. Install a CNI plugin (e.g., Calico, Cilium, Flannel)"
-    log_info "  2. Verify: kubectl get nodes"
     log_info "=========================="
 
-    if [ "$worker_failed" = true ] || [ "$cluster_ok" = false ]; then
+    if [ "$worker_failed" = true ] || [ "$cluster_ok" = false ] || [ "$kubeconfig_ok" = false ]; then
         _state_set "status" "failed"
         if [ "$worker_failed" = true ]; then
             _audit_log "deploy" "failed" "some worker joins failed"
@@ -331,6 +349,9 @@ deploy_cluster() {
         if [ "$cluster_ok" = false ]; then
             _audit_log "deploy" "failed" "cluster verification failed"
             log_error "The cluster did not pass verification (API server, etcd, or node registration). Check logs above."
+        fi
+        if [ "$kubeconfig_ok" = false ]; then
+            _audit_log "deploy" "failed" "kubeconfig not saved"
         fi
         return 1
     fi
@@ -454,6 +475,12 @@ validate_deploy_args() {
     # --control-planes is required
     if [ -z "$DEPLOY_CONTROL_PLANES" ]; then
         log_error "--control-planes is required for deploy"
+        exit 1
+    fi
+    # The admin kubeconfig is saved here at the end; never overwrite one
+    if [ -e "$DEPLOY_KUBECONFIG_PATH" ] && [ "${RESUME_ENABLED:-false}" != true ]; then
+        log_error "${DEPLOY_KUBECONFIG_PATH} already exists; deploy saves the admin kubeconfig there"
+        log_error "  Move it away or run deploy from another directory"
         exit 1
     fi
 

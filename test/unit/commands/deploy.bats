@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# shellcheck disable=SC2034 # tests set globals read by the modules under test
 # Ported from test/unit/test_deploy.sh
 
 setup() {
@@ -69,4 +70,28 @@ _case_deploy_timeout_defaults() {
 
 @test "DEPLOY_REMOTE_TIMEOUT / DEPLOY_POLL_INTERVAL defaults" {
     _case_deploy_timeout_defaults
+}
+
+@test "deploy saves the admin kubeconfig of the first control plane (mode 600)" {
+    load_modules; quiet_logs
+    cd "$BATS_TEST_TMPDIR"
+    _deploy_ssh() { case "$3" in "sudo -n cat /etc/kubernetes/admin.conf") printf 'apiVersion: v1\nkind: Config\nclusters: []\n' ;; *) return 1 ;; esac; }
+    _deploy_save_kubeconfig ubuntu 10.0.0.1
+    grep -qx 'kind: Config' kubeconfig
+    [ "$(stat -c %a kubeconfig)" = 600 ]
+    # Unreadable admin.conf: nothing written
+    rm -f kubeconfig
+    _deploy_ssh() { return 1; }
+    run _deploy_save_kubeconfig ubuntu 10.0.0.1
+    [ "$status" -ne 0 ] && [ ! -e kubeconfig ]
+}
+
+@test "deploy refuses to start when ./kubeconfig exists" {
+    load_modules
+    cd "$BATS_TEST_TMPDIR"
+    touch kubeconfig
+    DEPLOY_CONTROL_PLANES=10.0.0.1
+    run validate_deploy_args
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"./kubeconfig already exists"* ]]
 }

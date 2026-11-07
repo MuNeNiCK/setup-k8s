@@ -56,6 +56,9 @@ sh setup-k8s.sh \
 5. Joins additional control-plane nodes when configured.
 6. Joins workers in parallel.
 7. Runs health checks after deployment.
+8. Saves the admin kubeconfig of the first control plane to `./kubeconfig`
+   (mode 600) on the orchestrator: `kubectl --kubeconfig ./kubeconfig get nodes`.
+   deploy does not start when `./kubeconfig` already exists.
 
 ## HA deployment
 

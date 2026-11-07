@@ -586,10 +586,20 @@ _test_result() {
 
 # Timeout-guarded command execution. Sets the named variable to the exit code.
 # Usage: run_with_timeout <var_name> <log_file> <command...>
+# Working directory of host-side commands for this run (deploy writes
+# ./kubeconfig there; runs must not share it)
+host_workdir() {
+    [ -n "${_HOST_WORKDIR:-}" ] || _HOST_WORKDIR="$VM_DATA_DIR/host-$$"
+    mkdir -p "$_HOST_WORKDIR"
+    echo "$_HOST_WORKDIR"
+}
+
 run_with_timeout() {
     local _var_name=$1 _log_file=$2; shift 2
-    local _exit_code=0
-    if timeout "$TIMEOUT_TOTAL" "$@" 2>&1 | tee -a "$_log_file"; then _exit_code=0
+    local _exit_code=0 _dir
+    case "$_log_file" in /*) ;; *) _log_file="$PWD/$_log_file" ;; esac
+    _dir=$(host_workdir)
+    if (cd "$_dir" && timeout "$TIMEOUT_TOTAL" "$@") 2>&1 | tee -a "$_log_file"; then _exit_code=0
     else _exit_code=$?; [ "$_exit_code" -eq 124 ] && log_error "Timed out after ${TIMEOUT_TOTAL}s"; fi
     eval "${_var_name}=${_exit_code}"
 }
