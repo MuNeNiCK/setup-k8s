@@ -143,6 +143,7 @@ _cleanup_leftovers() {
             if pkg_installed "$name"; then echo "package ${name}"; fi
         done
     fi
+    if _crio_selinux_module_loaded; then echo "selinux-module ${_CRIO_SELINUX_MODULE}"; fi
     if command -v apt-mark >/dev/null 2>&1; then
         apt-mark showhold 2>/dev/null | grep -E '^(kube|cri-tools$|cri-o$)' | sed 's/^/hold /'
     fi

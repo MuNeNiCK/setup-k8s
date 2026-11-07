@@ -249,3 +249,37 @@ FAKE
     crio_set_minor 1.36
     [ ! -s "$CALLS" ]
 }
+
+@test "SELinux: CRI-O gets a module that lets systemd attach its device filters" {
+    STATE="$BATS_TEST_TMPDIR/modules"; : > "$STATE"
+    cat > "$FAKE_BIN/semodule" <<FAKE
+#!/bin/sh
+echo "semodule \$*" >> "$FAKE_LOG"
+case "\$1" in
+    -l) cat "$STATE" ;;
+    -i) cat "\$2" > "$BATS_TEST_TMPDIR/module.cil"; basename "\$2" .cil >> "$STATE" ;;
+    -r) : > "$STATE" ;;
+esac
+FAKE
+    chmod +x "$FAKE_BIN/semodule"
+    fake_cmd getenforce 0 Enforcing
+    _crio_selinux_module_install
+    grep -qxF '(allow init_t container_runtime_t (bpf (prog_run)))' "$BATS_TEST_TMPDIR/module.cil"
+    _crio_selinux_module_loaded
+    # Installed once
+    : > "$FAKE_LOG"
+    _crio_selinux_module_install
+    if fake_calls | grep -q 'semodule -i'; then return 1; fi
+    # Removed with CRI-O
+    DISTRO_PKG=""
+    crio_remove
+    run _crio_selinux_module_loaded
+    [ "$status" -ne 0 ]
+}
+
+@test "SELinux disabled or absent: no module" {
+    fake_cmd getenforce 0 Disabled
+    fake_cmd semodule
+    _crio_selinux_module_install
+    if fake_calls | grep -q 'semodule -i'; then return 1; fi
+}

@@ -123,6 +123,11 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Fixed
 
+- CRI-O on openSUSE Leap 16 (SELinux enforcing) started no containers:
+  the policy did not let systemd attach the eBPF device filters that crun
+  creates ("systemd failed to install eBPF device filter"). With SELinux
+  enabled, setup-k8s adds a policy module with only that rule
+  (`setup-k8s-crio-bpf`); cleanup removes it.
 - `upgrade` left CRI-O and its repository on the earlier Kubernetes minor.
   CRI-O now moves to the target minor on each node (and back on rollback)
   and is checked after the restart. dnf and zypper install the newest patch

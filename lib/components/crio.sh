@@ -193,11 +193,51 @@ _crio_from_binary() {
     _install_crio_service
 }
 
+# --- SELinux ---
+
+# With the systemd cgroup driver, systemd attaches the eBPF device filter that
+# crun (CRI-O's default OCI runtime) creates for each container. SELinux
+# policies without this rule (openSUSE Leap 16) deny it ("systemd failed to
+# install eBPF device filter") and no container starts. The module adds only
+# that rule; cleanup removes it.
+_CRIO_SELINUX_MODULE="setup-k8s-crio-bpf"
+
+_crio_selinux_enabled() {
+    case "$(getenforce 2>/dev/null)" in
+        Enforcing|Permissive) return 0 ;;
+    esac
+    return 1
+}
+
+_crio_selinux_module_loaded() {
+    command -v semodule >/dev/null 2>&1 && semodule -l 2>/dev/null | awk '{print $1}' | grep -qx "$_CRIO_SELINUX_MODULE"
+}
+
+_crio_selinux_module_install() {
+    _crio_selinux_enabled || return 0
+    _crio_selinux_module_loaded && return 0
+    if ! command -v semodule >/dev/null 2>&1; then
+        log_error "SELinux is enabled but semodule is missing: cannot allow systemd to attach CRI-O's device filters"
+        return 1
+    fi
+    local dir
+    dir=$(mktemp -d)
+    printf '%s\n' '(allow init_t container_runtime_t (bpf (prog_run)))' > "${dir}/${_CRIO_SELINUX_MODULE}.cil"
+    if ! semodule -i "${dir}/${_CRIO_SELINUX_MODULE}.cil"; then
+        rm -rf "$dir"
+        log_error "Failed to install the SELinux module ${_CRIO_SELINUX_MODULE}"
+        return 1
+    fi
+    rm -rf "$dir"
+    log_info "Installed the SELinux module ${_CRIO_SELINUX_MODULE} (systemd may attach CRI-O's device filters)"
+}
+
 # --- interface ---
 
 crio_install() {
     log_info "Installing CRI-O (source: ${DISTRO_CRIO_SOURCE})..."
     cri_install_selinux_policy
+    _crio_selinux_module_install || return 1
     case "$DISTRO_CRIO_SOURCE" in
         isv) _crio_from_isv || return 1 ;;
         distro)
@@ -284,6 +324,9 @@ crio_set_minor() {
 
 crio_remove() {
     local rc=0 bin had_binary=false
+    if _crio_selinux_module_loaded; then
+        semodule -r "$_CRIO_SELINUX_MODULE" >/dev/null || { log_error "Failed to remove the SELinux module ${_CRIO_SELINUX_MODULE}"; rc=1; }
+    fi
     if [ -n "${DISTRO_PKG:-}" ]; then
         # Only CRI-O itself; shared tools (conmon, crun, iptables-nft) may be
         # used by other software and are left to the package manager.
