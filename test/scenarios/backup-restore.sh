@@ -116,7 +116,7 @@ run_backup_test() {
     # ===================================================================
     log_info "=== Phase 1: Deploy single-node cluster ==="
     local deploy_cmd=(
-        bash "$SETUP_K8S_SCRIPT" deploy
+        sh "$HOST_BUNDLE" deploy
         --control-planes "$CP_DOCKER_IP"
         --ssh-user root
         --ssh-port 2222
@@ -166,7 +166,7 @@ run_backup_test() {
     log_info "=== Phase 3: Backup etcd (remote mode) ==="
     local snapshot_path="/tmp/etcd-backup-test-${_TEST_TS}.db"
     local backup_cmd=(
-        bash "$SETUP_K8S_SCRIPT" backup
+        sh "$HOST_BUNDLE" backup
         --control-planes "$CP_DOCKER_IP"
         --ssh-user root
         --ssh-port 2222
@@ -200,7 +200,7 @@ run_backup_test() {
     # ===================================================================
     log_info "=== Phase 5: Restore etcd (remote mode) ==="
     local restore_cmd=(
-        bash "$SETUP_K8S_SCRIPT" restore
+        sh "$HOST_BUNDLE" restore
         --control-planes "$CP_DOCKER_IP"
         --ssh-user root
         --ssh-port 2222

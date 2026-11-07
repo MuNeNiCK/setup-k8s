@@ -53,15 +53,63 @@ _has_etcd_certs() {
     _csv_any "$RENEW_CERTS" _is_etcd_cert
 }
 
-# Restart control-plane static pod components after certificate renewal.
-# kubelet watches manifests and restarts pods, but crictl stop forces immediate restart.
+# kubeconfig and API server manifest of the control-plane node
+_RENEW_KUBECONFIG="/etc/kubernetes/admin.conf"
+_RENEW_APISERVER_MANIFEST="/etc/kubernetes/manifests/kube-apiserver.yaml"
+
+# Print "<name> <expirationDate>" for every certificate kubeadm manages
+# (certificate authorities excluded), from "kubeadm certs check-expiration".
+_renew_expiry_dates() {
+    kubeadm certs check-expiration -o json 2>/dev/null | awk '
+        /"certificateAuthorities"/ { exit }
+        /"name":/ { gsub(/[",]/, "", $2); name = $2 }
+        /"expirationDate":/ { gsub(/[",]/, "", $2); if (name != "") print name, $2; name = "" }'
+}
+
+# Print the names of the certificates selected by RENEW_CERTS.
+_renew_selected_names() {
+    if [ "$RENEW_CERTS" = "all" ]; then
+        printf '%s\n' "$1" | awk '{print $1}'
+    else
+        printf '%s\n' "$RENEW_CERTS" | tr ',' '\n'
+    fi
+}
+
+# Succeed when every selected certificate expires later than before.
+# Usage: _renew_verify_expiry <dates_before> <dates_after>
+_renew_verify_expiry() {
+    local before="$1" after="$2" name old new rc=0
+    for name in $(_renew_selected_names "$before"); do
+        old=$(printf '%s\n' "$before" | awk -v n="$name" '$1 == n {print $2}')
+        new=$(printf '%s\n' "$after" | awk -v n="$name" '$1 == n {print $2}')
+        if [ -z "$new" ]; then
+            log_error "  ${name}: expiry not reported after renewal"
+            rc=1
+        elif [ -n "$old" ] && { [ "$new" = "$old" ] || [ "$(printf '%s\n%s\n' "$old" "$new" | sort | tail -n 1)" != "$new" ]; }; then
+            log_error "  ${name}: still expires ${new} (not renewed)"
+            rc=1
+        else
+            log_info "  ${name}: now expires ${new}"
+        fi
+    done
+    return "$rc"
+}
+
+# Print the ID of the running container of a control-plane component.
+_renew_container_id() {
+    crictl ps --name="^$1\$" --state=running -q 2>/dev/null | head -n 1
+}
+
+# Restart the control-plane static pod containers so that they load the
+# renewed certificates, and wait until each runs in a new container and the
+# API server is ready. kubelet restarts a stopped static pod container.
 _restart_control_plane_components() {
     log_info "Restarting control-plane components..."
 
     if ! command -v crictl >/dev/null 2>&1; then
-        log_warn "crictl not found, skipping component restart"
-        log_warn "Restart kubelet manually: systemctl restart kubelet"
-        return 0
+        log_error "crictl is required to restart the control-plane components after renewal"
+        log_error "  The components keep using the old certificates until they restart"
+        return 1
     fi
 
     local components="kube-apiserver kube-controller-manager kube-scheduler"
@@ -69,31 +117,47 @@ _restart_control_plane_components() {
         components="$components etcd"
     fi
 
+    local component cid old_ids=""
     for component in $components; do
-        local cid
-        cid=$(crictl ps --name="$component" --state=running -q 2>/dev/null | head -1) || true
-        if [ -n "$cid" ]; then
-            log_info "  Restarting $component (container $cid)..."
-            crictl stop "$cid" >/dev/null 2>&1 || true
-        else
-            log_debug "  $component container not found (may not be running)"
+        cid=$(_renew_container_id "$component")
+        if [ -z "$cid" ]; then
+            log_error "  $component is not running"
+            return 1
+        fi
+        old_ids="${old_ids} ${component}=${cid}"
+        log_info "  Restarting $component (container $cid)..."
+        if ! crictl stop "$cid" >/dev/null 2>&1; then
+            log_error "  Failed to stop $component (container $cid)"
+            return 1
         fi
     done
 
-    # Wait for API server to become ready
-    log_info "Waiting for API server to become ready..."
-    local elapsed=0 timeout=120
-    while [ "$elapsed" -lt "$timeout" ]; do
-        if kubectl get --raw /readyz >/dev/null 2>&1; then
-            log_info "API server is ready"
+    local elapsed=0 timeout=180 pending
+    log_info "Waiting for the components to restart and the API server to become ready..."
+    while :; do
+        pending=""
+        for component in $components; do
+            cid=$(_renew_container_id "$component")
+            case " $old_ids " in
+                *" ${component}=${cid} "*|*" ${component}= "*) pending="${pending} ${component}" ;;
+            esac
+            [ -n "$cid" ] || pending="${pending} ${component}"
+        done
+        if [ -z "$pending" ] && kubectl --kubeconfig="$_RENEW_KUBECONFIG" get --raw /readyz >/dev/null 2>&1; then
+            log_info "Control-plane components restarted; API server is ready"
             return 0
+        fi
+        if [ "$elapsed" -ge "$timeout" ]; then
+            if [ -n "$pending" ]; then
+                log_error "Not restarted within ${timeout}s:${pending}"
+            else
+                log_error "The API server did not become ready within ${timeout}s"
+            fi
+            return 1
         fi
         sleep 3
         elapsed=$((elapsed + 3))
     done
-
-    log_warn "API server did not become ready within ${timeout}s (may still be starting)"
-    return 0
 }
 
 # --- Local renewal ---
@@ -103,9 +167,9 @@ renew_certs_local() {
     log_info "Starting certificate renewal..."
 
     # Verify this is a control-plane node
-    if [ ! -f /etc/kubernetes/manifests/kube-apiserver.yaml ]; then
+    if [ ! -f "$_RENEW_APISERVER_MANIFEST" ]; then
         log_error "This node does not appear to be a control-plane node"
-        log_error "  (missing /etc/kubernetes/manifests/kube-apiserver.yaml)"
+        log_error "  (missing ${_RENEW_APISERVER_MANIFEST})"
         _audit_log "renew" "failed" "reason=not_control_plane_node"
         return 1
     fi
@@ -121,6 +185,8 @@ renew_certs_local() {
     kubeadm certs check-expiration 2>&1 | while IFS= read -r line; do
         log_info "  $line"
     done
+    local dates_before
+    dates_before=$(_renew_expiry_dates)
 
     # If check-only mode, stop here
     if [ "$RENEW_CHECK_ONLY" = true ]; then
@@ -149,14 +215,23 @@ renew_certs_local() {
     fi
 
     # Restart control-plane components
-    _restart_control_plane_components
+    if ! _restart_control_plane_components; then
+        _audit_log "renew" "failed" "reason=restart_failed"
+        return 1
+    fi
 
-    # Show updated certificate expiration
+    # Verify that the selected certificates were renewed
     log_info ""
-    log_info "Updated certificate expiration:"
-    kubeadm certs check-expiration 2>&1 | while IFS= read -r line; do
-        log_info "  $line"
-    done
+    log_info "Verifying renewed certificates..."
+    if [ -z "$dates_before" ]; then
+        log_error "Could not read certificate expiry dates (kubeadm certs check-expiration -o json)"
+        _audit_log "renew" "failed" "reason=expiry_unreadable"
+        return 1
+    fi
+    if ! _renew_verify_expiry "$dates_before" "$(_renew_expiry_dates)"; then
+        _audit_log "renew" "failed" "reason=not_renewed"
+        return 1
+    fi
 
     _audit_log "renew" "completed" "certs=${RENEW_CERTS}"
     log_info "Certificate renewal complete!"
@@ -223,7 +298,7 @@ renew_cluster() {
 
     # Step 1: Check SSH connectivity to all nodes
     log_info "Step 1: Checking SSH connectivity..."
-    if ! _init_remote_session "renew" "$DEPLOY_CONTROL_PLANES"; then
+    if ! remote_session_open "renew" "$DEPLOY_CONTROL_PLANES"; then
         return 1
     fi
 
@@ -240,17 +315,7 @@ renew_cluster() {
         log_info ""
         log_info "--- Node $_i/$cp_count: ${_NODE_HOST} ---"
 
-        local bundle_path
-        if ! bundle_path=$(_transfer_bundle_to_node "$_NODE_USER" "$_NODE_HOST" "renew"); then
-            fail_count=$((fail_count + 1)); IFS=','; continue
-        fi
-        local rdir; rdir=$(dirname "$bundle_path")
-
-        local sudo_pfx; sudo_pfx=$(_sudo_prefix "$_NODE_USER")
-        local cmd="${sudo_pfx}sh ${bundle_path} renew"
-        [ -n "$RENEW_PASSTHROUGH_ARGS" ] && cmd=$(_append_passthrough_to_cmd "$cmd" "$RENEW_PASSTHROUGH_ARGS")
-
-        if _run_remote_on_node "$_NODE_USER" "$_NODE_HOST" "cert renew" "$rdir" "$cmd"; then
+        if remote_run --forward "$RENEW_PASSTHROUGH_ARGS" "$node" "cert renew" renew; then
             success_count=$((success_count + 1))
         else
             log_error "Certificate renewal failed on ${_NODE_HOST}"
@@ -260,9 +325,7 @@ renew_cluster() {
     done
     IFS="$_old_ifs"
 
-    # Cleanup known_hosts
-    _teardown_session_known_hosts
-    _pop_cleanup
+    remote_session_close
 
     # Summary
     log_info ""
@@ -279,7 +342,7 @@ renew_cluster() {
     return 0
 }
 
-# === Renew argument parsing (moved from lib/validation.sh) ===
+# === Renew argument parsing ===
 
 # Help message for renew
 show_renew_help() {
@@ -404,4 +467,13 @@ validate_renew_deploy_args() {
     fi
 
     _validate_remote_node_args
+}
+
+# === Runner ===
+
+_run_renew() {
+    _run_dual_mode renew \
+        parse_renew_deploy_args validate_renew_deploy_args renew_dry_run renew_cluster \
+        "Local certificate renewal" parse_renew_local_args renew_dry_run renew_certs_local \
+        "$@"
 }

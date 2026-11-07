@@ -32,6 +32,17 @@ kubectl get configmap -n kube-system kube-proxy -o yaml | grep mode
 sudo ipvsadm -Ln
 ```
 
+## kubelet does not start after a reboot (swap)
+
+kubelet exits at startup while swap is on (`running with swap on is not supported`). setup-k8s keeps swap off across reboots by commenting out fstab swap entries, adding a drop-in to every systemd swap unit (`/etc/systemd/system/<unit>.swap.d/90-setup-k8s-swap-off.conf`), and disabling zram swap.
+
+Swap that is enabled outside these mechanisms (for example `swapon` in a boot script) still comes back. Check:
+```bash
+swapon --show
+systemctl list-units --type=swap --all
+journalctl -u kubelet -b | grep -i swap
+```
+
 ## nftables Mode Issues
 - Check kernel module availability:
 ```bash
@@ -41,7 +52,7 @@ lsmod | grep nf_tables
 ```bash
 which nft
 ```
-- Check kernel version (>= 3.13 required):
+- Check kernel version (kube-proxy nftables mode requires >= 5.13):
 ```bash
 uname -r
 ```
@@ -49,10 +60,11 @@ uname -r
 ```bash
 sudo nft list ruleset
 ```
-- Check Kubernetes version supports nftables (>= 1.29):
+- Check the mode kube-proxy runs in (with the default `--proxy-mode auto`, `init` prints the selected mode):
 ```bash
-kubectl version --short
+kubectl -n kube-system get configmap kube-proxy -o jsonpath='{.data.config\.conf}' | grep '^mode'
 ```
+- If a CNI plugin or tool requires iptables rules, reinstall the node with `--proxy-mode iptables`.
 - If NodePort services are not accessible:
   - nftables mode only allows NodePort on default IPs
   - Use the node's primary IP address, not 127.0.0.1
@@ -88,20 +100,23 @@ journalctl -xe
 ## Distribution Detection Issues
 If the script fails to detect your distribution correctly:
 - Check if `/etc/os-release` exists and contains valid information
-- You may need to manually specify some steps for unsupported distributions
+- Distributions not listed in [Supported Distros](supported-distros.md) are matched by `ID_LIKE` (for example, an Ubuntu derivative is handled like Ubuntu) with a warning
+- Unknown distributions fall back to release binaries (`--distro generic`)
+
+## SELinux
+setup-k8s does not change the SELinux mode. On RPM-based distributions it installs `container-selinux`, and `preflight` reports the current mode for information. If a workload or CNI plugin you install later requires it, switch to permissive mode yourself (`setenforce 0` and `SELINUX=permissive` in `/etc/selinux/config`).
 
 ## Distribution-Specific Notes
 
 ### Debian/Ubuntu
-- Uses apt/apt-get for package management
-- Packages are held using apt-mark to prevent automatic updates
+- Uses apt; Kubernetes packages are held with `apt-mark hold`
 
 ### RHEL/CentOS/Fedora
-- Automatically detects and uses dnf or yum
-- Package version locking handled via versionlock plugin
+- Uses dnf (dnf4 or dnf5) or yum
+- Kubernetes packages are excluded from routine upgrades with `exclude=` in the repository file, as in the upstream instructions; setup-k8s lifts the exclude only for its own installs and upgrades
 
 ### SUSE
-- Uses zypper for package management
+- Uses zypper; Kubernetes packages are locked with `zypper addlock`
 - SLES may require subscription for repositories
 
 ### Alpine Linux
@@ -110,7 +125,9 @@ If the script fails to detect your distribution correctly:
 - Community repository is automatically enabled for Kubernetes packages
 - Check kubelet logs with `rc-service kubelet status` or `/var/log/kubelet.log`
 - `--ignore-preflight-errors=SystemVerification` is automatically added to kubeadm commands
+- Kubernetes comes from Alpine packages, so the available version depends on the Alpine release (for example, Kubernetes 1.34 on Alpine 3.23 and 1.36 on Alpine 3.24). Without `--kubernetes-version`, that version is used; requesting another version fails with the available one in the message
 
 ### Arch Linux
-- Uses pacman and AUR (Arch User Repository)
-- Automatically installs yay AUR helper if needed
+- Uses pacman and the official Arch repositories (kubeadm, kubelet, kubectl, containerd, cri-o)
+- Arch provides only the current Kubernetes version, so versions cannot be pinned and the default is the packaged version
+- Installing packages performs a full system upgrade (`pacman -Syu`, kernels excluded), as Arch does not support partial upgrades

@@ -37,6 +37,7 @@ nav:
   - Quick Start: quick-start.md
   - Installation: installation.md
   - Remote Deploy: remote-deploy.md
+  - Cluster File: cluster-file.md
   - Configuration: configuration.md
   - High Availability: high-availability.md
   - Networking: networking.md

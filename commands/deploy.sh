@@ -1,18 +1,70 @@
 #!/bin/sh
 
 # Deploy module: orchestrate remote Kubernetes cluster installation via SSH
-# SSH infrastructure is provided by lib/ssh.sh (loaded before this module).
+# SSH infrastructure is provided by lib/remote/ssh.sh (loaded before this module).
 #
 # === Sections ===
 # 1. Dry-run display                        (~line 11)
 # 2. Remote orchestration (deploy_cluster)   (~line 73)
 # 3. CLI parsing & help                     (~line 337)
 #
-# Token extraction -> lib/join_token.sh
+# Token extraction -> lib/node/kubeadm.sh
 
 # --- Main Orchestration ---
 
 # Show dry-run deployment plan
+# Where deploy saves the admin kubeconfig (current directory)
+DEPLOY_KUBECONFIG_PATH="./kubeconfig"
+
+# Does the first control plane already run a cluster? Prints "new" or
+# "existing"; fails when the node is initialized but its API server does not
+# answer (adding nodes needs it; init would break it).
+# Usage: _deploy_cluster_state <node>
+_deploy_cluster_state() {
+    local i=0
+    if ! remote_exec "$1" "test -f /etc/kubernetes/admin.conf" >/dev/null 2>&1; then
+        echo new
+        return 0
+    fi
+    while [ "$i" -lt 12 ]; do
+        if remote_exec "$1" "kubectl --kubeconfig=/etc/kubernetes/admin.conf get --raw /readyz" >/dev/null 2>&1; then
+            echo existing
+            return 0
+        fi
+        i=$((i + 1))
+        sleep 5
+    done
+    log_error "$1 is set up as a control plane, but its API server does not answer"
+    return 1
+}
+
+# Is <node> already a node of the cluster? 0 = yes, 1 = no; exits the
+# deploy on 2 (node list unreadable).
+# Usage: _deploy_is_member <cp_user> <cp_host> <node>
+_deploy_is_member() {
+    local rc=0
+    _parse_node_address "$3"
+    _get_node_name "$1" "$2" "$_NODE_HOST" >/dev/null || rc=$?
+    [ "$rc" -eq 2 ] && return 2
+    return "$rc"
+}
+
+# Save admin.conf of the first control plane to DEPLOY_KUBECONFIG_PATH
+# (mode 600; read with sudo for non-root SSH users).
+# Usage: _deploy_save_kubeconfig <user> <host>
+_deploy_save_kubeconfig() {
+    local user="$1" host="$2" pfx tmp
+    pfx=$(_sudo_prefix "$user")
+    tmp="${DEPLOY_KUBECONFIG_PATH}.tmp.$$"
+    if ! (umask 077; _deploy_ssh "$user" "$host" "${pfx}cat /etc/kubernetes/admin.conf" > "$tmp") \
+        || ! grep -q '^kind: Config' "$tmp"; then
+        rm -f "$tmp"
+        log_error "Could not read /etc/kubernetes/admin.conf from ${host}"
+        return 1
+    fi
+    mv "$tmp" "$DEPLOY_KUBECONFIG_PATH"
+}
+
 deploy_dry_run() {
     log_info "=== Deploy Dry-Run Plan ==="
     log_info ""
@@ -74,16 +126,41 @@ deploy_dry_run() {
     log_info "=== End of dry-run (no changes made) ==="
 }
 
-# Build a join command string with common join arguments.
-# Usage: join_cmd=$(_build_join_cmd <sudo_prefix> <bundle_path>)
-# Requires: _JOIN_TOKEN, _JOIN_ADDR, _JOIN_HASH (set by _extract_join_info)
-_build_join_cmd() {
-    local _sudo="$1" _bundle="$2"
-    local _cmd="${_sudo}sh ${_bundle} join"
-    _cmd="${_cmd} --join-token $(_posix_shell_quote "$_JOIN_TOKEN")"
-    _cmd="${_cmd} --join-address $(_posix_shell_quote "$_JOIN_ADDR")"
-    _cmd="${_cmd} --discovery-token-hash $(_posix_shell_quote "$_JOIN_HASH")"
-    printf '%s' "$_cmd"
+# Run a setup-k8s subcommand on a node with the forwarded deploy options
+# (minus <drop>) and the node's copy of the kubeadm patches.
+# Usage: _deploy_remote_run <drop> <node> <description> <subcommand> [args...]
+_deploy_remote_run() {
+    local drop="$1" node="$2" desc="$3" node_ip
+    shift 3
+    # Per-node kubelet node IP (--config nodes[].node-ip)
+    _parse_node_address "$node"
+    node_ip=$(node_override "$_NODE_HOST" node-ip)
+    if [ -n "$node_ip" ]; then
+        drop="${drop}${drop:+ }--kubelet-node-ip"
+        set -- "$@" --kubelet-node-ip "$node_ip"
+    fi
+    if [ -n "${KUBEADM_PATCHES_DIR:-}" ]; then
+        remote_run --forward "$DEPLOY_PASSTHROUGH_ARGS" --drop "$drop" "$node" "$desc" "$@" \
+            --patches "$(remote_node_dir "$node")/kubeadm-patches"
+    else
+        remote_run --forward "$DEPLOY_PASSTHROUGH_ARGS" --drop "$drop" "$node" "$desc" "$@"
+    fi
+}
+
+# kube-proxy runs in the cluster's mode on every node. When the mode was not
+# given (auto), forward the mode the first control plane selected so that
+# joining nodes are prepared for it, not for what their own kernel prefers.
+# Usage: _deploy_pin_proxy_mode <first_cp>
+_deploy_pin_proxy_mode() {
+    case "$DEPLOY_PASSTHROUGH_ARGS" in
+        *--proxy-mode*) return 0 ;;
+    esac
+    local mode
+    mode=$(remote_exec "$1" "kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system get configmap kube-proxy -o jsonpath='{.data.config\\.conf}'" 2>/dev/null \
+        | awk '/^mode:/ {gsub(/"/, "", $2); print $2}') || mode=""
+    [ -n "$mode" ] || mode=iptables   # empty mode is kube-proxy's iptables default
+    log_info "  Cluster kube-proxy mode: ${mode} (used for joining nodes)"
+    DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_pair "$DEPLOY_PASSTHROUGH_ARGS" --proxy-mode "$mode")
 }
 
 # Main deploy orchestration
@@ -127,16 +204,16 @@ deploy_cluster() {
     # --- Step 1: SSH connectivity check ---
     _step=$((_step + 1))
     log_info "Step ${_step}/${total_steps}: Checking SSH connectivity..."
-    if ! _init_remote_session "deploy" "$_DEPLOY_ALL_NODES"; then
+    # --- Step 2: Transfer setup-k8s.sh ---
+    # Always transferred (even on resume): remote working directories are
+    # removed when the session closes.
+    _step=$((_step + 1))
+    if ! remote_session_open "deploy" "$_DEPLOY_ALL_NODES"; then
         return 1
     fi
-
-    # --- Step 2: Generate and transfer bundle ---
-    # Always regenerate (even on resume), because bundle paths are
-    # process-local and remote temp dirs are cleaned on exit.
-    _step=$((_step + 1))
-    log_info "Step ${_step}/${total_steps}: Generating and transferring bundle..."
-    if ! _generate_and_transfer_bundle "deploy"; then
+    if [ -n "${KUBEADM_PATCHES_DIR:-}" ] && ! remote_send_dir "$KUBEADM_PATCHES_DIR" kubeadm-patches; then
+        log_error "Failed to transfer kubeadm patches"
+        remote_session_close
         return 1
     fi
 
@@ -147,15 +224,31 @@ deploy_cluster() {
     _parse_node_address "$cp0"
     local cp1_user="$_NODE_USER" cp1_host="$_NODE_HOST"
 
-    if ! _state_is_step_done "init_cp"; then
+    # A rerun on an existing cluster adds the nodes that are not in it yet
+    local cluster_state
+    if ! cluster_state=$(_deploy_cluster_state "$cp0"); then
+        remote_session_close
+        return 1
+    fi
+    if [ "$cluster_state" = existing ]; then
+        log_info "${cp1_host} already runs a cluster: adding the listed nodes that are not in it"
+    elif [ -e "$DEPLOY_KUBECONFIG_PATH" ] && [ "${RESUME_ENABLED:-false}" != true ]; then
+        # A new cluster: never overwrite a kubeconfig of another cluster
+        log_error "${DEPLOY_KUBECONFIG_PATH} already exists; deploy saves the new cluster's admin kubeconfig there"
+        log_error "  Move it away or run deploy from another directory"
+        remote_session_close
+        return 1
+    fi
+
+    if [ "$cluster_state" = existing ]; then
+        log_info "Step ${_step}/${total_steps}: Initializing first control-plane... (skipped, existing cluster)"
+    elif ! _state_is_step_done "init_cp"; then
         log_info "Step ${_step}/${total_steps}: Initializing first control-plane..."
 
         # Transfer kubeadm config patch file to remote if specified
         local _remote_patch_path=""
         if [ -n "${KUBEADM_CONFIG_PATCH:-}" ] && [ -f "$KUBEADM_CONFIG_PATCH" ]; then
-            local _rdir
-            _rdir=$(_bundle_dir_lookup "$cp1_host")
-            _remote_patch_path="${_rdir}/kubeadm-config-patch.yaml"
+            _remote_patch_path="$(remote_node_dir "$cp0")/kubeadm-config-patch.yaml"
             log_info "  Transferring kubeadm config patch to ${cp1_host}..."
             if ! _deploy_scp "$KUBEADM_CONFIG_PATCH" "$cp1_user" "$cp1_host" "$_remote_patch_path"; then
                 log_error "Failed to transfer kubeadm config patch to ${cp1_host}"
@@ -171,18 +264,11 @@ deploy_cluster() {
             done)
         fi
 
-        # Build init command with passthrough args (shell-escaped)
-        local remote_bundle
-        remote_bundle="$(_bundle_dir_lookup "$cp1_host")/setup-k8s.sh"
-        local sudo_pfx; sudo_pfx=$(_sudo_prefix "$cp1_user")
-        local init_cmd="${sudo_pfx}sh ${remote_bundle} init"
-        # If multiple CPs, enable HA
-        if [ "$cp_count" -gt 1 ]; then
-            init_cmd="${init_cmd} --ha"
-        fi
-        init_cmd=$(_append_passthrough_to_cmd "$init_cmd" "$DEPLOY_PASSTHROUGH_ARGS")
-
-        if ! _deploy_exec_remote "$cp1_user" "$cp1_host" "kubeadm init" "$init_cmd"; then
+        # Multiple control planes enable HA
+        local init_ha=""
+        if [ "$cp_count" -gt 1 ]; then init_ha="--ha"; fi
+        # shellcheck disable=SC2086 # init_ha is empty or a single flag
+        if ! _deploy_remote_run "" "$cp0" "kubeadm init" init $init_ha; then
             log_error "First control-plane initialization failed. Aborting."
             if [ "${COLLECT_DIAGNOSTICS:-false}" = true ]; then
                 _collect_diagnostics "$cp1_user" "$cp1_host" "/tmp/setup-k8s-diag-init-$(date +%s)" || true
@@ -201,6 +287,7 @@ deploy_cluster() {
         log_error "Failed to extract join info. Aborting."
         return 1
     fi
+    _deploy_pin_proxy_mode "$cp0"
 
     # --- Step 5: Join additional control-planes (sequential) ---
     if [ "$cp_count" -gt 1 ]; then
@@ -217,18 +304,21 @@ deploy_cluster() {
                 _i=$((_i + 1))
                 continue
             fi
+            local member_rc=0
+            _deploy_is_member "$cp1_user" "$cp1_host" "$node" || member_rc=$?
+            if [ "$member_rc" -eq 2 ]; then
+                log_error "Could not read the node list from ${cp1_host}"
+                return 1
+            elif [ "$member_rc" -eq 0 ]; then
+                log_info "  [${_NODE_HOST}] Already in the cluster"
+                _i=$((_i + 1))
+                continue
+            fi
+            _parse_node_address "$node"
 
-            local node_bundle
-            node_bundle="$(_bundle_dir_lookup "$_NODE_HOST")/setup-k8s.sh"
-            local sudo_pfx; sudo_pfx=$(_sudo_prefix "$_NODE_USER")
-            local join_cmd
-            join_cmd=$(_build_join_cmd "$sudo_pfx" "$node_bundle")
-            join_cmd="${join_cmd} --control-plane"
-            join_cmd="${join_cmd} --certificate-key $(_posix_shell_quote "$_CERT_KEY")"
-            # Pass through HA and other args (shell-escaped)
-            join_cmd=$(_append_passthrough_to_cmd "$join_cmd" "$DEPLOY_PASSTHROUGH_ARGS")
-
-            if ! _deploy_exec_remote "$_NODE_USER" "$_NODE_HOST" "join control-plane" "$join_cmd"; then
+            if ! _deploy_remote_run "" "$node" "join control-plane" \
+                join --token "$_JOIN_TOKEN" --join-address "$_JOIN_ADDR" --discovery-token-ca-cert-hash "$_JOIN_HASH" \
+                --control-plane --certificate-key "$_CERT_KEY"; then
                 log_error "Control-plane join failed for ${_NODE_HOST}. Aborting."
                 if [ "${COLLECT_DIAGNOSTICS:-false}" = true ]; then
                     _collect_diagnostics "$_NODE_USER" "$_NODE_HOST" "/tmp/setup-k8s-diag-join-cp-$(date +%s)" || true
@@ -252,18 +342,29 @@ deploy_cluster() {
             local node
             node=$(_csv_get "$DEPLOY_WORKERS" "$_i")
             _parse_node_address "$node"
-            local w_user="$_NODE_USER" w_host="$_NODE_HOST"
+            local w_host="$_NODE_HOST"
 
-            local w_bundle
-            w_bundle="$(_bundle_dir_lookup "$w_host")/setup-k8s.sh"
-            local w_sudo; w_sudo=$(_sudo_prefix "$w_user")
-            local join_cmd
-            join_cmd=$(_build_join_cmd "$w_sudo" "$w_bundle")
-            join_cmd=$(_append_passthrough_filtered "$join_cmd" "$DEPLOY_PASSTHROUGH_ARGS" "--ha-vip --ha-interface")
+            if _state_is_step_done "join_worker_${w_host}"; then
+                log_info "  [${w_host}] Worker join... (skipped, resumed)"
+                _i=$((_i + 1))
+                continue
+            fi
+            local member_rc=0
+            _deploy_is_member "$cp1_user" "$cp1_host" "$node" || member_rc=$?
+            if [ "$member_rc" -eq 2 ]; then
+                log_error "Could not read the node list from ${cp1_host}"
+                worker_failed=true
+                break
+            elif [ "$member_rc" -eq 0 ]; then
+                log_info "  [${w_host}] Already in the cluster"
+                _i=$((_i + 1))
+                continue
+            fi
 
-            # Run in background subshell
+            # Run in background subshell (HA settings apply to control planes only)
             (
-                _deploy_exec_remote "$w_user" "$w_host" "join worker" "$join_cmd"
+                _deploy_remote_run "--ha-vip --ha-interface" "$node" "join worker" \
+                    join --token "$_JOIN_TOKEN" --join-address "$_JOIN_ADDR" --discovery-token-ca-cert-hash "$_JOIN_HASH"
             ) &
             worker_pids="${worker_pids}${worker_pids:+ }$!"
             worker_hosts="${worker_hosts}${worker_hosts:+ }${w_host}"
@@ -276,26 +377,24 @@ deploy_cluster() {
             _pi=$((_pi + 1))
             local _w_host
             _w_host=$(echo "$worker_hosts" | tr ' ' '\n' | sed -n "${_pi}p")
-            if ! wait "$_pid"; then
+            if wait "$_pid"; then
+                _state_mark_step "join_worker_${_w_host}" "done"
+            else
                 log_error "Worker join failed for ${_w_host}"
                 worker_failed=true
             fi
         done
     fi
 
-    # --- Post-deploy health check ---
+    # --- Verify the cluster (API server, etcd, every node registered) ---
     log_info ""
-    _health_check_cluster "$cp1_user" "$cp1_host" --post || true
-
-    # Verify expected node count (fatal if mismatch)
-    local node_count_ok=true
-    _verify_node_count "$cp1_user" "$cp1_host" "$all_count" || node_count_ok=false
+    local cluster_ok=true
+    _verify_deployed_cluster "$cp1_user" "$cp1_host" "$all_count" || cluster_ok=false
 
     # --- Step 7: Clean up remote bundle directories ---
     _step=$((_step + 1))
-    log_info "Step ${_step}/${total_steps}: Cleaning up remote bundle directories..."
-    _cleanup_remote_bundle_dirs
-    _pop_cleanup
+    log_info "Step ${_step}/${total_steps}: Cleaning up remote working directories..."
+    remote_session_close
 
     # --- Step 8: Summary ---
     log_info ""
@@ -308,36 +407,34 @@ deploy_cluster() {
         log_info ""
     fi
 
-    # Retrieve kubeconfig from first CP
-    local scp_display="scp"
-    [ "$DEPLOY_SSH_PORT" != "22" ] && scp_display="$scp_display -P $DEPLOY_SSH_PORT"
-    [ -n "$DEPLOY_SSH_KEY" ] && scp_display="$scp_display -i $DEPLOY_SSH_KEY"
-    # shellcheck disable=SC2088  # tilde is intentional display text, not expanded
-    scp_display="$scp_display ${cp1_user}@${cp1_host}:/etc/kubernetes/admin.conf ~/.kube/config"
-    log_info "To access the cluster from this machine:"
-    log_info "  ${scp_display}"
+    # Admin kubeconfig of the first control plane, for this machine
+    local kubeconfig_ok=true
+    if _deploy_save_kubeconfig "$cp1_user" "$cp1_host"; then
+        log_info "Admin kubeconfig: ${DEPLOY_KUBECONFIG_PATH}"
+        log_info "  kubectl --kubeconfig ${DEPLOY_KUBECONFIG_PATH} get nodes"
+    else
+        kubeconfig_ok=false
+    fi
     log_info ""
     log_info "Next steps:"
     log_info "  1. Install a CNI plugin (e.g., Calico, Cilium, Flannel)"
-    log_info "  2. Verify: kubectl get nodes"
     log_info "=========================="
 
-    if [ "$worker_failed" = true ] || [ "$node_count_ok" = false ]; then
+    if [ "$worker_failed" = true ] || [ "$cluster_ok" = false ] || [ "$kubeconfig_ok" = false ]; then
         _state_set "status" "failed"
         if [ "$worker_failed" = true ]; then
             _audit_log "deploy" "failed" "some worker joins failed"
             log_error "Some worker joins failed. Check logs above."
         fi
-        if [ "$node_count_ok" = false ]; then
-            _audit_log "deploy" "failed" "node count mismatch"
-            log_error "Not all nodes registered. Check logs above."
+        if [ "$cluster_ok" = false ]; then
+            _audit_log "deploy" "failed" "cluster verification failed"
+            log_error "The cluster did not pass verification (API server, etcd, or node registration). Check logs above."
+        fi
+        if [ "$kubeconfig_ok" = false ]; then
+            _audit_log "deploy" "failed" "kubeconfig not saved"
         fi
         return 1
     fi
-
-    # Clean up session-scoped known_hosts
-    _teardown_session_known_hosts
-    _pop_cleanup
 
     _state_complete
     _audit_log "deploy" "completed" "cp=${cp_count} workers=${w_count}"
@@ -345,11 +442,14 @@ deploy_cluster() {
     return 0
 }
 
-# === Deploy argument parsing (moved from lib/validation.sh) ===
+# === Deploy argument parsing ===
 show_deploy_help() {
     echo "Usage: $0 deploy [options]"
     echo ""
     echo "Deploy a Kubernetes cluster across remote nodes via SSH."
+    echo ""
+    echo "When the first control plane already runs a cluster, deploy adds the listed"
+    echo "nodes that are not in it yet (rerun it with the extended node lists)."
     echo ""
     echo "Required:"
     echo "  --control-planes IPs    Comma-separated list of control-plane nodes (user@ip or ip)"
@@ -360,16 +460,23 @@ show_deploy_help() {
     echo "  --ha-vip ADDRESS        VIP address for HA (required when >1 control-plane)"
     echo "  --ha-interface IFACE    Network interface for VIP (auto-detected on remote)"
     echo "  --cri RUNTIME           Container runtime (containerd or crio)"
-    echo "  --proxy-mode MODE       Kube-proxy mode (iptables, ipvs, or nftables)"
+    echo "  --proxy-mode MODE       Kube-proxy mode (auto, iptables, ipvs, or nftables; default: auto)"
     echo "  --distro FAMILY         Override distro family detection"
-    echo "  --swap-enabled          Keep swap enabled (K8s 1.28+)"
+    echo "  --swap-enabled          Keep swap enabled (Kubernetes 1.30+)"
     echo "  --enable-completion BOOL  Enable shell completion setup (default: true)"
     echo "  --install-helm BOOL     Install Helm package manager (default: false)"
     echo "  --install-kustomize BOOL  Install Kustomize (default: false)"
     echo "  --completion-shells LIST  Shells to configure (auto, bash, zsh, fish, or comma-separated)"
-    echo "  --kubernetes-version VER Kubernetes version (e.g., 1.32)"
+    echo "  --kubernetes-version VER Kubernetes version: MAJOR.MINOR or MAJOR.MINOR.PATCH (e.g., 1.37 or 1.37.2)"
+    echo "  --image-repository REPO Pull control-plane images from REPO"
+    echo "  --patches DIR   Apply kubeadm patches from local DIR on every node"
     echo "  --pod-network-cidr CIDR Pod network CIDR"
     echo "  --service-cidr CIDR     Service CIDR"
+    echo "  --apiserver-advertise-address ADDR, --control-plane-endpoint ENDPOINT,"
+    echo "  --apiserver-cert-extra-sans LIST, --kubeadm-config-patch FILE, --kubelet-node-ip IP"
+    echo "                          Passed to init/join on the nodes (see 'init --help')"
+    echo "  --http-proxy URL, --https-proxy URL, --no-proxy LIST"
+    echo "                          Proxy settings for every node (see 'init --help')"
     echo "  --resume                Resume a previously interrupted deploy"
     _show_help_footer "  " "Show deployment plan and exit"
     echo ""
@@ -402,7 +509,16 @@ parse_deploy_args() {
                 DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_pair "$DEPLOY_PASSTHROUGH_ARGS" "$1" "$2")
                 shift 2
                 ;;
-            --cri|--proxy-mode|--kubernetes-version|--pod-network-cidr|--service-cidr|--apiserver-advertise-address|--control-plane-endpoint|--kubeadm-config-patch|--api-server-extra-sans|--kubelet-node-ip)
+            --patches)
+                _require_value $# "$1" "${2:-}"
+                if [ ! -d "$2" ]; then
+                    log_error "--patches directory not found: $2"
+                    exit 1
+                fi
+                KUBEADM_PATCHES_DIR=$(cd "$2" && pwd)
+                shift 2
+                ;;
+            --cri|--proxy-mode|--kubernetes-version|--image-repository|--pod-network-cidr|--service-cidr|--apiserver-advertise-address|--control-plane-endpoint|--kubeadm-config-patch|--apiserver-cert-extra-sans|--kubelet-node-ip)
                 _require_value $# "$1" "${2:-}"
                 DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_pair "$DEPLOY_PASSTHROUGH_ARGS" "$1" "$2")
                 shift 2
@@ -417,7 +533,10 @@ parse_deploy_args() {
                 shift 2
                 ;;
             *)
-                if _parse_remote_ssh_args $# "$1" "${2:-}"; then
+                if _is_proxy_flag "$1"; then
+                    _parse_proxy_flag $# "$1" "${2:-}"
+                    shift "$_PROXY_SHIFT"
+                elif _parse_remote_ssh_args $# "$1" "${2:-}"; then
                     shift "$_REMOTE_SSH_SHIFT"
                 else
                     log_error "Unknown deploy option: $1"
@@ -426,6 +545,7 @@ parse_deploy_args() {
                 ;;
         esac
     done
+    DEPLOY_PASSTHROUGH_ARGS=$(proxy_forward_args "$DEPLOY_PASSTHROUGH_ARGS")
 }
 
 # Validate deploy arguments
@@ -459,4 +579,10 @@ validate_deploy_args() {
         log_error "--ha-vip requires multiple control-plane nodes (got 1)"
         exit 1
     fi
+}
+
+# === Runner ===
+
+_run_deploy() {
+    _run_remote deploy parse_deploy_args validate_deploy_args deploy_dry_run deploy_cluster "$@"
 }

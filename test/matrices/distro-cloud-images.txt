@@ -1,18 +1,21 @@
+ubuntu-26.04-cloud-amd64
 ubuntu-24.04-cloud-amd64
 ubuntu-22.04-cloud-amd64
 debian-13-cloud-amd64
 debian-12-cloud-amd64
-debian-11-cloud-amd64
 centos-stream-10-cloud-amd64
 centos-stream-9-cloud-amd64
+fedora-45-cloud-amd64
 fedora-44-cloud-amd64
-fedora-43-cloud-amd64
 opensuse-tumbleweed-cloud-amd64
 opensuse-leap-16.0-cloud-amd64
 rocky-10-cloud-amd64
 rocky-9-cloud-amd64
+rocky-8-cloud-amd64  # eol: extended (maintenance support until 2029; cgroups v1)
 alma-10-cloud-amd64
 alma-9-cloud-amd64
+alma-8-cloud-amd64   # eol: extended (maintenance support until 2029; cgroups v1)
 oracle-9-cloud-amd64
 archlinux-cloud-amd64
+alpine-3.24-cloud-amd64
 alpine-3.23-cloud-amd64

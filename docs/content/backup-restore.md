@@ -25,27 +25,28 @@ A cleanup handler restores the etcd manifest if restore fails mid-operation.
 ## Local backup
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   backup --snapshot-path /path/to/snapshot.db
 ```
 
 Use the default auto-generated path:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- backup
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- backup
 ```
 
 ## Local restore
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   restore --snapshot-path /path/to/snapshot.db
 ```
 
 ## Remote backup
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- \
+curl -fsSLO https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh
+sh setup-k8s.sh \
   backup \
   --control-planes root@192.168.1.10 \
   --ssh-key ~/.ssh/id_rsa \
@@ -55,7 +56,8 @@ curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -
 ## Remote restore
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- \
+curl -fsSLO https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh
+sh setup-k8s.sh \
   restore \
   --control-planes root@192.168.1.10 \
   --ssh-key ~/.ssh/id_rsa \

@@ -84,19 +84,110 @@ stop_cri_services() {
 # Remove Kubernetes configuration files
 remove_kubernetes_configs() {
     log_info "Removing Kubernetes configuration files..."
-    rm -f /etc/default/kubelet
+    rm -f /etc/default/kubelet /etc/sysconfig/kubelet
     rm -rf /etc/kubernetes
     rm -rf /etc/systemd/system/kubelet.service.d
 }
 
+# Remove installed components (packages, repositories, binaries) and host
+# preparation artifacts, then verify that nothing is left.
+cleanup_installed_components() {
+    local rc=0
+    k8s_remove || rc=1
+    crio_remove || rc=1
+    containerd_cleanup || rc=1
+    if [ "${DISTRO_K8S_SOURCE:-}" = binary ] && [ "$PRESERVE_CNI" = false ] && [ -d /opt/cni/bin ]; then
+        rm -rf /opt/cni/bin
+        log_info "Removed /opt/cni/bin/"
+    fi
+    system_cleanup
+    proxy_cleanup
+    _service_reload
+
+    local left
+    left=$(_cleanup_leftovers)
+    log_info "Verifying cleanup..."
+    if [ -n "$left" ]; then
+        printf '%s\n' "$left" | while IFS= read -r item; do log_warn "  Still present: ${item}"; done
+        log_warn "Some components could not be removed. You may want to remove them manually."
+        return 1
+    fi
+    log_info "No Kubernetes packages, binaries, package locks, repositories, or configuration remain."
+    return "$rc"
+}
+
+# Configuration roots checked by _cleanup_leftovers (overridable for tests)
+_CLEANUP_ETC="/etc"
+# kube-vip static pod manifest (names the VIP to release)
+_CLEANUP_KUBE_VIP_MANIFEST="/etc/kubernetes/manifests/kube-vip.yaml"
+
+# Print what setup-k8s installs or configures and is still present, one item
+# per line. Uses its own checks (PATH lookups, package database queries,
+# lock lists, file names) rather than the result of the removal steps.
+_cleanup_leftovers() {
+    local name file
+    hash -r 2>/dev/null || true
+    if command -v pgrep >/dev/null 2>&1; then
+        for name in kubelet kube-apiserver kube-controller-manager kube-scheduler etcd kube-proxy kube-vip; do
+            if pgrep -x "$name" >/dev/null 2>&1; then echo "process ${name}"; fi
+        done
+    fi
+    for name in kubeadm kubelet kubectl crio; do
+        if command -v "$name" >/dev/null 2>&1; then
+            echo "binary $(command -v "$name")"
+        fi
+    done
+    if [ -n "${DISTRO_PKG:-}" ]; then
+        # shellcheck disable=SC2046 # space-separated package names
+        for name in $(printf '%s\n' kubeadm kubelet kubectl cri-tools kubernetes-cni cri-o $(k8s_distro_installed_pkgs) | awk '!seen[$0]++'); do
+            if pkg_installed "$name"; then echo "package ${name}"; fi
+        done
+    fi
+    if _crio_selinux_module_loaded; then echo "selinux-module ${_CRIO_SELINUX_MODULE}"; fi
+    if command -v apt-mark >/dev/null 2>&1; then
+        apt-mark showhold 2>/dev/null | grep -E '^(kube|cri-tools$|cri-o$)' | sed 's/^/hold /'
+    fi
+    if command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive locks 2>/dev/null | grep -o -E '\b(kubeadm|kubelet|kubectl|cri-tools|cri-o)\b' | sort -u | sed 's/^/lock /'
+    fi
+    for file in apt/sources.list.d/kubernetes.list apt/sources.list.d/cri-o.list apt/sources.list.d/docker.list \
+                apt/keyrings/kubernetes.gpg apt/keyrings/cri-o.gpg apt/keyrings/docker.gpg \
+                yum.repos.d/kubernetes.repo yum.repos.d/cri-o.repo yum.repos.d/docker.repo \
+                yum.repos.d/containers.repo \
+                zypp/repos.d/kubernetes.repo zypp/repos.d/cri-o.repo zypp/repos.d/containers.repo \
+                default/kubelet sysconfig/kubelet systemd/system/kubelet.service init.d/kubelet \
+                systemd/system/containerd.service.d/10-setup-k8s-proxy.conf systemd/system/crio.service.d/10-setup-k8s-proxy.conf; do
+        if [ -e "${_CLEANUP_ETC}/${file}" ]; then echo "file ${_CLEANUP_ETC}/${file}"; fi
+    done
+    for file in kubernetes systemd/system/kubelet.service.d; do
+        if [ -d "${_CLEANUP_ETC}/${file}" ]; then echo "directory ${_CLEANUP_ETC}/${file}"; fi
+    done
+}
+
 # Reset Kubernetes cluster state
 reset_kubernetes_cluster() {
+    # kubeadm reset deletes the kube-vip manifest, which names the VIP; the VIP
+    # is released after the reset has removed the kube-vip container (a
+    # running kube-vip leader assigns it again)
+    local vip_manifest=""
+    if [ -f "$_CLEANUP_KUBE_VIP_MANIFEST" ]; then
+        vip_manifest=$(mktemp)
+        cp "$_CLEANUP_KUBE_VIP_MANIFEST" "$vip_manifest"
+    fi
     if command -v kubeadm >/dev/null 2>&1; then
         log_info "Resetting kubeadm cluster state..."
         if ! kubeadm reset -f; then
             log_error "kubeadm reset failed"
+            rm -f "$vip_manifest"
             return 1
         fi
+    fi
+    if [ -n "$vip_manifest" ]; then
+        if ! kube_vip_release "$vip_manifest"; then
+            rm -f "$vip_manifest"
+            return 1
+        fi
+        rm -f "$vip_manifest"
     fi
 }
 
@@ -146,9 +237,8 @@ cleanup_dry_run() {
     log_info "=== End of dry-run (no changes made) ==="
 }
 
-# confirm_cleanup and check_docker_warning are defined in lib/validation.sh
 
-# === Cleanup argument parsing (moved from lib/validation.sh) ===
+# === Cleanup argument parsing ===
 
 # Help message for cleanup
 show_cleanup_help() {
@@ -171,7 +261,7 @@ parse_cleanup_args() {
     while [ $# -gt 0 ]; do
         case $1 in
             --force)
-                # shellcheck disable=SC2034 # used by lib/validation.sh
+                # shellcheck disable=SC2034 # used by lib/core/validate.sh
                 FORCE=true
                 shift
                 ;;
@@ -204,7 +294,7 @@ parse_cleanup_args() {
     done
 }
 
-# === Cleanup confirmation (moved from lib/validation.sh) ===
+# === Cleanup confirmation ===
 
 # Confirmation prompt for cleanup
 confirm_cleanup() {
@@ -219,4 +309,50 @@ check_docker_warning() {
         log_warn "This cleanup script will reset containerd configuration but will NOT remove containerd."
         log_warn "Docker should continue to work normally after cleanup."
     fi
+}
+
+# === Runner ===
+
+_run_cleanup() {
+    _require_root "Cleanup"
+    parse_cleanup_args "$@"
+    _ensure_distro_detected
+    _dry_run_guard cleanup_dry_run
+    confirm_cleanup
+    _audit_start cleanup
+
+    CLEANUP_ERRORS=0
+    log_info "Starting Kubernetes cleanup..."
+    check_docker_warning
+    stop_kubernetes_services || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    # kubeadm reset removes the pod containers through the runtime, so the
+    # runtime must still run (CRI-O containers outlive a stopped CRI-O)
+    reset_kubernetes_cluster || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    stop_cri_services || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    remove_kubernetes_configs || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    restore_fstab_swap || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    restore_zram_swap || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_cni_conditionally || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_network_configs || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_kube_configs || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_crictl_config || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    reset_iptables || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    reset_containerd_config || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    _service_reload || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_installed_components || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    cleanup_kubernetes_completions || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    if [ "${REMOVE_HELM:-false}" = true ]; then
+        cleanup_helm || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    fi
+    if [ "${REMOVE_KUSTOMIZE:-false}" = true ]; then
+        cleanup_kustomize || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    fi
+
+    if [ "$CLEANUP_ERRORS" -gt 0 ]; then
+        log_error "Cleanup finished with $CLEANUP_ERRORS error(s). Check the output above for details."
+        exit 1
+    fi
+    _audit_done
+    log_info "Cleanup complete! Please reboot the system for all changes to take effect."
+    exit 0
 }

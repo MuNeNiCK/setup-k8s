@@ -1,0 +1,305 @@
+#!/bin/sh
+
+# SSH session management, remote execution, and known_hosts.
+# Credentials -> lib/remote/ssh.sh | Argument parsing -> lib/remote/args.sh | Transport -> lib/remote/ssh.sh
+
+# Check SSH connectivity and sudo for a list of nodes
+# Usage: _check_ssh_connectivity <node1> [node2] ...
+_check_ssh_connectivity() {
+    local ssh_failed=false
+    for node in "$@"; do
+        _parse_node_address "$node"
+        local _ssh_err
+        if _ssh_err=$(_deploy_ssh "$_NODE_USER" "$_NODE_HOST" "echo ok" 2>&1 >/dev/null); then
+            log_info "  [${_NODE_HOST}] SSH OK"
+            if [ "$_NODE_USER" != "root" ]; then
+                local _sudo_err
+                if ! _sudo_err=$(_deploy_ssh "$_NODE_USER" "$_NODE_HOST" "sudo -n true" 2>&1); then
+                    log_error "  [${_NODE_HOST}] sudo -n failed — NOPASSWD sudo required for ${_NODE_USER}"
+                    [ -n "$_sudo_err" ] && log_error "  [${_NODE_HOST}] ${_sudo_err}"
+                    ssh_failed=true
+                fi
+            fi
+        else
+            log_error "  [${_NODE_HOST}] SSH connection failed (${_NODE_USER}@${_NODE_HOST}:${DEPLOY_SSH_PORT})"
+            [ -n "$_ssh_err" ] && log_error "  [${_NODE_HOST}] ${_ssh_err}"
+            ssh_failed=true
+        fi
+    done
+    [ "$ssh_failed" = true ] && return 1
+    return 0
+}
+
+# --- Shared Node Name Resolution ---
+
+# Resolve a node's Kubernetes node name from its address.
+# 1) a node with exactly one matching address (InternalIP/Hostname/...);
+# 2) otherwise (no or several matches, e.g. nodes behind NAT sharing an
+#    address) the node whose name is the target's hostname.
+# Prints the name. Returns 0 when found, 1 when no node matches, 2 when the
+# node list could not be read (the API server did not answer).
+# Usage: _get_node_name <cp_user> <cp_host> <target_host>
+_get_node_name() {
+    local user="$1" host="$2" target_host="$3"
+    local pfx; pfx=$(_sudo_prefix "$user")
+    local stripped="${target_host#[}"
+    stripped="${stripped%]}"
+
+    local nodes_info="" attempt=0
+    while [ "$attempt" -lt 3 ]; do
+        if nodes_info=$(_deploy_ssh "$user" "$host" "${pfx}kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o jsonpath='{range .items[*]}{.metadata.name}{\" \"}{range .status.addresses[*]}{.address}{\" \"}{end}{\"\\n\"}{end}'" 2>/dev/null) && [ -n "$nodes_info" ]; then
+            break
+        fi
+        nodes_info=""
+        attempt=$((attempt + 1))
+        sleep 3
+    done
+    if [ -z "$nodes_info" ]; then
+        log_error "  Could not list the cluster nodes from ${host}"
+        return 2
+    fi
+
+    local matches
+    matches=$(printf '%s\n' "$nodes_info" | awk -v a="$stripped" -v b="$target_host" '
+        { for (i = 2; i <= NF; i++) if ($i == a || $i == b) { print $1; break } }')
+    if [ "$(printf '%s\n' "$matches" | grep -c .)" -eq 1 ]; then
+        echo "$matches"
+        return 0
+    fi
+
+    # By hostname, using the SSH address of the node as given on the command line
+    local target_user target_actual_host _node_entry _i=0 _cnt
+    _parse_node_address "$target_host"
+    target_user="$_NODE_USER" target_actual_host="$_NODE_HOST"
+    _cnt=$(_csv_count "$_DEPLOY_ALL_NODES")
+    while [ "$_i" -lt "$_cnt" ]; do
+        _node_entry=$(_csv_get "$_DEPLOY_ALL_NODES" "$_i")
+        case "${_node_entry#*@}" in
+            "$target_host"|"$stripped")
+                _parse_node_address "$_node_entry"
+                target_user="$_NODE_USER" target_actual_host="$_NODE_HOST"
+                break
+                ;;
+        esac
+        _i=$((_i + 1))
+    done
+    local remote_hostname
+    remote_hostname=$(_deploy_ssh "$target_user" "$target_actual_host" "hostname" 2>/dev/null | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]') || remote_hostname=""
+    if [ -n "$remote_hostname" ] && printf '%s\n' "$nodes_info" | awk '{print $1}' | grep -qxF "$remote_hostname"; then
+        echo "$remote_hostname"
+        return 0
+    fi
+    return 1
+}
+
+# --- Remote temp directory ---
+
+# Create a secure temp directory on a remote node.
+# Usage: _create_remote_tmpdir <user> <host>
+# Output: absolute path on stdout; returns 1 on failure.
+_create_remote_tmpdir() {
+    local user="$1" host="$2"
+    local rdir
+    rdir=$(_deploy_ssh "$user" "$host" "d=\$(mktemp -d) && chmod 700 \"\$d\" && echo \"\$d\"") || true
+    rdir=$(echo "$rdir" | tr -d '[:space:]')
+    if [ -z "$rdir" ]; then
+        log_error "[$host] Failed to create remote temp directory"
+        return 1
+    fi
+    case "$rdir" in
+        /*) ;;
+        *)
+            log_error "[$host] Failed to create remote temp directory (got: '${rdir}')"
+            return 1
+            ;;
+    esac
+    echo "$rdir"
+}
+
+# --- Remote Execution ---
+
+# Execute a command on a remote node via nohup + polling.
+# The command runs detached (it survives a dropped SSH connection) and writes
+# its exit status atomically (temp file + mv) when it ends. Each poll reports
+# "done", "running" (with the last log line), or "gone" when the process
+# ended without an exit status (killed, OOM, reboot), which fails at once
+# instead of waiting for the timeout.
+# Usage: _deploy_exec_remote <user> <host> <description> <command>
+_deploy_exec_remote() {
+    local user="$1" host="$2" desc="$3" cmd="$4"
+
+    log_info "[$host] Starting: $desc"
+
+    local remote_dir
+    if ! remote_dir=$(_create_remote_tmpdir "$user" "$host"); then
+        return 1
+    fi
+
+    local remote_script="${remote_dir}/run.sh"
+    local log_file="${remote_dir}/run.log"
+    local exit_file="${remote_dir}/run.exit"
+    local pid_file="${remote_dir}/run.pid"
+
+    # Write command to remote script via stdin
+    if ! printf '%s\n' "$cmd" | _deploy_ssh "$user" "$host" "cat > '$remote_script' && chmod 700 '$remote_script'"; then
+        log_error "[$host] Failed to upload remote script"
+        _deploy_ssh "$user" "$host" "rm -rf '$remote_dir'" >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    # Launch detached; the exit status appears only when complete
+    if ! _deploy_ssh "$user" "$host" "nohup sh -c 'sh \"$remote_script\" > \"$log_file\" 2>&1; echo \$? > \"$exit_file.tmp\" && mv \"$exit_file.tmp\" \"$exit_file\"' </dev/null >/dev/null 2>&1 & echo \$! > '$pid_file'"; then
+        log_error "[$host] Failed to launch remote command"
+        _deploy_ssh "$user" "$host" "rm -rf '$remote_dir'" >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    # Poll for completion
+    local poll="if [ -f '$exit_file' ]; then echo done; elif kill -0 \"\$(cat '$pid_file' 2>/dev/null)\" 2>/dev/null; then echo running; tail -n 1 '$log_file' 2>/dev/null; else echo gone; fi"
+    local elapsed=0 state="" reply="" _last_poll_err=""
+    while [ "$elapsed" -lt "$DEPLOY_REMOTE_TIMEOUT" ]; do
+        sleep "$DEPLOY_POLL_INTERVAL"
+        elapsed=$((elapsed + DEPLOY_POLL_INTERVAL))
+        if ! reply=$(_deploy_ssh "$user" "$host" "$poll" 2>&1); then
+            # Transient SSH failure: keep waiting
+            _last_poll_err="$reply"
+            continue
+        fi
+        state=$(printf '%s\n' "$reply" | head -n 1)
+        case "$state" in
+            done) break ;;
+            gone)
+                # The status may have been written between the two tests
+                if _deploy_ssh "$user" "$host" "test -f '$exit_file'" >/dev/null 2>&1; then
+                    state="done"
+                fi
+                break
+                ;;
+            running)
+                reply=$(printf '%s\n' "$reply" | sed -n '2p')
+                [ -n "$reply" ] && log_info "[$host] [${elapsed}s] $reply"
+                ;;
+        esac
+    done
+
+    if [ "$state" != "done" ]; then
+        if [ "$state" = gone ]; then
+            log_error "[$host] The remote command ended without an exit status (killed or the node restarted): $desc"
+        else
+            log_error "[$host] Timeout after ${DEPLOY_REMOTE_TIMEOUT}s: $desc"
+            [ -n "$_last_poll_err" ] && log_error "[$host] Last poll error: $_last_poll_err"
+        fi
+        log_error "[$host] Remote log:"
+        _deploy_ssh "$user" "$host" "cat '$log_file'" || true
+        _deploy_ssh "$user" "$host" "rm -rf '$remote_dir'" >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    # Retrieve exit code
+    local remote_exit
+    remote_exit=$(_deploy_ssh "$user" "$host" "cat '$exit_file'" 2>/dev/null | tr -d '[:space:]') || remote_exit=""
+
+    if ! echo "$remote_exit" | grep -qE '^[0-9]+$'; then
+        log_error "[$host] Invalid exit code from remote: '$remote_exit'"
+        _deploy_ssh "$user" "$host" "rm -rf '$remote_dir'" >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    if [ "$remote_exit" -ne 0 ]; then
+        log_error "[$host] Failed (exit $remote_exit): $desc"
+        log_error "[$host] Remote log:"
+        _deploy_ssh "$user" "$host" "cat '$log_file'" || true
+        _deploy_ssh "$user" "$host" "rm -rf '$remote_dir'" >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    # Clean up remote temp directory
+    _deploy_ssh "$user" "$host" "rm -rf '$remote_dir'" >/dev/null 2>&1 || true
+
+    log_info "[$host] Completed: $desc"
+    return 0
+}
+
+# --- Remote session initialization ---
+
+# Standard initialization for remote-mode commands.
+# Sets _DEPLOY_ALL_NODES, checks SSH connectivity.
+# Usage: _init_remote_session <label> <nodes_csv>
+_init_remote_session() {
+    local label="$1"
+    _DEPLOY_ALL_NODES="$2"
+    _log_ssh_host_key_policy
+    _setup_session_known_hosts "$label"
+    if ! _check_all_nodes_connectivity; then
+        log_error "SSH connectivity check failed. Aborting."
+        return 1
+    fi
+}
+
+# --- Session-scoped known_hosts management ---
+
+# Log SSH host key policy for user awareness.
+# Usage: _log_ssh_host_key_policy
+_log_ssh_host_key_policy() {
+    if [ "${DEPLOY_SSH_HOST_KEY_CHECK}" = "accept-new" ]; then
+        log_info "SSH host key check: accept-new (TOFU)."
+    elif [ "${DEPLOY_SSH_HOST_KEY_CHECK}" = "yes" ] && [ -z "$DEPLOY_SSH_KNOWN_HOSTS_FILE" ]; then
+        log_info "SSH strict host key checking is enabled."
+        log_info "Provide known_hosts with --ssh-known-hosts to proceed:"
+        log_info "  ssh-keyscan -H <node-ip> >> known_hosts"
+    fi
+}
+
+# Check SSH connectivity to all nodes in _DEPLOY_ALL_NODES (CSV).
+# Usage: _check_all_nodes_connectivity
+_CONN_NODES=""
+_collect_conn_node() { _CONN_NODES="${_CONN_NODES} $1"; }
+_check_all_nodes_connectivity() {
+    _CONN_NODES=""
+    _csv_for_each "$_DEPLOY_ALL_NODES" _collect_conn_node
+    # shellcheck disable=SC2086 # intentional word splitting
+    _check_ssh_connectivity $_CONN_NODES
+}
+
+# Create a session-scoped known_hosts file, optionally seeded from a user-provided file.
+# Registers a cleanup handler to remove it on exit.
+# Usage: _setup_session_known_hosts <label>
+_setup_session_known_hosts() {
+    local label="${1:-session}"
+    _DEPLOY_KNOWN_HOSTS=$(mktemp "/tmp/${label}-known-hosts-XXXXXX")
+    chmod 600 "$_DEPLOY_KNOWN_HOSTS"
+    if [ -n "$DEPLOY_SSH_KNOWN_HOSTS_FILE" ] && [ -f "$DEPLOY_SSH_KNOWN_HOSTS_FILE" ]; then
+        cp "$DEPLOY_SSH_KNOWN_HOSTS_FILE" "$_DEPLOY_KNOWN_HOSTS"
+    fi
+    if [ -n "$DEPLOY_SSH_PASSWORD" ]; then
+        _setup_ssh_askpass
+    fi
+    _push_cleanup _teardown_session_known_hosts
+}
+
+# Clean up session-scoped known_hosts file and askpass script.
+# Persists to DEPLOY_PERSIST_KNOWN_HOSTS path if set.
+# Usage: _teardown_session_known_hosts
+_teardown_session_known_hosts() {
+    if [ -n "${DEPLOY_PERSIST_KNOWN_HOSTS:-}" ] && [ -n "$_DEPLOY_KNOWN_HOSTS" ] && [ -f "$_DEPLOY_KNOWN_HOSTS" ]; then
+        _persist_known_hosts "$DEPLOY_PERSIST_KNOWN_HOSTS"
+    fi
+    rm -f "$_DEPLOY_KNOWN_HOSTS"
+    _DEPLOY_KNOWN_HOSTS=""
+    _teardown_ssh_askpass
+}
+
+# --- known_hosts persistence ---
+
+# Persist session known_hosts to a user-specified path for reuse.
+# Usage: _persist_known_hosts <dest_path>
+_persist_known_hosts() {
+    local dest="$1"
+    if [ -z "$_DEPLOY_KNOWN_HOSTS" ] || [ ! -f "$_DEPLOY_KNOWN_HOSTS" ]; then
+        log_warn "No session known_hosts to persist"
+        return 0
+    fi
+    cp "$_DEPLOY_KNOWN_HOSTS" "$dest"
+    chmod 600 "$dest"
+    log_info "Session known_hosts persisted to: $dest"
+}

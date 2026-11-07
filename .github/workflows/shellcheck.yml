@@ -2,9 +2,10 @@ name: ShellCheck & Unit Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,29 +14,44 @@ jobs:
   shellcheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install ShellCheck 0.11.0
         run: |
           curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz" | tar -xJ
           sudo cp shellcheck-v0.11.0/shellcheck /usr/local/bin/
           rm -rf shellcheck-v0.11.0
           shellcheck --version
-      - name: Run ShellCheck on entry scripts
-        run: shellcheck -s sh -S warning setup-k8s.sh
-      - name: Run ShellCheck on common modules
-        run: shellcheck -s sh -S warning lib/*.sh
-      - name: Run ShellCheck on command modules
-        run: shellcheck -s sh -S warning commands/*.sh
-      - name: Run ShellCheck on distro modules
-        run: shellcheck -s sh -S warning distros/**/*.sh
-      - name: Run ShellCheck on test runners
-        run: shellcheck -s bash -S warning test/scenarios/*.sh test/unit/run.sh test/lib/*.sh
-      - name: Run ShellCheck on unit test modules
-        run: shellcheck -s bash -S warning test/unit/*.sh
+      - name: Run ShellCheck on runtime scripts
+        run: shellcheck -s sh -S warning setup-k8s.sh scripts/*.sh lib/*/*.sh commands/*.sh
+      - name: Run ShellCheck on test scripts
+        run: shellcheck -s bash -S warning test/scenarios/*.sh test/lib/*.sh test/unit/helpers/*.bash
+      - name: Run ShellCheck on unit tests
+        run: shellcheck -S warning test/unit/*/*.bats
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install actionlint 1.7.12
+        run: |
+          curl -fsSL -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+          sudo install -m 0755 actionlint /usr/local/bin/actionlint
+          rm -f actionlint actionlint.tar.gz
+      - name: Lint workflows
+        # Uses the ShellCheck on the runner image for run: scripts
+        run: actionlint
 
   unit-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install bats-core 1.14.0
+        run: |
+          git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+          sudo /tmp/bats-core/install.sh /usr/local
+          bats --version
       - name: Run unit tests
-        run: bash test/unit/run.sh
+        run: bats -r test/unit

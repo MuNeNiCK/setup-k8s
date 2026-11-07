@@ -107,54 +107,35 @@ _cleanup_cp_worker() {
     cleanup_ssh_key
 }
 
+# Label attached to every test VM container: the PID of the scenario process
+# that owns it. Containers whose owner is still running belong to a parallel
+# test run and are left alone.
+TEST_OWNER_LABEL="setup-k8s-test-owner=$$"
+
 # Stop orphaned containers by label (shared across test runners)
 # Usage: cleanup_orphaned_containers <label>
 cleanup_orphaned_containers() {
-    local label=$1
+    local label=$1 cid owner
     docker ps -q --filter "label=managed-by=$label" 2>/dev/null | while read -r cid; do
+        owner=$(docker inspect --format '{{index .Config.Labels "setup-k8s-test-owner"}}' "$cid" 2>/dev/null || true)
+        if [ -n "$owner" ] && [ "$owner" != "$$" ] && kill -0 "$owner" 2>/dev/null; then
+            continue
+        fi
         log_warn "Stopping orphaned container: $(docker inspect --format '{{.Name}}' "$cid" 2>/dev/null | tr -d '/')"
         docker stop "$cid" >/dev/null 2>&1 || true
     done
 }
 
-# Generate a self-contained bundle script for bundled test execution.
-# Usage: _generate_bundle <entry_script> <bundle_path> [include_mode]
-#   entry_script:  path to the entry script (setup-k8s.sh)
+# Generate the single-file bundle (same as the release asset) for test execution.
+# Usage: _generate_bundle <entry_script> <bundle_path>
+#   entry_script:  path to the entry script (setup-k8s.sh) in the project root
 #   bundle_path:   output file path
-#   include_mode:  "true"/"all" to include all distro modules, "cleanup" for cleanup-only
 _generate_bundle() {
-    local entry_script="$1" bundle_path="$2" include_mode="${3:-all}"
+    local entry_script="$1" bundle_path="$2"
     local project_root
     project_root="$(cd "$(dirname "$entry_script")" && pwd)"
-    local _had_k8s_version=0 _saved_k8s_version=""
-    if [ "${K8S_VERSION+x}" ]; then
-        _had_k8s_version=1
-        _saved_k8s_version="$K8S_VERSION"
-    fi
-
-    # Source bootstrap (provides _COMMON_MODULES), variables (provides
-    # BUNDLE_COMMON_MODULES), and bundle (provides _generate_bundle_core)
-    if ! type -t _generate_bundle_core &>/dev/null; then
-        # Save caller's EXIT trap (bootstrap.sh unconditionally sets its own)
-        local _saved_exit_trap
-        _saved_exit_trap=$(trap -p EXIT)
-        source "${project_root}/lib/bootstrap.sh"
-        source "${project_root}/lib/variables.sh"
-        source "${project_root}/lib/bundle.sh"
-        # Restore caller's EXIT trap (or clear bootstrap's if caller had none)
-        if [ -n "$_saved_exit_trap" ]; then
-            eval "$_saved_exit_trap"
-        else
-            trap - EXIT
-        fi
-    fi
-    if [ "$_had_k8s_version" -eq 1 ]; then
-        K8S_VERSION="$_saved_k8s_version"
-    else
-        unset K8S_VERSION
-    fi
-
-    _generate_bundle_core "$bundle_path" "$entry_script" "$include_mode" "$project_root"
+    sh "$project_root/scripts/build.sh" "$bundle_path" "${SETUP_K8S_TEST_VERSION:-test}" >/dev/null
+    rm -f "${bundle_path}.sha256"
 }
 
 # Resolve latest stable Kubernetes minor version from dl.k8s.io.
@@ -204,7 +185,8 @@ poll_vm_command() {
             log_error "Container exited unexpectedly"
             return 1
         fi
-        if $ssh_func "test -f $exit_code_file" >/dev/null 2>&1; then
+        # Non-empty: the file exists before "echo \$? > file" has written to it
+        if $ssh_func "test -s $exit_code_file" >/dev/null 2>&1; then
             break
         fi
         local progress_line
@@ -360,6 +342,30 @@ cleanup_docker_network() {
 }
 
 # Start a VM container with static IP on the Docker network
+# Extra docker run arguments a distribution needs (printed one per line).
+# Alpine cloud images have no bash, sudo, or openssh: install them with an
+# additional cloud-init user-data file in the VM data directory.
+# Usage: _vm_distro_run_args <distro> <vm_data_dir>
+_vm_distro_run_args() {
+    case "$1" in
+        alpine-*)
+            cat > "$2/cloud-init-userdata.yaml" <<'CIEOF'
+#cloud-config
+packages:
+  - bash
+  - ca-certificates
+  - curl
+  - sudo
+  - openssh
+runcmd:
+  - ["sh", "-c", "rc-update add sshd default && rc-service sshd start"]
+CIEOF
+            printf '%s\n' -v "$2/cloud-init-userdata.yaml:/cloud-init-userdata.yaml:ro" \
+                -e "CLOUD_INIT_USER_DATA=/cloud-init-userdata.yaml"
+            ;;
+    esac
+}
+
 # Usage: start_vm <container_name> <static_ip> <host_ssh_port> <data_subdir> [label]
 start_vm() {
     local container_name=$1 static_ip=$2 host_ssh_port=$3 data_subdir=$4
@@ -371,11 +377,14 @@ start_vm() {
 
     local vm_data_dir="$VM_DATA_DIR/$data_subdir"
     mkdir -p "$vm_data_dir"
+    local -a distro_args=()
+    mapfile -t distro_args < <(_vm_distro_run_args "$DISTRO" "$vm_data_dir")
 
     log_info "Starting VM: $container_name (IP: $static_ip, SSH port: $host_ssh_port)"
     if ! docker run -d --rm \
         --name "$container_name" \
         --label "$label" \
+        --label "$TEST_OWNER_LABEL" \
         --network "$DOCKER_NETWORK" --ip "$static_ip" \
         --device /dev/kvm:/dev/kvm \
         -v "$vm_data_dir:/data" \
@@ -388,6 +397,7 @@ start_vm() {
         -e "MEMORY=$VM_MEMORY" \
         -e "CPUS=$VM_CPUS" \
         -e "DISK_SIZE=$VM_DISK_SIZE" \
+        "${distro_args[@]}" \
         "$DOCKER_VM_RUNNER_IMAGE" >/dev/null; then
         log_error "Failed to start container $container_name"
         return 1
@@ -410,15 +420,30 @@ setup_root_ssh() {
     local host_ssh_port=$1 label=$2
 
     log_info "[$label] Setting up root SSH access..."
+    # The login user may be set up for sudo or for doas (Alpine)
+    local esc
+    for esc in "sudo -n" "doas -n"; do
+        ssh "${SSH_OPTS[@]}" -p "$host_ssh_port" "$LOGIN_USER@localhost" "$esc true" >/dev/null 2>&1 && break
+    done
     ssh "${SSH_OPTS[@]}" -p "$host_ssh_port" "$LOGIN_USER@localhost" \
-        "sudo mkdir -p /root/.ssh && sudo cp ~/.ssh/authorized_keys /root/.ssh/ && sudo chmod 700 /root/.ssh && sudo chmod 600 /root/.ssh/authorized_keys" >/dev/null 2>&1
+        "$esc mkdir -p /root/.ssh && $esc cp ~/.ssh/authorized_keys /root/.ssh/ && $esc chmod 700 /root/.ssh && $esc chmod 600 /root/.ssh/authorized_keys" >/dev/null 2>&1
 
     if ssh "${SSH_OPTS[@]}" -p "$host_ssh_port" "root@localhost" "echo ok" >/dev/null 2>&1; then
         log_success "[$label] Root SSH access ready"
-    else
-        log_error "[$label] Root SSH access failed"
-        return 1
+        return 0
     fi
+
+    # OpenSSH refuses key logins for locked accounts ("!" in /etc/shadow,
+    # e.g. Alpine cloud images). "*" keeps password login disabled.
+    ssh "${SSH_OPTS[@]}" -p "$host_ssh_port" "$LOGIN_USER@localhost" \
+        "$esc sed -i 's/^root:![^:]*:/root:*:/' /etc/shadow" >/dev/null 2>&1 || true
+    local err
+    if err=$(ssh "${SSH_OPTS[@]}" -p "$host_ssh_port" "root@localhost" "echo ok" 2>&1 >/dev/null); then
+        log_success "[$label] Root SSH access ready (root account unlocked for key login)"
+        return 0
+    fi
+    log_error "[$label] Root SSH access failed: ${err}"
+    return 1
 }
 
 # SSH to a VM as root
@@ -532,6 +557,10 @@ _test_preamble() {
     log_info "=== ${test_name} E2E Test ==="
     log_info "Distro: $distro"
     mkdir -p results/logs "$VM_DATA_DIR"
+    # Host-side commands (deploy, upgrade, remove, ...) run the same single-file
+    # bundle that is published as the release asset.
+    HOST_BUNDLE="$VM_DATA_DIR/setup-k8s-host-$$.sh"
+    _generate_bundle "$SETUP_K8S_SCRIPT" "$HOST_BUNDLE"
 }
 
 # Evaluate test result and handle cleanup/diagnostics.
@@ -557,10 +586,20 @@ _test_result() {
 
 # Timeout-guarded command execution. Sets the named variable to the exit code.
 # Usage: run_with_timeout <var_name> <log_file> <command...>
+# Working directory of host-side commands for this run (deploy writes
+# ./kubeconfig there; runs must not share it)
+host_workdir() {
+    [ -n "${_HOST_WORKDIR:-}" ] || _HOST_WORKDIR="$VM_DATA_DIR/host-$$"
+    mkdir -p "$_HOST_WORKDIR"
+    echo "$_HOST_WORKDIR"
+}
+
 run_with_timeout() {
     local _var_name=$1 _log_file=$2; shift 2
-    local _exit_code=0
-    if timeout "$TIMEOUT_TOTAL" "$@" 2>&1 | tee -a "$_log_file"; then _exit_code=0
+    local _exit_code=0 _dir
+    case "$_log_file" in /*) ;; *) _log_file="$PWD/$_log_file" ;; esac
+    _dir=$(host_workdir)
+    if (cd "$_dir" && timeout "$TIMEOUT_TOTAL" "$@") 2>&1 | tee -a "$_log_file"; then _exit_code=0
     else _exit_code=$?; [ "$_exit_code" -eq 124 ] && log_error "Timed out after ${TIMEOUT_TOTAL}s"; fi
     eval "${_var_name}=${_exit_code}"
 }

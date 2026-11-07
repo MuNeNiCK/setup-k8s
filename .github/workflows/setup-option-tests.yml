@@ -1,14 +1,19 @@
 name: Setup Option Tests
 
+# Every pull request runs the smoke test (a required check). The full option
+# matrix runs before a release (pull requests into main) and on demand.
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:
   pull_request:
-    branches: [main]
+    branches: [main, develop]
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  # One run per pull request (per branch for manual runs); a newer push replaces it
+  group: setup-option-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # PR smoke test: single Ubuntu 24.04 offline test for fast merge-time feedback
@@ -18,7 +23,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run PR smoke test (Ubuntu 24.04 offline)
         working-directory: test
@@ -28,7 +33,7 @@ jobs:
 
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: logs-pr-smoke-test
           path: |
@@ -42,20 +47,20 @@ jobs:
           sudo rm -rf test/data
           sudo rm -rf test/results
 
-  # Setup option matrix: runs on push and manual dispatch only
+  # Setup option matrix: pull requests into main (before a release) and manual runs
   setup-option-tests:
-    if: github.event_name != 'pull_request'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.base_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: ubuntu2404-online-latest
-            distro: ubuntu-24.04-cloud-amd64
-            k8s_version: ""
-            setup_args: ""
-            test_mode: "online"
+          # The supported minors are listed in test/matrices/kubernetes-minors.txt
+          # (each is covered here); an empty k8s_version installs the latest
+          # stable release.
           - name: ubuntu2404-default
             distro: ubuntu-24.04-cloud-amd64
             k8s_version: ""
@@ -64,9 +69,13 @@ jobs:
             distro: ubuntu-24.04-cloud-amd64
             k8s_version: ""
             setup_args: "--proxy-mode ipvs --cri crio"
-          - name: ubuntu2404-nftables-k130
+          - name: ubuntu2404-iptables-k135
             distro: ubuntu-24.04-cloud-amd64
-            k8s_version: "1.30"
+            k8s_version: "1.35"
+            setup_args: "--proxy-mode iptables"
+          - name: ubuntu2404-nftables-patch-version
+            distro: ubuntu-24.04-cloud-amd64
+            k8s_version: "1.36.5"
             setup_args: "--proxy-mode nftables"
           - name: ubuntu2404-helm-completion
             distro: ubuntu-24.04-cloud-amd64
@@ -83,7 +92,7 @@ jobs:
           - name: ubuntu2404-network-config
             distro: ubuntu-24.04-cloud-amd64
             k8s_version: ""
-            setup_args: "--pod-network-cidr 10.244.0.0/16 --service-cidr 10.96.0.0/12 --apiserver-advertise-address __VM_IP__ --control-plane-endpoint __VM_IP__:6443 --api-server-extra-sans setup-k8s.local,__VM_IP__ --kubelet-node-ip __VM_IP__"
+            setup_args: "--pod-network-cidr 10.244.0.0/16 --service-cidr 10.96.0.0/12 --apiserver-advertise-address __VM_IP__ --control-plane-endpoint __VM_IP__:6443 --apiserver-cert-extra-sans setup-k8s.local,__VM_IP__ --kubelet-node-ip __VM_IP__"
           - name: ubuntu2404-dualstack-cidrs
             distro: ubuntu-24.04-cloud-amd64
             k8s_version: ""
@@ -92,30 +101,30 @@ jobs:
             distro: ubuntu-24.04-cloud-amd64
             k8s_version: ""
             guest_ip6: "fd00:10:2::15/64"
-            setup_args: "--pod-network-cidr fd00:10:244::/48 --service-cidr fd00:20::/108 --apiserver-advertise-address __VM_IP6__ --control-plane-endpoint [__VM_IP6__]:6443 --api-server-extra-sans setup-k8s.local,__VM_IP6__ --kubelet-node-ip __VM_IP6__"
+            setup_args: "--pod-network-cidr fd00:10:244::/48 --service-cidr fd00:20::/108 --apiserver-advertise-address __VM_IP6__ --control-plane-endpoint [__VM_IP6__]:6443 --apiserver-cert-extra-sans setup-k8s.local,__VM_IP6__ --kubelet-node-ip __VM_IP6__"
           - name: ubuntu2404-kubeadm-patch
             distro: ubuntu-24.04-cloud-amd64
             k8s_version: ""
             setup_args: "--kubeadm-config-patch __KUBEADM_PATCH__"
           - name: ubuntu2404-swap-enabled
             distro: ubuntu-24.04-cloud-amd64
-            k8s_version: "1.32"
+            k8s_version: ""
             setup_args: "--swap-enabled"
-          - name: ubuntu2204-custom-k8s
+          - name: ubuntu2204-k136
             distro: ubuntu-22.04-cloud-amd64
-            k8s_version: "1.31"
+            k8s_version: "1.36"
             setup_args: "--install-helm false"
-          - name: ubuntu2204-cri-containerd-ipvs
+          - name: ubuntu2204-containerd-ipvs
             distro: ubuntu-22.04-cloud-amd64
             k8s_version: ""
             setup_args: "--proxy-mode ipvs --cri containerd"
-          - name: ubuntu2204-legacy-k128
-            distro: ubuntu-22.04-cloud-amd64
-            k8s_version: "1.28"
-            setup_args: ""
+          - name: ubuntu2604-crio-k135
+            distro: ubuntu-26.04-cloud-amd64
+            k8s_version: "1.35"
+            setup_args: "--cri crio"
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run setup-k8s option test
         working-directory: test
@@ -123,16 +132,12 @@ jobs:
           SETUP_ARGS: ${{ matrix.setup_args }}
           K8S_VERSION: ${{ matrix.k8s_version }}
           DISTRO: ${{ matrix.distro }}
-          TEST_MODE: ${{ matrix.test_mode || 'offline' }}
           VM_GUEST_IP6: ${{ matrix.guest_ip6 || '' }}
         run: |
           set -euo pipefail
-          # Use test_mode from matrix (defaults to offline)
-          mode_flag="--${TEST_MODE}"
-
-          k8s_flag=""
+          k8s_flag=()
           if [ -n "$K8S_VERSION" ]; then
-            k8s_flag="--k8s-version $K8S_VERSION"
+            k8s_flag=(--k8s-version "$K8S_VERSION")
           fi
 
           setup_flag=()
@@ -140,11 +145,11 @@ jobs:
             setup_flag=(--setup-args "$SETUP_ARGS")
           fi
 
-          ./scenarios/init-cleanup.sh $mode_flag $k8s_flag "${setup_flag[@]}" "$DISTRO"
+          ./scenarios/init-cleanup.sh --offline "${k8s_flag[@]}" "${setup_flag[@]}" "$DISTRO"
 
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: logs-${{ matrix.name }}
           path: |

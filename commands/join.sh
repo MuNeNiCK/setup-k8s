@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # === Cluster Join (join subcommand) ===
-# Depends on: lib/helpers.sh (deploy_kube_vip, _verify_kube_vip_kubeconfig, _configure_kubectl)
+# Depends on: lib/components/kube_vip.sh (deploy_kube_vip, _verify_kube_vip_kubeconfig, _configure_kubectl)
 
 # Join node to cluster
 join_cluster() {
@@ -10,7 +10,7 @@ join_cluster() {
     # Deploy kube-vip on additional control-plane nodes
     # Skip VIP pre-add to avoid conflicts with the existing VIP leader
     if [ "${JOIN_AS_CONTROL_PLANE:-false}" = true ] && [ -n "$HA_VIP_ADDRESS" ]; then
-        deploy_kube_vip --skip-vip-preadd
+        deploy_kube_vip --skip-vip-preadd || return 1
     fi
 
     _configure_kubelet_node_ip
@@ -25,6 +25,9 @@ join_cluster() {
     # HA cluster: join as control-plane node
     if [ "${JOIN_AS_CONTROL_PLANE:-false}" = true ]; then
         set -- "$@" --control-plane --certificate-key "$CERTIFICATE_KEY"
+    fi
+    if [ -n "${KUBEADM_PATCHES_DIR:-}" ]; then
+        set -- "$@" --patches "$KUBEADM_PATCHES_DIR"
     fi
 
     local join_exit=0

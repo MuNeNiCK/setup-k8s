@@ -21,8 +21,8 @@ Run preflight checks to verify system requirements before cluster init/join.
 Options:
   --mode MODE           Check mode: init or join (default: init)
   --cri RUNTIME         Container runtime to check (containerd or crio). Default: containerd
-  --proxy-mode MODE     Proxy mode to check (iptables, ipvs, or nftables). Default: iptables
-  --kubernetes-version VER Target Kubernetes minor version (e.g., 1.36)
+  --proxy-mode MODE     Proxy mode to check (auto, iptables, ipvs, or nftables). Default: auto
+  --kubernetes-version VER Target Kubernetes version (e.g., 1.37)
   --preflight-strict    Treat warnings as failures
   --dry-run             Show what checks would be performed
   --help, -h            Display this help message
@@ -35,10 +35,10 @@ Checks performed:
   - Kernel modules (overlay, br_netfilter, proxy-mode specific)
   - IP forwarding
   - Container runtime installation (info only)
-  - containerd v2 readiness for Kubernetes 1.36+ (warning only)
+  - containerd 2 readiness (fails when the target version requires containerd 2, warns otherwise)
   - Swap state (warning only)
   - cgroups v2
-  - SELinux state (warning only)
+  - SELinux mode and user namespace support (info only)
   - AppArmor state (info only)
   - Unattended upgrades detection (warning only)
   - Existing cluster detection (init only)
@@ -71,14 +71,17 @@ parse_preflight_args() {
                 ;;
             --proxy-mode)
                 _require_value $# "$1" "${2:-}"
-                PREFLIGHT_PROXY_MODE="$2"
+                case "$2" in
+                    auto|iptables|ipvs|nftables) PREFLIGHT_PROXY_MODE="$2" ;;
+                    *) log_error "--proxy-mode must be auto, iptables, ipvs, or nftables"; exit 1 ;;
+                esac
                 shift 2
                 ;;
             --kubernetes-version)
                 _require_value $# "$1" "${2:-}"
                 PREFLIGHT_K8S_VERSION="$2"
-                if ! echo "$PREFLIGHT_K8S_VERSION" | grep -qE '^[0-9]+\.[0-9]+$'; then
-                    log_error "--kubernetes-version for preflight must be MAJOR.MINOR (e.g., 1.36)"
+                if ! echo "$PREFLIGHT_K8S_VERSION" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+                    log_error "--kubernetes-version for preflight must be MAJOR.MINOR or MAJOR.MINOR.PATCH (e.g., 1.37)"
                     exit 1
                 fi
                 shift 2
@@ -255,32 +258,29 @@ _preflight_check_cri() {
     esac
 }
 
+# kubelet supports containerd 1.x only below the containerd-v2-required
+# minimum: fail for target versions at or above it, warn otherwise.
 _preflight_check_containerd_v2_readiness() {
-    local version major
+    local min version major
+    min=$(k8s_feature_min containerd-v2-required)
     version=$(containerd --version 2>/dev/null | awk '{print $3}' | sed 's/^v//') || version=""
     if [ -z "$version" ]; then
-        _preflight_record_warn "Cannot determine containerd version; Kubernetes 1.36+ requires containerd 2.0+"
+        _preflight_record_warn "Cannot determine containerd version; Kubernetes ${min}+ requires containerd 2.0+"
         return
     fi
 
     major=$(echo "$version" | cut -d. -f1)
     if ! echo "$major" | grep -qE '^[0-9]+$'; then
-        _preflight_record_warn "Cannot parse containerd version '$version'; Kubernetes 1.36+ requires containerd 2.0+"
+        _preflight_record_warn "Cannot parse containerd version '$version'; Kubernetes ${min}+ requires containerd 2.0+"
         return
     fi
 
-    if [ "$major" -lt 2 ]; then
-        if [ -n "$PREFLIGHT_K8S_VERSION" ]; then
-            local k8s_minor
-            k8s_minor=$(echo "$PREFLIGHT_K8S_VERSION" | cut -d. -f2)
-            if [ "$k8s_minor" -ge 36 ]; then
-                _preflight_record_warn "containerd ${version} detected; upgrade to containerd 2.0+ before Kubernetes ${PREFLIGHT_K8S_VERSION}"
-            fi
-        else
-            _preflight_record_warn "containerd ${version} detected; Kubernetes 1.36+ requires containerd 2.0+"
-        fi
+    if [ "$major" -ge 2 ]; then
+        _preflight_record_pass "containerd ${version} is supported by Kubernetes ${min}+"
+    elif [ -n "$PREFLIGHT_K8S_VERSION" ] && k8s_supports containerd-v2-required "$PREFLIGHT_K8S_VERSION"; then
+        _preflight_record_fail "containerd ${version} is not supported by Kubernetes ${PREFLIGHT_K8S_VERSION}; upgrade to containerd 2.0+"
     else
-        _preflight_record_pass "containerd ${version} is ready for Kubernetes 1.36+"
+        _preflight_record_warn "containerd ${version} detected; Kubernetes ${min}+ requires containerd 2.0+"
     fi
 }
 
@@ -321,6 +321,8 @@ _preflight_check_existing_cluster() {
     fi
 }
 
+# Report the SELinux mode. setup-k8s does not change it; container-selinux is
+# installed on RPM-based systems so the runtimes work in Enforcing mode.
 _preflight_check_selinux() {
     if ! command -v getenforce >/dev/null 2>&1; then
         # SELinux not installed, nothing to check
@@ -328,20 +330,27 @@ _preflight_check_selinux() {
     fi
     local mode
     mode=$(getenforce 2>/dev/null) || mode="unknown"
-    case "$mode" in
-        Enforcing)
-            _preflight_record_warn "SELinux is in Enforcing mode (may require additional configuration for K8s)"
-            ;;
-        Permissive)
-            _preflight_record_pass "SELinux is in Permissive mode"
-            ;;
-        Disabled)
-            _preflight_record_pass "SELinux is disabled"
-            ;;
-        *)
-            _preflight_record_warn "Cannot determine SELinux state: $mode"
-            ;;
-    esac
+    log_info "  [INFO] SELinux mode: ${mode}"
+    if [ "$mode" = Enforcing ] && k8s_supports selinux-mount "${PREFLIGHT_K8S_VERSION:-$(k8s_feature_min selinux-mount)}"; then
+        log_info "  [INFO] Kubernetes $(k8s_feature_min selinux-mount)+ relabels volumes with mount options (SELinuxMount);"
+        log_info "         Pods that share a volume need the same SELinux label (see the Kubernetes SELinuxMount notes)"
+    fi
+}
+
+# Report whether Pods can use user namespaces (hostUsers: false): Linux 6.3+
+# with idmap mounts and a runtime that supports them.
+_preflight_check_user_namespaces() {
+    local reason=""
+    if ! _kernel_version_ge 6.3; then
+        reason="kernel $(_kernel_release) (6.3+ required)"
+    elif [ -r /proc/sys/user/max_user_namespaces ] && [ "$(cat /proc/sys/user/max_user_namespaces)" = 0 ]; then
+        reason="user.max_user_namespaces is 0"
+    fi
+    if [ -n "$reason" ]; then
+        log_info "  [INFO] User namespaces for Pods: not available (${reason})"
+    else
+        log_info "  [INFO] User namespaces for Pods: available (hostUsers: false; GA in Kubernetes $(k8s_feature_min user-namespaces))"
+    fi
 }
 
 _preflight_check_apparmor() {
@@ -398,6 +407,10 @@ _preflight_check_connectivity() {
 # --- Main entry points ---
 
 preflight_local() {
+    if [ "$PREFLIGHT_PROXY_MODE" = auto ]; then
+        PREFLIGHT_PROXY_MODE=$(_resolve_auto_proxy_mode "$PREFLIGHT_K8S_VERSION")
+        log_info "Proxy mode auto resolves to ${PREFLIGHT_PROXY_MODE} on this node"
+    fi
     log_info "=== Preflight Checks ==="
     log_info "Mode: $PREFLIGHT_MODE | CRI: $PREFLIGHT_CRI | Proxy mode: $PREFLIGHT_PROXY_MODE"
     [ -n "$PREFLIGHT_K8S_VERSION" ] && log_info "Target Kubernetes version: $PREFLIGHT_K8S_VERSION"
@@ -417,6 +430,7 @@ preflight_local() {
     _preflight_check_swap
     _preflight_check_cgroups
     _preflight_check_selinux
+    _preflight_check_user_namespaces
     _preflight_check_apparmor
     _preflight_check_unattended_upgrades
     _preflight_check_existing_cluster
@@ -465,11 +479,11 @@ preflight_dry_run() {
     log_info "  6. IPv4 forwarding"
     log_info "  7. Container runtime ($PREFLIGHT_CRI) installation status"
     if [ "$PREFLIGHT_CRI" = "containerd" ]; then
-        log_info "     containerd v2 readiness for Kubernetes 1.36+"
+        log_info "     containerd 2 readiness for Kubernetes $(k8s_feature_min containerd-v2-required)+"
     fi
     log_info "  8. Swap state"
     log_info "  9. cgroups v2"
-    log_info "  10. SELinux state"
+    log_info "  10. SELinux mode and user namespace support (info)"
     log_info "  11. AppArmor state"
     log_info "  12. Unattended upgrades detection"
     if [ "$PREFLIGHT_MODE" = "init" ]; then
@@ -480,4 +494,14 @@ preflight_dry_run() {
         log_info "  Strict mode: warnings will be treated as failures"
     fi
     log_info "=== End of dry-run (no changes made) ==="
+}
+
+# === Runner ===
+
+_run_preflight() {
+    _require_root "Preflight checks"
+    parse_preflight_args "$@"
+    _dry_run_guard preflight_dry_run
+    preflight_local
+    exit $?
 }

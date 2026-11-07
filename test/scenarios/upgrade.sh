@@ -33,6 +33,7 @@ DISTRO="${DISTRO:-ubuntu-24.04-cloud-amd64}"
 FROM_VERSION=""  # MAJOR.MINOR for deploy (e.g., 1.32)
 TO_VERSION=""    # MAJOR.MINOR.PATCH for upgrade (e.g., 1.33.2)
 UPGRADE_EXTRA_ARGS=()
+DEPLOY_EXTRA_ARGS=()
 # Common defaults from vm_harness.sh: VM_MEMORY, VM_CPUS, VM_DISK_SIZE, TIMEOUT_TOTAL, SSH_READY_TIMEOUT
 
 # Docker network
@@ -59,6 +60,7 @@ Options:
   --from-version <ver>    Initial K8s version MAJOR.MINOR (e.g., 1.32)
   --to-version <ver>      Target K8s version MAJOR.MINOR.PATCH (e.g., 1.33.2)
   --upgrade-args ARGS     Extra args for setup-k8s.sh upgrade
+  --deploy-args ARGS      Extra args for setup-k8s.sh deploy (e.g. "--cri crio")
   --memory <MB>           VM memory (default: $VM_MEMORY)
   --cpus <count>          VM CPUs (default: $VM_CPUS)
   --disk-size <size>      VM disk size (default: $VM_DISK_SIZE)
@@ -141,7 +143,7 @@ run_upgrade_test() {
     # ===================================================================
     log_info "=== Phase 1: Deploy cluster with v${FROM_VERSION} ==="
     local deploy_cmd=(
-        bash "$SETUP_K8S_SCRIPT" deploy
+        sh "$HOST_BUNDLE" deploy
         --control-planes "$CP_DOCKER_IP"
         --workers "$WORKER_DOCKER_IP"
         --ssh-user root
@@ -150,6 +152,7 @@ run_upgrade_test() {
         --ssh-host-key-check accept-new
         --kubernetes-version "$FROM_VERSION"
         --control-plane-endpoint "${CP_DOCKER_IP}:6443"
+        "${DEPLOY_EXTRA_ARGS[@]}"
     )
     log_info "Deploy command: ${deploy_cmd[*]}"
 
@@ -172,7 +175,7 @@ run_upgrade_test() {
     # ===================================================================
     log_info "=== Phase 2: Upgrade cluster to v${TO_VERSION} ==="
     local upgrade_cmd=(
-        bash "$SETUP_K8S_SCRIPT" upgrade
+        sh "$HOST_BUNDLE" upgrade
         --control-planes "$CP_DOCKER_IP"
         --workers "$WORKER_DOCKER_IP"
         --ssh-user root
@@ -195,8 +198,6 @@ run_upgrade_test() {
     log_info "=== Verification ==="
 
     local all_pass=true
-    local target_minor
-    target_minor=$(echo "$TO_VERSION" | cut -d. -f1,2)
 
     # Check 1: deploy exit code
     if [ "$deploy_exit_code" -eq 0 ]; then
@@ -214,34 +215,59 @@ run_upgrade_test() {
         all_pass=false
     fi
 
-    # Check 3: CP kubeadm version contains target
+    # Check 3: CP kubeadm version is the target
     local cp_kubeadm_ver
     cp_kubeadm_ver=$(vm_ssh_root "$_CP_SSH_PORT" "kubeadm version -o short" 2>/dev/null | tr -d '[:space:]') || cp_kubeadm_ver="unknown"
-    if echo "$cp_kubeadm_ver" | grep -q "v${target_minor}"; then
-        log_success "CHECK 3: CP kubeadm version = $cp_kubeadm_ver (contains v${target_minor})"
+    if [ "${cp_kubeadm_ver#Kubernetes}" = "v${TO_VERSION}" ]; then
+        log_success "CHECK 3: CP kubeadm version = ${cp_kubeadm_ver}"
     else
-        log_error "CHECK 3: CP kubeadm version = $cp_kubeadm_ver (expected v${target_minor}.*)"
+        log_error "CHECK 3: CP kubeadm version = ${cp_kubeadm_ver} (expected v${TO_VERSION})"
         all_pass=false
     fi
 
-    # Check 4: CP kubelet version contains target
+    # Check 4: CP kubelet version is the target
     local cp_kubelet_ver
     cp_kubelet_ver=$(vm_ssh_root "$_CP_SSH_PORT" "kubelet --version" 2>/dev/null | tr -d '[:space:]') || cp_kubelet_ver="unknown"
-    if echo "$cp_kubelet_ver" | grep -q "v${target_minor}"; then
-        log_success "CHECK 4: CP kubelet version = $cp_kubelet_ver (contains v${target_minor})"
+    if [ "${cp_kubelet_ver#Kubernetes}" = "v${TO_VERSION}" ]; then
+        log_success "CHECK 4: CP kubelet version = ${cp_kubelet_ver}"
     else
-        log_error "CHECK 4: CP kubelet version = $cp_kubelet_ver (expected v${target_minor}.*)"
+        log_error "CHECK 4: CP kubelet version = ${cp_kubelet_ver} (expected v${TO_VERSION})"
         all_pass=false
     fi
 
-    # Check 5: Worker kubelet version contains target
+    # Check 5: Worker kubelet version is the target
     local worker_kubelet_ver
     worker_kubelet_ver=$(vm_ssh_root "$_WORKER_SSH_PORT" "kubelet --version" 2>/dev/null | tr -d '[:space:]') || worker_kubelet_ver="unknown"
-    if echo "$worker_kubelet_ver" | grep -q "v${target_minor}"; then
-        log_success "CHECK 5: Worker kubelet version = $worker_kubelet_ver (contains v${target_minor})"
+    if [ "${worker_kubelet_ver#Kubernetes}" = "v${TO_VERSION}" ]; then
+        log_success "CHECK 5: Worker kubelet version = ${worker_kubelet_ver}"
     else
-        log_error "CHECK 5: Worker kubelet version = $worker_kubelet_ver (expected v${target_minor}.*)"
+        log_error "CHECK 5: Worker kubelet version = ${worker_kubelet_ver} (expected v${TO_VERSION})"
         all_pass=false
+    fi
+
+    # Check 5b: the control plane (API server) runs the target version
+    local server_ver
+    server_ver=$(vm_ssh_root "$_CP_SSH_PORT" "kubectl --kubeconfig=/etc/kubernetes/admin.conf version -o json" 2>/dev/null \
+        | awk -F'"' '/"serverVersion"/ {s = 1} s && /"gitVersion"/ {print $4; exit}')
+    if [ "$server_ver" = "v${TO_VERSION}" ]; then
+        log_success "CHECK 5b: API server version = ${server_ver}"
+    else
+        log_error "CHECK 5b: API server version = '${server_ver}' (expected v${TO_VERSION})"
+        all_pass=false
+    fi
+
+    # Check 5c: CRI-O follows the Kubernetes minor on every node
+    if [[ " ${DEPLOY_EXTRA_ARGS[*]} " == *" --cri crio "* ]]; then
+        local port crio_ver
+        for port in "$_CP_SSH_PORT" "$_WORKER_SSH_PORT"; do
+            crio_ver=$(vm_ssh_root "$port" "crio --version" 2>/dev/null | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
+            if [ "$(echo "$crio_ver" | cut -d. -f1,2)" = "$(echo "$TO_VERSION" | cut -d. -f1,2)" ]; then
+                log_success "CHECK 5c: CRI-O ${crio_ver} on the node with SSH port ${port}"
+            else
+                log_error "CHECK 5c: CRI-O '${crio_ver}' on the node with SSH port ${port} (expected $(echo "$TO_VERSION" | cut -d. -f1,2).x)"
+                all_pass=false
+            fi
+        done
     fi
 
     # Check 6: CP API server responsive
@@ -281,6 +307,13 @@ while [[ $# -gt 0 ]]; do
         --help|-h) show_help; exit 0 ;;
         --from-version) _require_arg $# "$1"; FROM_VERSION="$2"; shift 2 ;;
         --to-version) _require_arg $# "$1"; TO_VERSION="$2"; shift 2 ;;
+        --deploy-args)
+            _require_arg $# "$1"
+            _deploy_args_tmp=()
+            read -r -a _deploy_args_tmp <<<"$2"
+            DEPLOY_EXTRA_ARGS+=("${_deploy_args_tmp[@]}")
+            shift 2
+            ;;
         --upgrade-args)
             _require_arg $# "$1"
             read -r -a _upgrade_args_tmp <<< "$2"

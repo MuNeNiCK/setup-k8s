@@ -10,7 +10,7 @@ It supports local single-node setup, manual node joins, SSH-driven multi-node de
 - Join worker and additional control-plane nodes.
 - Deploy a full cluster from one orchestrator host over SSH.
 - Use containerd or CRI-O.
-- Select kube-proxy mode: iptables, IPVS, or nftables.
+- Select kube-proxy mode: nftables or iptables automatically by Kubernetes and kernel version, or IPVS.
 - Configure IPv4, IPv6, or dual-stack networking.
 - Run preflight checks before changing nodes.
 - Upgrade clusters, renew certificates, back up etcd, restore etcd, and clean up nodes.
@@ -20,13 +20,14 @@ It supports local single-node setup, manual node joins, SSH-driven multi-node de
 Use the repository script directly:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- init
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- init
 ```
 
 For multi-node operations, run without `sudo` on the orchestrator and let the script use SSH to reach the nodes:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- \
+curl -fsSLO https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh
+sh setup-k8s.sh \
   deploy \
   --control-planes root@192.168.1.10 \
   --workers root@192.168.1.11,root@192.168.1.12

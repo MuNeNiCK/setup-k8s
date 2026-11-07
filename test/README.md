@@ -27,8 +27,12 @@ cd test
 ./scenarios/init-cleanup.sh --help
 ./scenarios/init-cleanup.sh ubuntu-24.04-cloud-amd64
 ./scenarios/init-cleanup.sh --all
-./scenarios/init-cleanup.sh --online ubuntu-24.04-cloud-amd64
+./scenarios/init-cleanup.sh --online ubuntu-24.04-cloud-amd64   # uses the published release asset
 ```
+
+By default scenarios build the single-file bundle with `scripts/build.sh` and
+run it with `sh` on the VMs; host-side commands (deploy, upgrade, remove, ...)
+run the same bundle.
 
 Subcommand scenarios:
 
@@ -38,6 +42,10 @@ Subcommand scenarios:
 ./scenarios/preflight.sh --distro ubuntu-24.04-cloud-amd64
 ./scenarios/backup-restore.sh --distro ubuntu-24.04-cloud-amd64
 ./scenarios/cert-renew.sh --distro ubuntu-24.04-cloud-amd64
+./scenarios/swap-reboot.sh --distro ubuntu-24.04-cloud-amd64   # swap stays off across reboots
+./scenarios/options.sh --distro ubuntu-24.04-cloud-amd64       # patch version, image repository, kubeadm patches, Helm, Kustomize
+./scenarios/proxy.sh --distro ubuntu-24.04-cloud-amd64          # through an HTTP proxy, all other outbound HTTP(S) blocked
+./scenarios/upgrade.sh --deploy-args "--cri crio"                # CRI-O follows the Kubernetes minor
 ./scenarios/upgrade.sh --distro ubuntu-24.04-cloud-amd64
 ./scenarios/upgrade.sh --distro ubuntu-24.04-cloud-amd64 --upgrade-args "--skip-drain --no-rollback"
 ./scenarios/generic.sh --host-distro ubuntu-24.04-cloud-amd64
@@ -47,12 +55,21 @@ Subcommand scenarios:
 
 ## GitHub Actions Coverage
 
-| Workflow | Coverage |
-| --- | --- |
-| `ShellCheck & Unit Tests` | Runs shellcheck and unit tests for local scripts. |
-| `Setup Option Tests` | Runs the setup/remove lifecycle across the setup option matrix. |
-| `Setup Distro Tests` | Runs the setup/remove lifecycle across the distro matrix. |
-| `Scenario Tests` | Runs join, preflight, deploy/remove, backup/restore, cert renew, upgrade, generic, and HA checks across the scenario matrix. |
+| Workflow | Runs on | Coverage |
+| --- | --- | --- |
+| `ShellCheck & Unit Tests` | pull requests and pushes to `main` and `develop` | ShellCheck, actionlint, and the bats unit tests. |
+| `Setup Option Tests` | every pull request (Ubuntu 24.04 smoke test); pull requests to `main` and manual runs (full matrix) | The setup/remove lifecycle across the setup option matrix (`matrices/kubernetes-minors.txt`). |
+| `Setup Distro Tests` | pull requests to `main`; manual runs | The setup/remove lifecycle across `matrices/distro-cloud-images.txt`. |
+| `Scenario Tests` | pull requests to `main`; manual runs | Join, preflight, deploy/remove, backup/restore, cert renew, upgrade, swap persistence, init options, generic, HA, proxy, and CRI-O upgrade checks. |
+| `Upstream Check` | weekly; manual runs | Opens an issue per upstream change that needs action (`scripts/check-upstream.sh`). |
+| `docs` | pull requests and pushes to `main` that change `docs/` | Builds the site; deploys it from `main`. |
+| `Release` | `v*` tags | Builds and publishes the release asset. |
+
+The full VM matrices run before a release, for the pull request from `develop`
+into `main`, and on demand (Actions > the workflow > Run workflow, for example
+on `develop` before merging a risky change). A newer push to a pull request
+cancels its running VM workflows. Run the matching scenarios locally while
+developing (see above).
 
 ## Configuration
 

@@ -16,28 +16,29 @@ It supports local node-by-node execution and remote orchestration over SSH.
 Run on the first control-plane node:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   upgrade --kubernetes-version 1.33.2 --first-control-plane
 ```
 
 Run on additional control-plane nodes and workers:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   upgrade --kubernetes-version 1.33.2
 ```
 
 For a single-node cluster:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
   upgrade --kubernetes-version 1.33.2 --first-control-plane --skip-drain
 ```
 
 ## Remote mode
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- \
+curl -fsSLO https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh
+sh setup-k8s.sh \
   upgrade \
   --control-planes 10.0.0.1,10.0.0.2 \
   --workers 10.0.0.3,10.0.0.4 \
@@ -47,7 +48,7 @@ curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -
 
 Remote flow:
 
-1. Generate and transfer a self-contained bundle to all nodes.
+1. Transfer setup-k8s.sh to all nodes.
 2. Check current cluster version and validate upgrade constraints.
 3. Run `kubeadm upgrade plan`.
 4. Drain, upgrade, and uncordon each control-plane node.
@@ -56,7 +57,13 @@ Remote flow:
 
 ## Automatic rollback
 
-Remote upgrade records pre-upgrade package versions. If a node upgrade fails, the script downgrades kubeadm, kubelet, and kubectl to their recorded versions, restarts kubelet, and uncordons the node.
+Remote upgrade records the kubeadm version of each node before upgrading it. If a node upgrade fails, the node runs `setup-k8s.sh upgrade --rollback-to <previous version>`, which reinstalls kubeadm, kubelet, and kubectl at that version and restarts kubelet; the node is then uncordoned. kubeadm restores its own control-plane manifests when `kubeadm upgrade` fails.
+
+The same command can be run manually on a node:
+
+```bash
+sudo sh setup-k8s.sh upgrade --rollback-to 1.36.6
+```
 
 Disable rollback for debugging:
 

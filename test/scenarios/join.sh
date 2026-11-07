@@ -91,14 +91,14 @@ run_join_test() {
 
     local bundle
     bundle=$(mktemp /tmp/setup-k8s-join-bundle.XXXXXX.sh)
-    _generate_bundle "$SETUP_K8S_SCRIPT" "$bundle" "all"
+    _generate_bundle "$SETUP_K8S_SCRIPT" "$bundle"
     _copy_bundle_to_node "$_CP_SSH_PORT" "CP" "$bundle"
     _copy_bundle_to_node "$_WORKER_SSH_PORT" "Worker" "$bundle"
     rm -f "$bundle"
 
     log_info "=== Phase 1: init control-plane ==="
     local init_cmd
-    init_cmd="bash /tmp/setup-k8s.sh init --kubernetes-version $(printf '%q' "$K8S_VERSION") --control-plane-endpoint $(printf '%q' "${CP_DOCKER_IP}:6443")"
+    init_cmd="sh /tmp/setup-k8s.sh init --kubernetes-version $(printf '%q' "$K8S_VERSION") --control-plane-endpoint $(printf '%q' "${CP_DOCKER_IP}:6443")"
     vm_ssh_root "$_CP_SSH_PORT" "nohup bash -c '$init_cmd > /tmp/setup-k8s-init.log 2>&1; echo \$? > /tmp/init-exit-code' </dev/null >/dev/null 2>&1 &"
     if ! poll_vm_command _join_cp_ssh "$cp_container" /tmp/init-exit-code /tmp/setup-k8s-init.log "$TIMEOUT_TOTAL"; then
         vm_ssh_root "$_CP_SSH_PORT" "cat /tmp/setup-k8s-init.log" 2>/dev/null || true
@@ -130,7 +130,7 @@ run_join_test() {
 
     log_info "=== Phase 3: join worker ==="
     local worker_join_cmd
-    worker_join_cmd="bash /tmp/setup-k8s.sh join --kubernetes-version $(printf '%q' "$K8S_VERSION") --join-address $(printf '%q' "$join_address") --join-token $(printf '%q' "$join_token") --discovery-token-hash $(printf '%q' "$discovery_hash")"
+    worker_join_cmd="sh /tmp/setup-k8s.sh join --kubernetes-version $(printf '%q' "$K8S_VERSION") --join-address $(printf '%q' "$join_address") --token $(printf '%q' "$join_token") --discovery-token-ca-cert-hash $(printf '%q' "$discovery_hash")"
     vm_ssh_root "$_WORKER_SSH_PORT" "nohup bash -c '$worker_join_cmd > /tmp/setup-k8s-join.log 2>&1; echo \$? > /tmp/join-exit-code' </dev/null >/dev/null 2>&1 &"
     if ! poll_vm_command _join_worker_ssh "$worker_container" /tmp/join-exit-code /tmp/setup-k8s-join.log "$TIMEOUT_TOTAL"; then
         vm_ssh_root "$_WORKER_SSH_PORT" "cat /tmp/setup-k8s-join.log" 2>/dev/null || true

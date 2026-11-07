@@ -64,6 +64,20 @@ EOF
 
 # --- Main test logic ---
 
+# Print "name=serial" for the certificates the test follows, and the serial
+# of the certificate the API server serves ("served").
+_cert_serials() {
+    vm_ssh_root "$_CP_SSH_PORT" 'for c in apiserver:/etc/kubernetes/pki/apiserver.crt front-proxy-client:/etc/kubernetes/pki/front-proxy-client.crt etcd-server:/etc/kubernetes/pki/etcd/server.crt; do
+            printf "%s=%s " "${c%%:*}" "$(openssl x509 -noout -serial -in "${c#*:}" | cut -d= -f2)"
+        done
+        printf "served=%s" "$(openssl s_client -connect 127.0.0.1:6443 </dev/null 2>/dev/null | openssl x509 -noout -serial | cut -d= -f2)"' 2>/dev/null
+}
+
+# Usage: _serial_of <serials> <name>
+_serial_of() {
+    printf '%s\n' "$1" | tr ' ' '\n' | sed -n "s/^$2=//p"
+}
+
 run_renew_test() {
     _test_preamble "renew" "$DISTRO"
     local cp_container="k8s-renew-cp-${DISTRO}-${_TEST_TS}"
@@ -86,7 +100,7 @@ run_renew_test() {
     # ===================================================================
     log_info "=== Phase 1: Deploy single-node cluster ==="
     local deploy_cmd=(
-        bash "$SETUP_K8S_SCRIPT" deploy
+        sh "$HOST_BUNDLE" deploy
         --control-planes "$CP_DOCKER_IP"
         --ssh-user root
         --ssh-port 2222
@@ -113,12 +127,16 @@ run_renew_test() {
         return 1
     fi
 
+    local s0 s1 s2 s3
+    s0=$(_cert_serials)
+    log_info "Certificate serials before: ${s0}"
+
     # ===================================================================
     # Phase 2: renew --check-only (remote mode)
     # ===================================================================
     log_info "=== Phase 2: renew --check-only (remote mode) ==="
     local check_cmd=(
-        bash "$SETUP_K8S_SCRIPT" renew
+        sh "$HOST_BUNDLE" renew
         --control-planes "$CP_DOCKER_IP"
         --ssh-user root
         --ssh-port 2222
@@ -130,13 +148,14 @@ run_renew_test() {
 
     local check_exit_code=0
     run_with_timeout check_exit_code "$log_file" "${check_cmd[@]}"
+    s1=$(_cert_serials)
 
     # ===================================================================
     # Phase 3: renew all certs (remote mode)
     # ===================================================================
     log_info "=== Phase 3: renew all certificates (remote mode) ==="
     local renew_all_cmd=(
-        bash "$SETUP_K8S_SCRIPT" renew
+        sh "$HOST_BUNDLE" renew
         --control-planes "$CP_DOCKER_IP"
         --ssh-user root
         --ssh-port 2222
@@ -154,6 +173,7 @@ run_renew_test() {
     if wait_for_api_ready "$_CP_SSH_PORT" 40 5; then
         api_after_all=true
     fi
+    s2=$(_cert_serials)
 
     # ===================================================================
     # Phase 4: renew specific certs (remote mode)
@@ -161,7 +181,7 @@ run_renew_test() {
     log_info "=== Phase 4: renew specific certificates (remote mode) ==="
     local specific_certs="apiserver,front-proxy-client"
     local renew_specific_cmd=(
-        bash "$SETUP_K8S_SCRIPT" renew
+        sh "$HOST_BUNDLE" renew
         --control-planes "$CP_DOCKER_IP"
         --ssh-user root
         --ssh-port 2222
@@ -180,6 +200,7 @@ run_renew_test() {
     if wait_for_api_ready "$_CP_SSH_PORT" 40 5; then
         api_after_specific=true
     fi
+    s3=$(_cert_serials)
 
     # ===================================================================
     # Phase 5: Verify certificate dates on the node
@@ -243,23 +264,42 @@ run_renew_test() {
         all_pass=false
     fi
 
-    # Check 7: certificate expiration shows valid dates (not expired)
-    if [ -n "$cert_check_output" ]; then
-        # kubeadm certs check-expiration outputs a table with expiration dates
-        # Check that no certificate shows "EXPIRED" or "invalid"
-        if echo "$cert_check_output" | grep -qi "expired"; then
-            log_error "CHECK 7: Some certificates appear EXPIRED"
-            all_pass=false
-        else
-            log_success "CHECK 7: Certificate expiration dates look valid"
-        fi
-        log_info "Certificate status:"
-        echo "$cert_check_output" | while IFS= read -r line; do
-            log_info "  $line"
-        done
+    # Check 7: --check-only changed nothing
+    if [ -n "$s0" ] && [ "$s1" = "$s0" ]; then
+        log_success "CHECK 7: --check-only left every certificate unchanged"
     else
-        log_warn "CHECK 7: Could not retrieve certificate expiration info (non-fatal)"
+        log_error "CHECK 7: certificates changed after --check-only (before: ${s0} after: ${s1})"
+        all_pass=false
     fi
+
+    # Check 8: renewing all replaced every certificate, and the API server
+    # serves the new one (it was restarted)
+    local name changed=true
+    for name in apiserver front-proxy-client etcd-server; do
+        [ "$(_serial_of "$s2" "$name")" != "$(_serial_of "$s1" "$name")" ] || changed=false
+    done
+    if [ "$changed" = true ] && [ "$(_serial_of "$s2" served)" = "$(_serial_of "$s2" apiserver)" ]; then
+        log_success "CHECK 8: all certificates renewed and the API server serves the new certificate"
+    else
+        log_error "CHECK 8: after renewing all: before ${s1} after ${s2}"
+        all_pass=false
+    fi
+
+    # Check 9: a selective renewal replaced only the selected certificates
+    if [ "$(_serial_of "$s3" apiserver)" != "$(_serial_of "$s2" apiserver)" ] \
+        && [ "$(_serial_of "$s3" front-proxy-client)" != "$(_serial_of "$s2" front-proxy-client)" ] \
+        && [ "$(_serial_of "$s3" etcd-server)" = "$(_serial_of "$s2" etcd-server)" ] \
+        && [ "$(_serial_of "$s3" served)" = "$(_serial_of "$s3" apiserver)" ]; then
+        log_success "CHECK 9: only apiserver and front-proxy-client were renewed; the new certificate is served"
+    else
+        log_error "CHECK 9: after renewing apiserver,front-proxy-client: before ${s2} after ${s3}"
+        all_pass=false
+    fi
+
+    log_info "Certificate status:"
+    printf '%s\n' "$cert_check_output" | while IFS= read -r line; do
+        log_info "  $line"
+    done
 
     # Show cluster state for debugging
     log_info "Cluster state after renewal:"

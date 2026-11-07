@@ -43,24 +43,25 @@ Options:
 EOF
 }
 
+# Usage: run_preflight_case <name> <success|failure> <output_regex> [preflight args...]
+# The exit status must match and the output must match <output_regex>.
 run_preflight_case() {
-    local name="$1" expected="$2"; shift 2
-    local output exit_code=0
+    local name="$1" expected="$2" pattern="$3"; shift 3
+    local output exit_code=0 ok=true
 
     log_info "Running preflight case: $name"
-    output=$(vm_ssh_root "$_CP_SSH_PORT" "bash /tmp/setup-k8s.sh preflight $* 2>&1") || exit_code=$?
+    output=$(vm_ssh_root "$_CP_SSH_PORT" "sh /tmp/setup-k8s.sh preflight $* 2>&1") || exit_code=$?
     printf '%s\n' "$output" >> "$_TEST_LOG_FILE"
 
-    if [ "$expected" = "success" ] && [ "$exit_code" -eq 0 ]; then
-        log_success "CHECK: $name exited 0"
-        return 0
-    fi
-    if [ "$expected" = "failure" ] && [ "$exit_code" -ne 0 ]; then
-        log_success "CHECK: $name failed as expected"
-        return 0
-    fi
+    if [ "$expected" = "success" ] && [ "$exit_code" -ne 0 ]; then ok=false; fi
+    if [ "$expected" = "failure" ] && [ "$exit_code" -eq 0 ]; then ok=false; fi
+    if ! printf '%s\n' "$output" | grep -q -E "$pattern"; then ok=false; fi
 
-    log_error "CHECK: $name unexpected exit code $exit_code (expected $expected)"
+    if [ "$ok" = true ]; then
+        log_success "CHECK: $name (exit $exit_code, output matches /$pattern/)"
+        return 0
+    fi
+    log_error "CHECK: $name: exit $exit_code (expected $expected), output must match /$pattern/"
     printf '%s\n' "$output"
     return 1
 }
@@ -79,15 +80,29 @@ run_preflight_test() {
 
     local bundle
     bundle=$(mktemp /tmp/setup-k8s-preflight-bundle.XXXXXX.sh)
-    _generate_bundle "$SETUP_K8S_SCRIPT" "$bundle" "all"
+    _generate_bundle "$SETUP_K8S_SCRIPT" "$bundle"
     scp "${SSH_OPTS[@]}" -P "$_CP_SSH_PORT" "$bundle" "root@localhost:/tmp/setup-k8s.sh" >/dev/null
     rm -f "$bundle"
     vm_ssh_root "$_CP_SSH_PORT" "chmod +x /tmp/setup-k8s.sh"
 
-    run_preflight_case "init-default" success --mode init --cri containerd --proxy-mode iptables || all_pass=false
-    run_preflight_case "join-dry-run-crio-ipvs" success --dry-run --mode join --cri crio --proxy-mode ipvs || all_pass=false
-    run_preflight_case "strict-dry-run-nftables" success --dry-run --mode init --proxy-mode nftables --preflight-strict || all_pass=false
-    run_preflight_case "invalid-mode" failure --mode invalid || all_pass=false
+    # A fresh node passes, and auto resolves to nftables on a current kernel
+    run_preflight_case "init-default" success 'Failed: 0' --mode init || all_pass=false
+    run_preflight_case "proxy-mode-auto" success 'auto resolves to nftables' --mode init --proxy-mode auto || all_pass=false
+    # A dry run lists the checks and runs none
+    run_preflight_case "join-dry-run" success 'Dry-run|dry-run' --dry-run --mode join --cri crio --proxy-mode ipvs || all_pass=false
+
+    # The API server port in use fails init checks (not join)
+    vm_ssh_root "$_CP_SSH_PORT" "nohup python3 -m http.server 6443 >/dev/null 2>&1 & sleep 2" || true
+    run_preflight_case "port-6443-in-use" failure '6443' --mode init || all_pass=false
+    vm_ssh_root "$_CP_SSH_PORT" "pkill -f 'http.server 6443'" || true
+
+    # Swap is a warning; --preflight-strict turns warnings into a failure
+    vm_ssh_root "$_CP_SSH_PORT" "fallocate -l 128M /swap-preflight && chmod 600 /swap-preflight && mkswap /swap-preflight >/dev/null && swapon /swap-preflight" || true
+    run_preflight_case "swap-warning" success '\[WARN\].*[Ss]wap' --mode init || all_pass=false
+    run_preflight_case "swap-strict" failure '[Ss]wap' --mode init --preflight-strict || all_pass=false
+    vm_ssh_root "$_CP_SSH_PORT" "swapoff /swap-preflight; rm -f /swap-preflight" || true
+
+    run_preflight_case "invalid-mode" failure 'mode' --mode invalid || all_pass=false
 
     _test_result "PREFLIGHT" "$all_pass" _cleanup_single_cp "$cp_container" "$_CP_SSH_PORT"
 }

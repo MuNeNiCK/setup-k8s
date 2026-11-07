@@ -15,7 +15,7 @@ cd "$TEST_DIR"
 
 SETUP_K8S_SCRIPT="$PROJECT_ROOT/setup-k8s.sh"
 DOCKER_VM_RUNNER_IMAGE="${DOCKER_VM_RUNNER_IMAGE:-ghcr.io/munenick/docker-vm-runner:latest}"
-GITHUB_BASE_URL="${GITHUB_BASE_URL:-https://raw.githubusercontent.com/MuNeNiCK/setup-k8s/main}"
+SETUP_K8S_URL="${SETUP_K8S_URL:-https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh}"
 VM_DATA_DIR="${VM_DATA_DIR:-$TEST_DIR/data}"
 
 # VM resource defaults
@@ -35,7 +35,7 @@ LOGIN_USER="user"
 
 # Timeout settings (seconds)
 TIMEOUT_TOTAL=1200    # 20 minutes
-SSH_READY_TIMEOUT=300 # 5 minutes for SSH to become available
+SSH_READY_TIMEOUT="${SSH_READY_TIMEOUT:-300}" # seconds for SSH to become available
 
 # SSH settings
 SSH_KEY_DIR=""
@@ -47,14 +47,11 @@ SSH_OPTS=("${SSH_BASE_OPTS[@]}")
 # Global cleanup state (must be module-level for EXIT trap)
 _VM_CONTAINER_NAME=""
 _WATCHDOG_PID=""
-_CLOUD_INIT_USER_DATA=""
 
 _e2e_cleanup_vm_container() {
     _cleanup_vm_container "$_WATCHDOG_PID" "$_VM_CONTAINER_NAME"
     _WATCHDOG_PID=""
     _VM_CONTAINER_NAME=""
-    rm -f "$_CLOUD_INIT_USER_DATA"
-    _CLOUD_INIT_USER_DATA=""
 }
 
 # Help message
@@ -68,7 +65,7 @@ Options:
   --all, -a                 Test all distributions sequentially
   --k8s-version <version>   Kubernetes version to test (e.g., 1.32, 1.31, 1.30)
   --setup-args ARGS         Extra args for setup-k8s.sh (use quotes)
-  --online                  Run test using curl | bash from GitHub (requires push)
+  --online                  Run test using curl | sh with the published release asset
   --offline                 Run test in bundled mode with local code (default)
   --memory <MB>             VM memory in MB (default: $VM_MEMORY)
   --cpus <count>            VM CPU count (default: $VM_CPUS)
@@ -86,16 +83,16 @@ EOF
     echo "Examples:"
     echo "  $0 ubuntu-24.04-cloud-amd64"
     echo "  $0 --online ubuntu-24.04-cloud-amd64"
-    echo "  $0 --k8s-version 1.31 ubuntu-24.04-cloud-amd64"
+    echo "  $0 --k8s-version 1.36 ubuntu-24.04-cloud-amd64"
     echo "  $0 --all                              # Test all distributions offline"
-    echo "  $0 --all --online                     # Test all distributions via curl | bash"
-    echo "  $0 --all --k8s-version 1.30           # Test all distributions with k8s v1.30"
+    echo "  $0 --all --online                     # Test all distributions with the release asset"
+    echo "  $0 --all --k8s-version 1.35           # Test all distributions with k8s v1.35"
     echo "  $0 --memory 16384 --cpus 8 ubuntu-24.04-cloud-amd64"
     echo "  $0 archlinux-cloud-amd64"
-    echo "  $0 --k8s-version 1.32 rocky-9-cloud-amd64"
+    echo "  $0 --k8s-version 1.36.5 rocky-9-cloud-amd64"
     echo
     echo "Test Modes:"
-    echo "  Online:  Runs curl | bash from GitHub inside VM (tests production flow; requires push)"
+    echo "  Online:  Runs curl | sh with the published release asset inside the VM"
     echo "  Offline: Uses pre-bundled script with local code (default; no push required)"
 }
 
@@ -117,7 +114,7 @@ generate_bundled_scripts() {
     _SETUP_BUNDLE=$(mktemp /tmp/setup-k8s-bundle.XXXXXX.sh)
 
     log_info "Generating bundled script..."
-    _generate_bundle "$SETUP_K8S_SCRIPT" "$_SETUP_BUNDLE" "all"
+    _generate_bundle "$SETUP_K8S_SCRIPT" "$_SETUP_BUNDLE"
     log_info "Bundled script generated successfully"
 }
 
@@ -162,6 +159,7 @@ run_vm_container() {
         docker run -d --rm
         --name "$container_name"
         --label "managed-by=k8s-test-runner"
+        --label "$TEST_OWNER_LABEL"
         --device /dev/kvm:/dev/kvm
         -v "$VM_DATA_DIR:/data"
         -p "${SSH_PORT}:2222"
@@ -174,27 +172,10 @@ run_vm_container() {
         -e "DISK_SIZE=$VM_DISK_SIZE"
     )
 
-    # Alpine: cloud image has no bash/sudo/openssh pre-installed
-    case "$distro" in
-        alpine-*)
-            _CLOUD_INIT_USER_DATA=$(mktemp /tmp/cloud-init-userdata.XXXXXX.yaml)
-            cat > "$_CLOUD_INIT_USER_DATA" <<'CIEOF'
-#cloud-config
-packages:
-  - bash
-  - ca-certificates
-  - curl
-  - sudo
-  - openssh
-runcmd:
-  - ["sh", "-c", "rc-update add sshd default && rc-service sshd start"]
-CIEOF
-            _docker_run_args+=(
-                -v "$_CLOUD_INIT_USER_DATA:/cloud-init-userdata.yaml:ro"
-                -e "CLOUD_INIT_USER_DATA=/cloud-init-userdata.yaml"
-            )
-            ;;
-    esac
+    # Distribution-specific arguments (e.g. Alpine cloud-init user-data)
+    local _distro_args=()
+    mapfile -t _distro_args < <(_vm_distro_run_args "$distro" "$VM_DATA_DIR")
+    _docker_run_args+=("${_distro_args[@]}")
 
     if [ -n "$VM_GUEST_IP6" ]; then
         _docker_run_args+=(-e "NETWORK_GUEST_IP6=$VM_GUEST_IP6")
@@ -225,8 +206,8 @@ CIEOF
 
     # --- Deploy scripts ---
     if [ "$TEST_MODE" = "online" ]; then
-        # Online mode: test the production curl | bash flow from GitHub
-        log_info "Online mode: testing curl | bash from ${GITHUB_BASE_URL}"
+        # Online mode: test the published release asset via curl | sh
+        log_info "Online mode: testing curl | sh with ${SETUP_K8S_URL}"
     else
         generate_bundled_scripts
         log_info "Transferring bundled script to VM..."
@@ -279,9 +260,9 @@ PATCH"
 
     local setup_cmd
     if [ "$TEST_MODE" = "online" ]; then
-        setup_cmd="set -o pipefail; curl -fsSL ${GITHUB_BASE_URL}/setup-k8s.sh | bash -s -- ${setup_args}"
+        setup_cmd="set -o pipefail; curl -fsSL ${SETUP_K8S_URL} | sh -s -- ${setup_args}"
     else
-        setup_cmd="bash /tmp/setup-k8s.sh ${setup_args}"
+        setup_cmd="sh /tmp/setup-k8s.sh ${setup_args}"
     fi
     setup_cmd+=" > /tmp/setup-k8s.log 2>&1; echo \$? > /tmp/setup-exit-code"
     vm_ssh "nohup bash -c '${setup_cmd}' </dev/null >/dev/null 2>&1 &"
@@ -306,9 +287,9 @@ PATCH"
     log_info "Running setup-k8s status..."
     local status_cmd
     if [ "$TEST_MODE" = "online" ]; then
-        status_cmd="bash -o pipefail -c \"curl -fsSL ${GITHUB_BASE_URL}/setup-k8s.sh | KUBECONFIG=/etc/kubernetes/admin.conf bash -s -- status --output wide\""
+        status_cmd="bash -o pipefail -c \"curl -fsSL ${SETUP_K8S_URL} | KUBECONFIG=/etc/kubernetes/admin.conf sh -s -- status --output wide\""
     else
-        status_cmd="KUBECONFIG=/etc/kubernetes/admin.conf bash /tmp/setup-k8s.sh status --output wide"
+        status_cmd="KUBECONFIG=/etc/kubernetes/admin.conf sh /tmp/setup-k8s.sh status --output wide"
     fi
     local status_exit_code=0
     vm_ssh "$status_cmd > /tmp/status-k8s.log 2>&1" || status_exit_code=$?
@@ -349,9 +330,20 @@ PATCH"
         log_info "API server is not responsive"
     fi
 
+    # What the setup arguments asked for
+    local options_ok=false
+    if [ "$api_responsive" = "true" ]; then
+        # setup_extra_args_str holds printf %q-quoted words
+        local -a _verify_args=()
+        eval "_verify_args=(${setup_extra_args_str})"
+        if verify_setup vm_ssh "$distro" "$k8s_version_val" "${_verify_args[@]}"; then
+            options_ok=true
+        fi
+    fi
+
     local setup_test_status="failed"
     if [ "$setup_exit_code" -eq 0 ] && [ "$status_exit_code" -eq 0 ] && \
-       [ "$kubelet_status" = "active" ] && [ "$api_responsive" = "true" ]; then
+       [ "$kubelet_status" = "active" ] && [ "$api_responsive" = "true" ] && [ "$options_ok" = true ]; then
         setup_test_status="success"
         log_success "Setup test: SUCCESS"
     else
@@ -366,9 +358,9 @@ PATCH"
         log_info "Starting Kubernetes cleanup..."
         local cleanup_cmd
         if [ "$TEST_MODE" = "online" ]; then
-            cleanup_cmd="set -o pipefail; curl -fsSL ${GITHUB_BASE_URL}/setup-k8s.sh | bash -s -- cleanup --force"
+            cleanup_cmd="set -o pipefail; curl -fsSL ${SETUP_K8S_URL} | sh -s -- cleanup --force"
         else
-            cleanup_cmd="bash /tmp/setup-k8s.sh cleanup --force"
+            cleanup_cmd="sh /tmp/setup-k8s.sh cleanup --force"
         fi
         vm_ssh "nohup bash -c '${cleanup_cmd} > /tmp/cleanup-k8s.log 2>&1; echo \$? > /tmp/cleanup-exit-code' </dev/null >/dev/null 2>&1 &"
 
@@ -382,47 +374,17 @@ PATCH"
 
         # --- Phase 4: Verify cleanup ---
         log_info "Verifying cleanup..."
-        local kubelet_active kubelet_enabled
-        if vm_ssh "test -x /usr/bin/systemctl || test -x /bin/systemctl" >/dev/null 2>&1; then
-            kubelet_active=$(vm_ssh "systemctl is-active kubelet" 2>/dev/null) || kubelet_active="inactive"
-            kubelet_enabled=$(vm_ssh "systemctl is-enabled kubelet" 2>/dev/null) || kubelet_enabled="disabled"
-        elif vm_ssh "test -x /sbin/rc-service || test -x /usr/sbin/rc-service" >/dev/null 2>&1; then
-            if vm_ssh "rc-service kubelet status" >/dev/null 2>&1; then
-                kubelet_active="active"
-            else
-                kubelet_active="inactive"
-            fi
-            if vm_ssh "rc-update show default 2>/dev/null | grep -q kubelet" >/dev/null 2>&1; then
-                kubelet_enabled="enabled"
-            else
-                kubelet_enabled="disabled"
-            fi
+        local leftovers
+        leftovers=$(vm_ssh "sh -s" < "$SCRIPT_DIR/lib/leftovers.sh" 2>/dev/null)
+        services_stopped=true config_cleaned=true packages_removed=true
+        if grep -q '^service:' <<<"$leftovers"; then services_stopped=false; fi
+        if grep -q -E '^(file|directory):' <<<"$leftovers"; then config_cleaned=false; fi
+        if grep -q -E '^(binary|package|hold|lock|selinux-module):' <<<"$leftovers"; then packages_removed=false; fi
+        if [ -n "$leftovers" ]; then
+            log_error "CHECK: left behind after cleanup: $(echo "$leftovers" | tr '\n' ' ')"
         else
-            kubelet_active="inactive"
-            kubelet_enabled="disabled"
+            log_success "CHECK: nothing left behind after cleanup"
         fi
-
-        if [ "$(echo "$kubelet_active" | tr -d '[:space:]')" = "active" ] || [ "$(echo "$kubelet_enabled" | tr -d '[:space:]')" = "enabled" ]; then
-            services_stopped="false"
-        else
-            services_stopped="true"
-        fi
-
-        if vm_ssh "test -d /etc/kubernetes && ls -A /etc/kubernetes 2>/dev/null | head -1 | grep -q ." >/dev/null 2>&1; then
-            config_cleaned="false"
-        elif vm_ssh "test -f /etc/default/kubelet" >/dev/null 2>&1; then
-            config_cleaned="false"
-        else
-            config_cleaned="true"
-        fi
-
-        packages_removed="true"
-        for cmd in kubeadm kubectl kubelet; do
-            if vm_ssh "command -v $cmd" >/dev/null 2>&1; then
-                packages_removed="false"
-                break
-            fi
-        done
 
         if [ "$cleanup_exit_code" -eq 0 ] && [ "$services_stopped" = "true" ] && \
            [ "$config_cleaned" = "true" ] && [ "$packages_removed" = "true" ]; then
@@ -549,7 +511,7 @@ test_all() {
     log_info "Starting test for all distributions"
     log_info "Test mode: $TEST_MODE"
     if [ "$TEST_MODE" = "online" ]; then
-        log_info "Script source: curl | bash from GitHub"
+        log_info "Script source: release asset via curl | sh"
     else
         log_info "Script source: Bundled (all modules included)"
     fi
@@ -640,7 +602,7 @@ run_single_test() {
     log_info "Starting K8s test for: $distro"
     log_info "Test mode: $TEST_MODE"
     if [ "$TEST_MODE" = "online" ]; then
-        log_info "Script source: curl | bash from GitHub"
+        log_info "Script source: release asset via curl | sh"
     else
         log_info "Script source: Bundled (all modules included)"
     fi

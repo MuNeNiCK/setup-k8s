@@ -3,7 +3,7 @@
 ## Initialize a single-node cluster
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- init
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- init
 ```
 
 Install a CNI plugin after initialization:
@@ -29,26 +29,28 @@ kubeadm token create --print-join-command
 Then run `setup-k8s` on the worker:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- \
-  join \
-  --join-token <token> \
-  --join-address <address> \
-  --discovery-token-hash <hash>
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
+  join <address> \
+  --token <token> \
+  --discovery-token-ca-cert-hash <hash>
 ```
 
 ## Deploy multiple nodes over SSH
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- \
+curl -fsSLO https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh
+sh setup-k8s.sh \
   deploy \
   --control-planes root@192.168.1.10 \
   --workers root@192.168.1.11,root@192.168.1.12
+kubectl --kubeconfig ./kubeconfig get nodes   # saved by deploy
 ```
 
 ## Deploy an HA cluster
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- \
+curl -fsSLO https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh
+sh setup-k8s.sh \
   deploy \
   --control-planes root@192.168.1.10,root@192.168.1.11,root@192.168.1.12 \
   --workers root@192.168.1.20 \
@@ -58,17 +60,17 @@ curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -
 ## Check status
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- status
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sh -s -- status
 ```
 
 Use `wide` output for cluster-level details:
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sh -s -- status --output wide
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sh -s -- status --output wide
 ```
 
 ## Clean up
 
 ```bash
-curl -fsSL https://github.com/MuNeNiCK/setup-k8s/raw/main/setup-k8s.sh | sudo sh -s -- cleanup --force
+curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- cleanup --force
 ```

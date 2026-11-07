@@ -1,8 +1,8 @@
 #!/bin/sh
 
 # Upgrade module: local upgrade logic, dry-run display, and CLI parsing.
-# Remote orchestration -> lib/upgrade_orchestration.sh
-# Version helpers, node role detection, rollback -> lib/upgrade_helpers.sh
+# Remote orchestration -> lib/cluster/upgrade.sh
+# Version helpers, node role detection, rollback -> lib/cluster/upgrade.sh
 #
 # === Sections ===
 # 1. Local upgrade logic    (~line 12)
@@ -10,6 +10,77 @@
 # 3. CLI parsing & help     (~line 145)
 
 # --- Local Upgrade ---
+
+# kubeadm refuses alpha/beta and release candidate targets without these
+_kubeadm_prerelease_upgrade_args() {
+    case "$1" in
+        *-rc.*) echo "--allow-release-candidate-upgrades" ;;
+        *-*)    echo "--allow-experimental-upgrades" ;;
+    esac
+}
+
+# Restart kubelet and wait until it stays active (a kubelet that cannot start
+# with the new version or configuration restarts in a loop).
+_upgrade_restart_kubelet() {
+    _service_reload
+    if ! _service_restart kubelet; then
+        log_error "kubelet failed to restart"
+        return 1
+    fi
+    local stable=0 elapsed=0
+    while [ "$elapsed" -lt 90 ]; do
+        if _service_is_active kubelet; then
+            stable=$((stable + 1))
+            # active on three consecutive checks (10 s apart)
+            [ "$stable" -ge 3 ] && return 0
+        else
+            stable=0
+        fi
+        sleep 10
+        elapsed=$((elapsed + 10))
+    done
+    log_error "kubelet is not running after the restart"
+    return 1
+}
+
+# Succeed when kubeadm and kubelet report <version>.
+_upgrade_verify_local_versions() {
+    local version="$1" kubeadm_v kubelet_v
+    kubeadm_v=$(kubeadm version -o short 2>/dev/null) || kubeadm_v=""
+    kubelet_v=$(kubelet --version 2>/dev/null | awk '{print $2}') || kubelet_v=""
+    if [ "$kubeadm_v" != "v${version}" ] || [ "$kubelet_v" != "v${version}" ]; then
+        log_error "Installed versions: kubeadm ${kubeadm_v:-none}, kubelet ${kubelet_v:-none} (expected v${version})"
+        return 1
+    fi
+}
+
+# Reinstall kubeadm, kubelet, and kubectl at an earlier version after a failed
+# upgrade (run with sudo). kubeadm restores its own control-plane manifests
+# when "kubeadm upgrade" fails, so only the packages are rolled back.
+rollback_node_local() {
+    local current target="$UPGRADE_ROLLBACK_VERSION"
+    current=$(_get_current_k8s_version) || current=""
+    if [ -n "$current" ] && [ "$(_k8s_minor_version "$current")" != "$(_k8s_minor_version "$target")" ]; then
+        local cur_minor tar_minor
+        cur_minor=$(echo "$current" | cut -d. -f2)
+        tar_minor=$(echo "$target" | cut -d. -f2)
+        if [ "$tar_minor" -lt $((cur_minor - 1)) ] || [ "$tar_minor" -gt "$cur_minor" ]; then
+            log_error "Rollback must target the same or the previous minor version (current: v${current}, target: v${target})"
+            return 1
+        fi
+    fi
+    k8s_select_channel "$(_k8s_minor_version "$target")" "$target" || return 1
+    log_info "Rolling back Kubernetes packages from v${current:-unknown} to v${target}..."
+    k8s_upgrade_kubeadm "$target" || return 1
+    k8s_upgrade_node "$target" || return 1
+    if crio_in_use; then
+        crio_set_minor "$(_k8s_minor_version "$target")" || return 1
+    fi
+    _upgrade_restart_kubelet || return 1
+    _upgrade_verify_local_versions "$target" || return 1
+    show_versions
+    log_info "Rollback to v${target} complete"
+}
 
 # Upgrade the current node (run with sudo)
 upgrade_node_local() {
@@ -23,20 +94,32 @@ upgrade_node_local() {
     # shellcheck disable=SC2034 # K8S_VERSION used by distro functions for repo URLs
     K8S_VERSION="$minor_version"
 
+    kubeadm_prepare_node_patches "$UPGRADE_TARGET_VERSION" || return 1
+    # A prerelease target comes from the prerelease channels
+    k8s_select_channel "$minor_version" "$UPGRADE_TARGET_VERSION" || return 1
     log_info "Upgrading node (role: $role) from v${current_version} to v${UPGRADE_TARGET_VERSION}..."
 
     # 1. Upgrade kubeadm package
     log_info "Step 1: Upgrading kubeadm to ${UPGRADE_TARGET_VERSION}..."
-    _dispatch "upgrade_kubeadm_${DISTRO_FAMILY}" "$UPGRADE_TARGET_VERSION"
+    k8s_upgrade_kubeadm "$UPGRADE_TARGET_VERSION"
 
     # 2. Run kubeadm upgrade
     if [ "$role" = "first-control-plane" ]; then
         log_info "Step 2: Running kubeadm upgrade apply v${UPGRADE_TARGET_VERSION}..."
-        local _preflight_errors="ControlPlaneNodesReady,CreateJob"
-        if [ "$(_detect_init_system)" != "systemd" ]; then
-            _preflight_errors="${_preflight_errors},SystemVerification"
+        # kubeadm checks that all control-plane nodes are Ready and runs a
+        # Job; both fail before a CNI plugin is installed (nodes NotReady).
+        # Skip them only in that case.
+        local _preflight_errors=""
+        if kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes --no-headers 2>/dev/null | awk '$2 != "Ready" {found = 1} END {exit !found}'; then
+            log_info "Nodes are NotReady (no CNI plugin?): skipping the ControlPlaneNodesReady and CreateJob checks"
+            _preflight_errors="ControlPlaneNodesReady,CreateJob"
         fi
-        kubeadm upgrade apply "v${UPGRADE_TARGET_VERSION}" --yes --ignore-preflight-errors="${_preflight_errors}"
+        if [ "$(_detect_init_system)" != "systemd" ] || _kubeadm_cgroupv1_allowed; then
+            _preflight_errors="${_preflight_errors}${_preflight_errors:+,}SystemVerification"
+        fi
+        # shellcheck disable=SC2046 # empty or "--patches DIR"
+        kubeadm upgrade apply "v${UPGRADE_TARGET_VERSION}" --yes ${_preflight_errors:+--ignore-preflight-errors=$_preflight_errors} \
+            $(_kubeadm_prerelease_upgrade_args "$UPGRADE_TARGET_VERSION") $(_kubeadm_patches_args)
     else
         log_info "Step 2: Running kubeadm upgrade node..."
         # On workers, the default kubelet kubeconfig may lack permissions to read
@@ -49,19 +132,20 @@ upgrade_node_local() {
             _kubeconfig_arg="--kubeconfig ${UPGRADE_ADMIN_CONF}"
         fi
         # shellcheck disable=SC2086,SC2046 # intentional word splitting
-        kubeadm upgrade node $_kubeconfig_arg $(_kubeadm_preflight_ignore_args)
+        kubeadm upgrade node $_kubeconfig_arg $(_kubeadm_preflight_ignore_args) $(_kubeadm_patches_args)
     fi
 
-    # 3. Upgrade kubelet + kubectl packages
+    # 3. Upgrade kubelet + kubectl packages (and CRI-O, which follows the minor)
     log_info "Step 3: Upgrading kubelet and kubectl to ${UPGRADE_TARGET_VERSION}..."
-    _dispatch "upgrade_kubelet_kubectl_${DISTRO_FAMILY}" "$UPGRADE_TARGET_VERSION"
-
-    # 4. Restart kubelet
-    log_info "Step 4: Restarting kubelet..."
-    _service_reload
-    if ! _service_restart kubelet; then
-        log_warn "kubelet restart returned non-zero. It may take a moment to stabilize."
+    k8s_upgrade_node "$UPGRADE_TARGET_VERSION" || return 1
+    if crio_in_use; then
+        crio_set_minor "$minor_version" || return 1
     fi
+
+    # 4. Restart kubelet and verify
+    log_info "Step 4: Restarting kubelet..."
+    _upgrade_restart_kubelet || return 1
+    _upgrade_verify_local_versions "$UPGRADE_TARGET_VERSION" || return 1
 
     show_versions
     log_info "Node upgrade complete (role: $role)!"
@@ -142,7 +226,7 @@ upgrade_dry_run() {
     log_info "=== End of dry-run (no changes made) ==="
 }
 
-# === Upgrade argument parsing (moved from lib/validation.sh) ===
+# === Upgrade argument parsing ===
 # Help message for upgrade
 show_upgrade_help() {
     echo "Usage: $0 upgrade [options]"
@@ -158,7 +242,11 @@ show_upgrade_help() {
     echo "    --skip-drain              Skip drain/uncordon (for single-node clusters)"
     echo "    --no-rollback             Disable automatic rollback on failure"
     echo "    --auto-step-upgrade       Automatically step through intermediate minor versions"
+    echo "    --rollback-to VER         Reinstall packages at VER after a failed upgrade (replaces --kubernetes-version)"
+    echo "    --patches DIR     Apply kubeadm patches from DIR (use the same patches as on init/join)"
     echo "    --distro FAMILY           Override distro family detection"
+    echo "    --http-proxy URL, --https-proxy URL, --no-proxy LIST"
+    echo "                              Proxy for package downloads (see 'init --help')"
     _show_help_footer "    "
     echo ""
     echo "Remote mode (orchestrate from local machine via SSH):"
@@ -173,6 +261,8 @@ show_upgrade_help() {
     echo "    --no-rollback             Disable automatic rollback on failure"
     echo "    --auto-step-upgrade       Automatically step through intermediate minor versions"
     echo "    --resume                  Resume a previously interrupted upgrade"
+    echo "    --http-proxy URL, --https-proxy URL, --no-proxy LIST"
+    echo "                              Proxy settings for every node"
     _show_help_footer "    " "Show upgrade plan and exit"
     echo ""
     echo "Examples:"
@@ -199,8 +289,8 @@ _parse_upgrade_common_arg() {
     case "$arg" in
         --kubernetes-version)
             _require_value "$argc" "$arg" "$next"
-            if ! echo "$next" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-                log_error "--kubernetes-version for upgrade must be MAJOR.MINOR.PATCH (e.g., 1.33.2)"
+            if ! echo "$next" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$'; then
+                log_error "--kubernetes-version for upgrade must be MAJOR.MINOR.PATCH (e.g., 1.33.2, or a prerelease such as 1.38.0-beta.0)"
                 exit 1
             fi
             UPGRADE_TARGET_VERSION="$next"
@@ -234,12 +324,34 @@ parse_upgrade_local_args() {
                 UPGRADE_FIRST_CONTROL_PLANE=true
                 shift
                 ;;
+            --patches)
+                _require_value $# "$1" "${2:-}"
+                if [ ! -d "$2" ]; then
+                    log_error "--patches directory not found: $2"
+                    exit 1
+                fi
+                # shellcheck disable=SC2034 # used by lib/node/kubeadm.sh and lib/cluster/upgrade.sh
+                KUBEADM_PATCHES_DIR=$(cd "$2" && pwd)
+                shift 2
+                ;;
+            --rollback-to)
+                _require_value $# "$1" "${2:-}"
+                if ! echo "$2" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+                    log_error "--rollback-to must be MAJOR.MINOR.PATCH (e.g., 1.36.6)"
+                    exit 1
+                fi
+                UPGRADE_ROLLBACK_VERSION="$2"
+                shift 2
+                ;;
             *)
                 if _parse_upgrade_common_arg $# "$1" "${2:-}"; then
                     shift "$_UPGRADE_ARG_SHIFT"
                 elif _is_distro_flag "$1"; then
                     _parse_distro_flag $# "$1" "${2:-}"
                     shift "$_DISTRO_SHIFT"
+                elif _is_proxy_flag "$1"; then
+                    _parse_proxy_flag $# "$1" "${2:-}"
+                    shift "$_PROXY_SHIFT"
                 else
                     log_error "Unknown upgrade option: $1"
                     show_upgrade_help 1
@@ -247,8 +359,12 @@ parse_upgrade_local_args() {
                 ;;
         esac
     done
-    if [ -z "$UPGRADE_TARGET_VERSION" ]; then
+    if [ -z "$UPGRADE_TARGET_VERSION" ] && [ -z "$UPGRADE_ROLLBACK_VERSION" ]; then
         log_error "--kubernetes-version is required for upgrade"
+        exit 1
+    fi
+    if [ -n "$UPGRADE_TARGET_VERSION" ] && [ -n "$UPGRADE_ROLLBACK_VERSION" ]; then
+        log_error "--kubernetes-version and --rollback-to cannot be combined"
         exit 1
     fi
 }
@@ -258,6 +374,16 @@ parse_upgrade_deploy_args() {
     while [ $# -gt 0 ]; do
         case $1 in
             --help|-h) show_upgrade_help ;;
+            --patches)
+                _require_value $# "$1" "${2:-}"
+                if [ ! -d "$2" ]; then
+                    log_error "--patches directory not found: $2"
+                    exit 1
+                fi
+                # shellcheck disable=SC2034 # used by lib/node/kubeadm.sh and lib/cluster/upgrade.sh
+                KUBEADM_PATCHES_DIR=$(cd "$2" && pwd)
+                shift 2
+                ;;
             --distro)
                 _require_value $# "$1" "${2:-}"
                 UPGRADE_PASSTHROUGH_ARGS=$(_passthrough_add_pair "$UPGRADE_PASSTHROUGH_ARGS" "$1" "$2")
@@ -276,6 +402,9 @@ parse_upgrade_deploy_args() {
                             ;;
                     esac
                     shift "$_UPGRADE_ARG_SHIFT"
+                elif _is_proxy_flag "$1"; then
+                    _parse_proxy_flag $# "$1" "${2:-}"
+                    shift "$_PROXY_SHIFT"
                 elif _parse_remote_ssh_args $# "$1" "${2:-}"; then
                     shift "$_REMOTE_SSH_SHIFT"
                 else
@@ -285,6 +414,7 @@ parse_upgrade_deploy_args() {
                 ;;
         esac
     done
+    UPGRADE_PASSTHROUGH_ARGS=$(proxy_forward_args "$UPGRADE_PASSTHROUGH_ARGS")
 }
 
 # Validate upgrade deploy arguments (reuses address validation patterns from validate_deploy_args)
@@ -302,4 +432,26 @@ validate_upgrade_deploy_args() {
     fi
 
     _validate_remote_node_args
+}
+
+# === Runner ===
+
+_upgrade_node_local_main() {
+    _ensure_distro_detected
+    proxy_apply_env
+    if [ -n "$UPGRADE_ROLLBACK_VERSION" ]; then
+        _audit_start rollback "version=${UPGRADE_ROLLBACK_VERSION}"
+        rollback_node_local || return 1
+    else
+        _audit_start upgrade "version=${UPGRADE_TARGET_VERSION}"
+        upgrade_node_local || return 1
+    fi
+    _audit_done
+}
+
+_run_upgrade() {
+    _run_dual_mode upgrade \
+        parse_upgrade_deploy_args validate_upgrade_deploy_args upgrade_dry_run upgrade_cluster \
+        "Local upgrade" parse_upgrade_local_args upgrade_dry_run _upgrade_node_local_main \
+        "$@"
 }

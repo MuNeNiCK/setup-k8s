@@ -3,8 +3,10 @@
 ## setup-k8s.sh
 
 ```
-Usage: setup-k8s.sh <init|join|deploy|upgrade|remove|backup|restore|cleanup|renew|status|preflight> [options]
+Usage: setup-k8s.sh <subcommand> [options]
 ```
+
+Run `setup-k8s.sh <subcommand> --help` for the options of a subcommand.
 
 ### Subcommands
 
@@ -24,7 +26,7 @@ Usage: setup-k8s.sh <init|join|deploy|upgrade|remove|backup|restore|cleanup|rene
 
 ### Global Options
 
-These options apply to all subcommands and are parsed before subcommand-specific arguments.
+These options apply to all subcommands. They are handled by the entry point and may appear anywhere after the subcommand; all other options are passed to the subcommand unchanged.
 
 | Option | Description | Default | Example |
 |--------|-------------|---------|---------|
@@ -35,29 +37,36 @@ These options apply to all subcommands and are parsed before subcommand-specific
 | `--audit-syslog` | Send structured audit events to syslog via `logger` | — | `--audit-syslog` |
 | `--collect-diagnostics` | Collect node diagnostics (kubelet/containerd logs, events) on failure | — | `--collect-diagnostics` |
 | `--resume` | Resume a previously interrupted deploy or upgrade operation | — | `--resume` |
-| `--distro FAMILY` | Override distro family detection (debian, rhel, suse, arch, alpine, generic) | auto-detect | `--distro alpine` |
-| `--help`, `-h` | Display help message | — | `--help` |
+| `--version` | Print the setup-k8s version and exit | — | `--version` |
+| `--help`, `-h` | Display help message (global, or for the given subcommand) | — | `--help` |
+
+`--distro FAMILY` (override distro family detection: debian, rhel, suse, arch, alpine, generic) is a subcommand option accepted by `init`, `join`, `cleanup`, `deploy`, and the remote modes of `upgrade`, `backup`, `restore`, and `renew`.
 
 ### Init/Join Options
 
 | Option | Description | Default | Example |
 |--------|-------------|---------|---------|
 | `--cri RUNTIME` | Container runtime (containerd or crio) | `containerd` | `--cri crio` |
-| `--proxy-mode MODE` | Kube-proxy mode (iptables, ipvs, or nftables; ipvs is deprecated in Kubernetes 1.35+) | `iptables` | `--proxy-mode nftables` |
+| `--proxy-mode MODE` | Kube-proxy mode: `auto` (nftables on Kubernetes 1.33+ with Linux 5.13+, otherwise iptables), `nftables`, `iptables`, or `ipvs` (deprecated in Kubernetes 1.35+) | `auto` | `--proxy-mode nftables` |
 | `--pod-network-cidr CIDR` | Pod network CIDR (IPv4, IPv6, or dual-stack comma-separated) | — | `--pod-network-cidr 10.244.0.0/16,fd00:10:244::/48` |
 | `--apiserver-advertise-address ADDR` | API server advertise address | — | `--apiserver-advertise-address 192.168.1.10` |
 | `--control-plane-endpoint ENDPOINT` | Control plane endpoint | — | `--control-plane-endpoint cluster.example.com` |
 | `--service-cidr CIDR` | Service CIDR (IPv4, IPv6, or dual-stack comma-separated) | — | `--service-cidr 10.96.0.0/12,fd00:20::/108` |
-| `--kubernetes-version VER` | Kubernetes version | — | `--kubernetes-version 1.29` |
-| `--join-token TOKEN` | Join token (join only) | — | `--join-token abcdef.1234567890abcdef` |
-| `--join-address ADDR` | Control plane address (join only) | — | `--join-address 192.168.1.10:6443` |
-| `--discovery-token-hash HASH` | Discovery token hash (join only) | — | `--discovery-token-hash sha256:abc...` |
+| `--kubernetes-version VER` | Kubernetes version: MAJOR.MINOR (latest patch) or MAJOR.MINOR.PATCH (pinned) | latest stable | `--kubernetes-version 1.37.2` |
+| `--image-repository REPO` | Pull control-plane images from REPO instead of registry.k8s.io | — | `--image-repository registry.example.com/k8s` |
+| `--patches DIR` | Apply kubeadm patches from DIR (`kubeadm --patches`); with `deploy`, a local directory copied to every node | — | `--patches ./patches` |
+| `--token TOKEN` | Join token (join only) | — | `--token abcdef.1234567890abcdef` |
+| `ADDR`, `--join-address ADDR` | API server address (join only); the first argument, as in `kubeadm join` | — | `join 192.168.1.10:6443 …` |
+| `--discovery-token-ca-cert-hash HASH` | Discovery token hash (join only) | — | `--discovery-token-ca-cert-hash sha256:abc...` |
 | `--control-plane` | Join as control-plane node (join only, HA cluster) | — | `--control-plane` |
 | `--certificate-key KEY` | Certificate key for control-plane join | — | `--certificate-key abc123` |
 | `--ha` | Enable HA mode with kube-vip (init only) | — | `--ha` |
 | `--ha-vip ADDRESS` | VIP address (required when --ha is set) | — | `--ha-vip 192.168.1.100` |
 | `--ha-interface IFACE` | Network interface for VIP | auto-detect | `--ha-interface eth0` |
-| `--swap-enabled` | Keep swap enabled (K8s 1.28+, NodeSwap LimitedSwap) | — | `--swap-enabled` |
+| `--swap-enabled` | Keep swap enabled (Kubernetes 1.30+, NodeSwap LimitedSwap) | — | `--swap-enabled` |
+| `--http-proxy URL` | HTTP proxy for downloads, the package manager, and image pulls | `$http_proxy` | `--http-proxy http://proxy:3128` |
+| `--https-proxy URL` | HTTPS proxy | `$https_proxy` | `--https-proxy http://proxy:3128` |
+| `--no-proxy LIST` | Extra destinations without the proxy; the cluster's addresses and networks are always added (see [HTTP proxy](configuration.md#http-proxy)) | `$no_proxy` | `--no-proxy .example.com` |
 | `--enable-completion BOOL` | Enable shell completion setup | `true` | `--enable-completion false` |
 | `--completion-shells LIST` | Shells to configure (auto, bash, zsh, fish, or comma-separated) | `auto` | `--completion-shells bash,zsh` |
 | `--install-helm BOOL` | Install Helm package manager | `false` | `--install-helm true` |
@@ -82,7 +91,7 @@ These options are shared across all remote subcommands: `deploy`, `upgrade`, `re
 
 ### Deploy Options
 
-Options specific to the `deploy` subcommand. Init/join options like `--cri`, `--proxy-mode`, `--kubernetes-version`, `--pod-network-cidr`, `--service-cidr`, and `--control-plane-endpoint` are passed through to remote nodes.
+Options specific to the `deploy` subcommand. Init/join options like `--cri`, `--proxy-mode`, `--kubernetes-version`, `--image-repository`, `--pod-network-cidr`, `--service-cidr`, and `--control-plane-endpoint` are passed through to remote nodes; `--patches` copies the local directory to every node.
 
 | Option | Description | Default | Example |
 |--------|-------------|---------|---------|
@@ -90,9 +99,10 @@ Options specific to the `deploy` subcommand. Init/join options like `--cri`, `--
 | `--workers IPs` | Comma-separated worker nodes (user@ip or ip) | — | `--workers 10.0.0.3,10.0.0.4` |
 | `--ha-vip ADDRESS` | VIP for HA (required when >1 control-plane) | — | `--ha-vip 10.0.0.100` |
 | `--ha-interface IFACE` | Network interface for VIP | auto-detect | `--ha-interface eth0` |
-| `--kubeadm-config-patch FILE` | Extra kubeadm config YAML to append (merged as additional `---` document) | — | `--kubeadm-config-patch custom.yaml` |
-| `--api-server-extra-sans NAMES` | Additional SANs for the API server certificate (comma-separated) | — | `--api-server-extra-sans lb.example.com,10.0.0.200` |
+| `--kubeadm-config-patch FILE` | Extra kubeadm config YAML: documents of a generated kind replace its top-level fields, others are added (see [Configuration](configuration.md#kubeadm-configuration)) | — | `--kubeadm-config-patch custom.yaml` |
+| `--apiserver-cert-extra-sans NAMES` | Additional SANs for the API server certificate (comma-separated) | — | `--apiserver-cert-extra-sans lb.example.com,10.0.0.200` |
 | `--kubelet-node-ip IP` | Set kubelet `--node-ip` on all nodes | — | `--kubelet-node-ip 10.0.0.1` |
+| `--http-proxy URL`, `--https-proxy URL`, `--no-proxy LIST` | Proxy for every node (see [HTTP proxy](configuration.md#http-proxy)) | — | `--https-proxy http://proxy:3128` |
 
 ### Upgrade Options (local mode)
 
@@ -115,6 +125,8 @@ Options for the `upgrade` subcommand when orchestrating remotely via SSH.
 | `--kubernetes-version VER` | Target version in MAJOR.MINOR.PATCH format | — (required) | `--kubernetes-version 1.33.2` |
 | `--skip-drain` | Skip drain/uncordon for all nodes | — | `--skip-drain` |
 | `--no-rollback` | Disable automatic rollback on upgrade failure | — | `--no-rollback` |
+| `--patches DIR` | Apply kubeadm patches from DIR during the upgrade (remote mode: local directory copied to every node) | — | `--patches ./patches` |
+| `--rollback-to VER` | Local mode: reinstall kubeadm, kubelet, and kubectl at VER after a failed upgrade (instead of `--kubernetes-version`) | — | `--rollback-to 1.36.6` |
 | `--auto-step-upgrade` | Automatically step through intermediate minor versions (e.g., 1.31 → 1.32 → 1.33) | — | `--auto-step-upgrade` |
 
 ### Remove Options
@@ -201,11 +213,11 @@ Options for the `preflight` subcommand. Runs locally with root privileges to ver
 |--------|-------------|---------|---------|
 | `--mode MODE` | Check mode (`init` or `join`) | `init` | `--mode join` |
 | `--cri RUNTIME` | Container runtime to check (`containerd` or `crio`) | `containerd` | `--cri crio` |
-| `--proxy-mode MODE` | Proxy mode to check (`iptables`, `ipvs`, or `nftables`) | `iptables` | `--proxy-mode ipvs` |
-| `--kubernetes-version VER` | Target Kubernetes minor version for compatibility checks | — | `--kubernetes-version 1.36` |
+| `--proxy-mode MODE` | Proxy mode to check (`auto`, `iptables`, `ipvs`, or `nftables`) | `auto` | `--proxy-mode ipvs` |
+| `--kubernetes-version VER` | Target Kubernetes version for compatibility checks | — | `--kubernetes-version 1.38` |
 | `--preflight-strict` | Treat warnings as failures (exit non-zero on any warning) | — | `--preflight-strict` |
 
-Checks performed: CPU count (>= 2), memory (>= 1700 MB), disk space, required port availability, kernel modules, IPv4 forwarding, CRI installation, containerd v2 readiness for Kubernetes 1.36+, swap state, cgroups v2, SELinux state, AppArmor state, unattended upgrades detection, existing cluster detection (init only), and network connectivity.
+Checks performed: CPU count (>= 2), memory (>= 1700 MB), disk space, required port availability, kernel modules, IPv4 forwarding, CRI installation, containerd 2 readiness (fails when the target Kubernetes version no longer supports containerd 1.x, which is 1.38+; warns otherwise), swap state, cgroups v2, SELinux mode and user namespace support (info), AppArmor state, unattended upgrades detection, existing cluster detection (init only), and network connectivity. With `--proxy-mode auto`, the checks use the mode `auto` resolves to on the node.
 
 ### Cleanup Options
 
