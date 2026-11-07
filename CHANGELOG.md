@@ -52,6 +52,9 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Changed
 
+- The full VM matrices run for pull requests into `main` (before a release)
+  and on demand, instead of on every push to `develop` and `main` and weekly.
+  Every pull request still runs the Ubuntu 24.04 smoke test.
 - The VM tests check what each run asks for (Kubernetes version, runtime,
   proxy mode, networking, swap, kubeadm patches, tools, completion, logging),
   that cleanup leaves nothing behind, that the HA VIP serves the API server

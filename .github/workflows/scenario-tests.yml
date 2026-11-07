@@ -1,24 +1,23 @@
 name: Scenario Tests
 
+# The full VM matrices run before a release (pull requests into main) and on
+# demand (Actions > Run workflow).
 on:
-  push:
-    branches: [main, develop]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  # One run per branch; a newer push to develop replaces the running one,
-  # runs for main are never cancelled.
-  group: scenario-tests-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # One run per pull request (per branch for manual runs); a newer push replaces it
+  group: scenario-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   scenario-tests:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 240
     strategy:
