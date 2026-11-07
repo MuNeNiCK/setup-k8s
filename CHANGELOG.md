@@ -52,6 +52,12 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Changed
 
+- The VM tests check what each run asks for (Kubernetes version, runtime,
+  proxy mode, networking, swap, kubeadm patches, tools, completion, logging),
+  that cleanup leaves nothing behind, that the HA VIP serves the API server
+  and moves when the leader fails, that renewed certificates are new and
+  served, and exact versions after upgrades. Unit tests that only checked
+  that functions exist were removed.
 - kube-proxy runs in nftables mode by default where the node supports it (see
   `--proxy-mode auto`); use `--proxy-mode iptables` for the previous default.
 - containerd 1.x: `preflight` fails for Kubernetes 1.38+ (the first release
@@ -108,6 +114,34 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Fixed
 
+- Commands no longer report success without checking the result:
+  - `renew` fails without crictl, waits until the control-plane components
+    run in new containers and the API server is ready, and checks that each
+    renewed certificate expires later than before.
+  - `upgrade` checks that the cluster reports the target version for each
+    node's kubelet and for the API server, that kubelet stays running, and
+    fails when a node stays cordoned. kubeadm's node-readiness checks are
+    skipped only while nodes are NotReady (no CNI plugin).
+  - `remove` succeeds only when the node object is gone; nodes are found by
+    address or hostname, never by guessing the address as the node name.
+  - `backup` checks the snapshot with `etcdutl snapshot status` and that the
+    copy (or download) is identical; `restore` waits for the API server.
+  - `status` exits 1 when kubelet, the container runtime, the API server, or
+    etcd does not work and 2 when Kubernetes is not set up (always 0 before).
+  - `cleanup` checks for leftovers independently of the removal steps
+    (packages, holds and locks, repositories and keys, binaries, kubelet
+    configuration), removes all distribution packages of the install on
+    Alpine and Arch (cri-tools/crictl and cni-plugins were left), and
+    releases the kube-vip VIP.
+  - HA `init` fails when the control-plane certificates cannot be uploaded;
+    CRI-O is restarted to load its configuration and must be running; host
+    preparation checks cgroups and shared mount propagation.
+- `--audit-syslog` had no effect on `init`, `join`, `cleanup`, and local
+  `upgrade`: they now write started, completed, and failed records.
+- `--kubeadm-config-patch` with a `KubeletConfiguration` or
+  `KubeProxyConfiguration` together with `--swap-enabled` or `--proxy-mode`
+  made kubeadm reject the config (two documents of one kind); such documents
+  are now merged.
 - `init` and `join` with `--dry-run` installed base packages, refreshed the
   package indexes, and prepared the host before printing "no changes made".
 - Remote commands (deploy, upgrade, backup, restore, renew): a command that
