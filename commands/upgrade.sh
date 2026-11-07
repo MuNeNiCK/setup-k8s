@@ -232,6 +232,8 @@ show_upgrade_help() {
     echo "    --rollback-to VER         Reinstall packages at VER after a failed upgrade (replaces --kubernetes-version)"
     echo "    --kubeadm-patches DIR     Apply kubeadm patches from DIR (use the same patches as on init/join)"
     echo "    --distro FAMILY           Override distro family detection"
+    echo "    --http-proxy URL, --https-proxy URL, --no-proxy LIST"
+    echo "                              Proxy for package downloads (see 'init --help')"
     _show_help_footer "    "
     echo ""
     echo "Remote mode (orchestrate from local machine via SSH):"
@@ -246,6 +248,8 @@ show_upgrade_help() {
     echo "    --no-rollback             Disable automatic rollback on failure"
     echo "    --auto-step-upgrade       Automatically step through intermediate minor versions"
     echo "    --resume                  Resume a previously interrupted upgrade"
+    echo "    --http-proxy URL, --https-proxy URL, --no-proxy LIST"
+    echo "                              Proxy settings for every node"
     _show_help_footer "    " "Show upgrade plan and exit"
     echo ""
     echo "Examples:"
@@ -332,6 +336,9 @@ parse_upgrade_local_args() {
                 elif _is_distro_flag "$1"; then
                     _parse_distro_flag $# "$1" "${2:-}"
                     shift "$_DISTRO_SHIFT"
+                elif _is_proxy_flag "$1"; then
+                    _parse_proxy_flag $# "$1" "${2:-}"
+                    shift "$_PROXY_SHIFT"
                 else
                     log_error "Unknown upgrade option: $1"
                     show_upgrade_help 1
@@ -382,6 +389,9 @@ parse_upgrade_deploy_args() {
                             ;;
                     esac
                     shift "$_UPGRADE_ARG_SHIFT"
+                elif _is_proxy_flag "$1"; then
+                    _parse_proxy_flag $# "$1" "${2:-}"
+                    shift "$_PROXY_SHIFT"
                 elif _parse_remote_ssh_args $# "$1" "${2:-}"; then
                     shift "$_REMOTE_SSH_SHIFT"
                 else
@@ -391,6 +401,7 @@ parse_upgrade_deploy_args() {
                 ;;
         esac
     done
+    UPGRADE_PASSTHROUGH_ARGS=$(proxy_forward_args "$UPGRADE_PASSTHROUGH_ARGS")
 }
 
 # Validate upgrade deploy arguments (reuses address validation patterns from validate_deploy_args)
@@ -414,6 +425,7 @@ validate_upgrade_deploy_args() {
 
 _upgrade_node_local_main() {
     _ensure_distro_detected
+    proxy_apply_env
     if [ -n "$UPGRADE_ROLLBACK_VERSION" ]; then
         _audit_start rollback "version=${UPGRADE_ROLLBACK_VERSION}"
         rollback_node_local || return 1

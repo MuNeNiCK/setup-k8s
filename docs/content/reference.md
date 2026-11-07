@@ -65,6 +65,9 @@ These options apply to all subcommands. They are handled by the entry point and 
 | `--ha-vip ADDRESS` | VIP address (required when --ha is set) | — | `--ha-vip 192.168.1.100` |
 | `--ha-interface IFACE` | Network interface for VIP | auto-detect | `--ha-interface eth0` |
 | `--swap-enabled` | Keep swap enabled (Kubernetes 1.30+, NodeSwap LimitedSwap) | — | `--swap-enabled` |
+| `--http-proxy URL` | HTTP proxy for downloads, the package manager, and image pulls | `$http_proxy` | `--http-proxy http://proxy:3128` |
+| `--https-proxy URL` | HTTPS proxy | `$https_proxy` | `--https-proxy http://proxy:3128` |
+| `--no-proxy LIST` | Extra destinations without the proxy; the cluster's addresses and networks are always added (see [HTTP proxy](configuration.md#http-proxy)) | `$no_proxy` | `--no-proxy .example.com` |
 | `--enable-completion BOOL` | Enable shell completion setup | `true` | `--enable-completion false` |
 | `--completion-shells LIST` | Shells to configure (auto, bash, zsh, fish, or comma-separated) | `auto` | `--completion-shells bash,zsh` |
 | `--install-helm BOOL` | Install Helm package manager | `false` | `--install-helm true` |
@@ -100,6 +103,7 @@ Options specific to the `deploy` subcommand. Init/join options like `--cri`, `--
 | `--kubeadm-config-patch FILE` | Extra kubeadm config YAML: documents of a generated kind replace its top-level fields, others are added (see [Configuration](configuration.md#kubeadm-configuration)) | — | `--kubeadm-config-patch custom.yaml` |
 | `--api-server-extra-sans NAMES` | Additional SANs for the API server certificate (comma-separated) | — | `--api-server-extra-sans lb.example.com,10.0.0.200` |
 | `--kubelet-node-ip IP` | Set kubelet `--node-ip` on all nodes | — | `--kubelet-node-ip 10.0.0.1` |
+| `--http-proxy URL`, `--https-proxy URL`, `--no-proxy LIST` | Proxy for every node (see [HTTP proxy](configuration.md#http-proxy)) | — | `--https-proxy http://proxy:3128` |
 
 ### Upgrade Options (local mode)
 

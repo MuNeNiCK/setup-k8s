@@ -24,6 +24,10 @@ Options (init and join):
   --kubelet-node-ip IP      Set the kubelet node IP
   --swap-enabled            Keep swap enabled (NodeSwap, LimitedSwap; Kubernetes 1.30+)
   --distro FAMILY           Override distro family detection (debian, rhel, suse, arch, alpine, generic)
+  --http-proxy URL          HTTP proxy for downloads and image pulls (default: $http_proxy)
+  --https-proxy URL         HTTPS proxy (default: $https_proxy)
+  --no-proxy LIST           Extra destinations without the proxy (default: $no_proxy); the
+                            cluster's own addresses and networks are always added
   --enable-completion BOOL  Set up shell completion (default: true)
   --completion-shells LIST  Shells to configure: auto, bash, zsh, fish, or a comma-separated list
   --install-helm BOOL       Install Helm (default: false)
@@ -223,6 +227,9 @@ parse_setup_args() {
                 if _is_distro_flag "$1"; then
                     _parse_distro_flag $# "$1" "${2:-}"
                     shift "$_DISTRO_SHIFT"
+                elif _is_proxy_flag "$1"; then
+                    _parse_proxy_flag $# "$1" "${2:-}"
+                    shift "$_PROXY_SHIFT"
                 else
                     log_error "Unknown option: $1"
                     log_error "Run with --help for usage information"
@@ -358,6 +365,8 @@ _run_setup() {
     if [ -z "${DISTRO_FAMILY:-}" ]; then
         detect_distribution
     fi
+    # Downloads (version lookup, packages) go through the proxy, if any
+    proxy_apply_env
 
     # A dry run changes nothing: no package installs or index refreshes, and
     # no host preparation. Values that need missing tools (curl) are reported
@@ -418,8 +427,10 @@ _run_setup() {
     log_info "Setting up container runtime: ${CRI}..."
     if [ "$CRI" = "containerd" ]; then
         containerd_install
+        proxy_verify_runtime containerd
     else
         crio_install
+        proxy_verify_runtime crio
     fi
 
     log_info "Performing pre-installation cleanup..."
