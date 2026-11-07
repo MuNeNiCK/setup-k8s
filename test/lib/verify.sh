@@ -83,9 +83,7 @@ verify_setup() {
         case "$distro" in
             alpine-*|archlinux-*) ;;  # the distribution's version
             *)
-                local marker=stable
-                [[ "$flags" == *" --prerelease "* ]] && marker=latest
-                want=$(curl -fsSL --retry 3 "https://dl.k8s.io/release/${marker}.txt" | sed 's/^v//')
+                want=$(curl -fsSL --retry 3 "https://dl.k8s.io/release/stable.txt" | sed 's/^v//')
                 ;;
         esac
     fi

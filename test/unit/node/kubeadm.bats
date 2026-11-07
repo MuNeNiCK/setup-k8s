@@ -178,14 +178,15 @@ FAKE
     rm -f "$cfg"
 }
 
-@test "parse_setup_args accepts patch versions, prerelease, image repository, and patches" {
+@test "parse_setup_args accepts patch and prerelease versions, image repository, and patches" {
     load_modules; quiet_logs
     local dir="$BATS_TEST_TMPDIR/patches"
     mkdir -p "$dir"
-    parse_setup_args --kubernetes-version 1.37.2 --prerelease --image-repository mirror.example.com/k8s --patches "$dir"
-    [ "$K8S_VERSION" = 1.37 ]
+    parse_setup_args --kubernetes-version 1.38.0-beta.0 --image-repository mirror.example.com/k8s --patches "$dir"
+    [ "$K8S_VERSION" = 1.38 ]
+    [ "$K8S_PATCH_VERSION" = 1.38.0-beta.0 ]
+    parse_setup_args --kubernetes-version 1.37.2
     [ "$K8S_PATCH_VERSION" = 1.37.2 ]
-    [ "$K8S_PRERELEASE" = true ]
     [ "$KUBEADM_IMAGE_REPOSITORY" = mirror.example.com/k8s ]
     [ "$KUBEADM_PATCHES_DIR" = "$dir" ]
     run parse_setup_args --kubernetes-version 1.37.2.1
@@ -213,12 +214,41 @@ FAKE
     fake_calls | grep -q 'https://dl.k8s.io/release/latest-1.38.txt'
 }
 
-@test "--prerelease is rejected with distribution Kubernetes packages" {
+@test "an unreleased minor or a prerelease version selects the prerelease channels" {
     load_modules; quiet_logs
-    # shellcheck disable=SC2034 # read by determine_k8s_version
-    K8S_PRERELEASE=true DISTRO_K8S_SOURCE=distro K8S_VERSION=1.34
-    run determine_k8s_version
-    [ "$status" -ne 0 ]
+    _has_cgroupv2() { return 0; }
+    fake_cmd curl 0 v1.37.2
+    K8S_VERSION=1.38 K8S_PATCH_VERSION=""
+    determine_k8s_version
+    [ "$K8S_PRERELEASE" = true ]
+    K8S_VERSION=1.37
+    determine_k8s_version
+    [ "$K8S_PRERELEASE" = false ]
+    K8S_VERSION=1.36
+    determine_k8s_version
+    [ "$K8S_PRERELEASE" = false ]
+    # An exact version decides without asking dl.k8s.io
+    : > "$FAKE_LOG"
+    K8S_VERSION=1.38 K8S_PATCH_VERSION=1.38.0-rc.1
+    determine_k8s_version
+    [ "$K8S_PRERELEASE" = true ]
+    [ ! -s "$FAKE_LOG" ]
+}
+
+@test "prerelease versions use the packaged notation (1.38.0~beta.0)" {
+    load_modules; quiet_logs
+    [ "$(_pkg_version_native 1.38.0-beta.0)" = "1.38.0~beta.0" ]
+    [ "$(_pkg_version_native 1.37.2)" = "1.37.2" ]
+    DISTRO_PKG=apt
+    fake_cmd apt-cache 0 " kubeadm | 1.38.0~beta.0-1.1 | https://pkgs.k8s.io/core:/prerelease:/v1.38/deb  Packages"
+    [ "$(_pkg_apt_resolve_version kubeadm 1.38.0-beta.0)" = "1.38.0~beta.0-1.1" ]
+}
+
+@test "kubeadm upgrade apply allows the prerelease target kinds" {
+    load_modules; quiet_logs
+    [ "$(_kubeadm_prerelease_upgrade_args 1.38.0-beta.0)" = "--allow-experimental-upgrades" ]
+    [ "$(_kubeadm_prerelease_upgrade_args 1.38.0-rc.1)" = "--allow-release-candidate-upgrades" ]
+    [ -z "$(_kubeadm_prerelease_upgrade_args 1.38.0)" ]
 }
 
 @test "a config patch of a generated kind is merged, not added as a second document" {

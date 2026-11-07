@@ -53,7 +53,6 @@ These options apply to all subcommands. They are handled by the entry point and 
 | `--control-plane-endpoint ENDPOINT` | Control plane endpoint | — | `--control-plane-endpoint cluster.example.com` |
 | `--service-cidr CIDR` | Service CIDR (IPv4, IPv6, or dual-stack comma-separated) | — | `--service-cidr 10.96.0.0/12,fd00:20::/108` |
 | `--kubernetes-version VER` | Kubernetes version: MAJOR.MINOR (latest patch) or MAJOR.MINOR.PATCH (pinned) | latest stable | `--kubernetes-version 1.37.2` |
-| `--prerelease` | Install the next release from the prerelease channels (pkgs.k8s.io, isv:cri-o) | — | `--prerelease` |
 | `--image-repository REPO` | Pull control-plane images from REPO instead of registry.k8s.io | — | `--image-repository registry.example.com/k8s` |
 | `--patches DIR` | Apply kubeadm patches from DIR (`kubeadm --patches`); with `deploy`, a local directory copied to every node | — | `--patches ./patches` |
 | `--token TOKEN` | Join token (join only) | — | `--token abcdef.1234567890abcdef` |
@@ -92,7 +91,7 @@ These options are shared across all remote subcommands: `deploy`, `upgrade`, `re
 
 ### Deploy Options
 
-Options specific to the `deploy` subcommand. Init/join options like `--cri`, `--proxy-mode`, `--kubernetes-version`, `--prerelease`, `--image-repository`, `--pod-network-cidr`, `--service-cidr`, and `--control-plane-endpoint` are passed through to remote nodes; `--patches` copies the local directory to every node.
+Options specific to the `deploy` subcommand. Init/join options like `--cri`, `--proxy-mode`, `--kubernetes-version`, `--image-repository`, `--pod-network-cidr`, `--service-cidr`, and `--control-plane-endpoint` are passed through to remote nodes; `--patches` copies the local directory to every node.
 
 | Option | Description | Default | Example |
 |--------|-------------|---------|---------|

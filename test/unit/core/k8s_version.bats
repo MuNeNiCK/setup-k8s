@@ -69,6 +69,7 @@ EOF
 @test "determine_k8s_version warns about cgroups v1 from the cgroupv2-required minimum" {
     _has_cgroupv2() { return 1; }
     log_warn() { echo "WARN: $*"; }
+    fake_cmd curl 0 v1.37.2
     K8S_VERSION=1.35
     run determine_k8s_version
     [ "$status" -eq 0 ]

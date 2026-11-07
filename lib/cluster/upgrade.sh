@@ -15,12 +15,12 @@ _get_current_k8s_version() {
 _validate_upgrade_version() {
     local current="$1" target="$2"
 
-    # Validate MAJOR.MINOR.PATCH format
-    if ! echo "$current" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    # Validate MAJOR.MINOR.PATCH[-prerelease] format
+    if ! echo "$current" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$'; then
         log_error "Invalid current version format: '${current}' (expected MAJOR.MINOR.PATCH)"
         return 1
     fi
-    if ! echo "$target" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    if ! echo "$target" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$'; then
         log_error "Invalid target version format: '${target}' (expected MAJOR.MINOR.PATCH)"
         return 1
     fi
@@ -28,14 +28,25 @@ _validate_upgrade_version() {
     local cur_major cur_minor cur_patch tar_major tar_minor tar_patch
     cur_major=$(echo "$current" | cut -d. -f1)
     cur_minor=$(echo "$current" | cut -d. -f2)
-    cur_patch=$(echo "$current" | cut -d. -f3)
+    cur_patch=$(echo "$current" | cut -d. -f3 | cut -d- -f1)
     tar_major=$(echo "$target" | cut -d. -f1)
     tar_minor=$(echo "$target" | cut -d. -f2)
-    tar_patch=$(echo "$target" | cut -d. -f3)
+    tar_patch=$(echo "$target" | cut -d. -f3 | cut -d- -f1)
 
-    # Same version
+    # Same MAJOR.MINOR.PATCH: a prerelease is older than its release
     if [ "$cur_major" -eq "$tar_major" ] && [ "$cur_minor" -eq "$tar_minor" ] && [ "$cur_patch" -eq "$tar_patch" ]; then
-        log_error "Current version ($current) is already at target version ($target)"
+        if [ "$current" = "$target" ]; then
+            log_error "Current version ($current) is already at target version ($target)"
+            return 1
+        fi
+        if k8s_is_prerelease "$current" && ! k8s_is_prerelease "$target"; then
+            return 0
+        fi
+        if k8s_is_prerelease "$current" && k8s_is_prerelease "$target" \
+            && [ "$(printf '%s\n%s\n' "${current#*-}" "${target#*-}" | sort -t. -k1,1 -k2,2n | tail -n 1)" = "${target#*-}" ]; then
+            return 0
+        fi
+        log_error "Downgrade not supported: $current -> $target"
         return 1
     fi
 

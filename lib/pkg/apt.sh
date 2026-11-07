@@ -18,7 +18,8 @@ _pkg_apt_base_deps() {
 # MAJOR.MINOR.PATCH matches "PATCH-*" exactly; MAJOR.MINOR matches the newest
 # "MINOR.*". Fails when nothing matches.
 _pkg_apt_resolve_version() {
-    local name="$1" version="$2" prefix candidates match
+    local name="$1" version prefix candidates match
+    version=$(_pkg_version_native "$2")
     case "$version" in
         *.*.*) prefix="${version}-" ;;
         *)     prefix="${version}." ;;

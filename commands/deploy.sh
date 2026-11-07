@@ -468,7 +468,6 @@ show_deploy_help() {
     echo "  --install-kustomize BOOL  Install Kustomize (default: false)"
     echo "  --completion-shells LIST  Shells to configure (auto, bash, zsh, fish, or comma-separated)"
     echo "  --kubernetes-version VER Kubernetes version: MAJOR.MINOR or MAJOR.MINOR.PATCH (e.g., 1.37 or 1.37.2)"
-    echo "  --prerelease            Install the next release from the prerelease channels"
     echo "  --image-repository REPO Pull control-plane images from REPO"
     echo "  --patches DIR   Apply kubeadm patches from local DIR on every node"
     echo "  --pod-network-cidr CIDR Pod network CIDR"
@@ -518,10 +517,6 @@ parse_deploy_args() {
                 fi
                 KUBEADM_PATCHES_DIR=$(cd "$2" && pwd)
                 shift 2
-                ;;
-            --prerelease)
-                DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_flag "$DEPLOY_PASSTHROUGH_ARGS" "$1")
-                shift
                 ;;
             --cri|--proxy-mode|--kubernetes-version|--image-repository|--pod-network-cidr|--service-cidr|--apiserver-advertise-address|--control-plane-endpoint|--kubeadm-config-patch|--apiserver-cert-extra-sans|--kubelet-node-ip)
                 _require_value $# "$1" "${2:-}"

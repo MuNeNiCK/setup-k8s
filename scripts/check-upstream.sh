@@ -158,7 +158,7 @@ $(k8s_readiness "$m" prerelease)
 
 To do:
 
-- [ ] Run \`test/scenarios/init-cleanup.sh --k8s-version ${m} --setup-args "--prerelease" <distro>\` on the main distributions
+- [ ] Run \`test/scenarios/init-cleanup.sh --k8s-version ${m} <distro>\` on the main distributions (an unreleased minor installs the prerelease)
 - [ ] Check the release notes draft for removals: https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG/CHANGELOG-${m}.md
 EOF
             fi

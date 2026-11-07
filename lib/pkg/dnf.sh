@@ -75,7 +75,7 @@ _pkg_dnf_install() {
             set -- "$@" "$name"
         else
             case "${spec#*=}" in
-                *.*.*) set -- "$@" "${name}-${spec#*=}-*" ;;
+                *.*.*) set -- "$@" "${name}-$(_pkg_version_native "${spec#*=}")-*" ;;
                 *)     set -- "$@" "$name" ;;  # repositories are per minor version
             esac
         fi
@@ -98,8 +98,8 @@ _pkg_dnf_install() {
         case "${spec#*=}" in
             *.*.*)
                 installed_ver=$(rpm -q --qf '%{VERSION}' "$name" 2>/dev/null) || installed_ver=""
-                if [ -n "$installed_ver" ] && [ "$installed_ver" != "${spec#*=}" ]; then
-                    older="${older}${older:+ }${name}-${spec#*=}"
+                if [ -n "$installed_ver" ] && [ "$installed_ver" != "$(_pkg_version_native "${spec#*=}")" ]; then
+                    older="${older}${older:+ }${name}-$(_pkg_version_native "${spec#*=}")"
                 fi
                 ;;
         esac

@@ -400,3 +400,16 @@ restart" ]
     rollback_node_local
     grep -qx 'crio 1.36' "$CALLS"
 }
+
+@test "upgrade accepts prerelease targets and orders them before the release" {
+    load_modules; quiet_logs
+    _parse_upgrade_common_arg 2 --kubernetes-version 1.38.0-beta.0
+    [ "$UPGRADE_TARGET_VERSION" = 1.38.0-beta.0 ]
+    _validate_upgrade_version 1.37.2 1.38.0-beta.0
+    _validate_upgrade_version 1.38.0-beta.0 1.38.0
+    _validate_upgrade_version 1.38.0-alpha.3 1.38.0-rc.0
+    run _validate_upgrade_version 1.38.0 1.38.0-rc.1
+    [ "$status" -ne 0 ]
+    run _validate_upgrade_version 1.38.0-beta.0 1.38.0-beta.0
+    [ "$status" -ne 0 ]
+}
