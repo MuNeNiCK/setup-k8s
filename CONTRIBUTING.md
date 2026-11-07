@@ -141,8 +141,10 @@ matching scenario on that distribution.
 On GitHub, pull requests run ShellCheck, actionlint, the unit tests, and an
 Ubuntu 24.04 smoke test. These four are required to merge into `main` and
 `develop` (enable auto-merge on the pull request to merge once they pass).
-The full VM matrices run after merging into `develop` (and again for `main`);
-see [test/README.md](test/README.md).
+The full VM matrices (distributions, options, scenarios) run for the pull
+request from `develop` into `main` before a release, and on demand from the
+Actions tab; see [test/README.md](test/README.md). Run the scenarios that a
+change affects locally before opening the pull request.
 
 Dependabot proposes GitHub Actions updates against `develop`. A weekly
 workflow (`.github/workflows/upstream-check.yml`) opens an issue labeled

@@ -57,15 +57,18 @@ Subcommand scenarios:
 | Workflow | Runs on | Coverage |
 | --- | --- | --- |
 | `ShellCheck & Unit Tests` | pull requests and pushes to `main` and `develop` | ShellCheck, actionlint, and the bats unit tests. |
-| `Setup Option Tests` | pull requests to `main` and `develop` (Ubuntu 24.04 smoke test only); pushes to `main` and `develop` (full matrix) | The setup/remove lifecycle across the setup option matrix (Kubernetes 1.35-1.37). |
-| `Setup Distro Tests` | pushes to `main` and `develop`; weekly for `main` | The setup/remove lifecycle across `matrices/distro-cloud-images.txt`. |
-| `Scenario Tests` | pushes to `main` and `develop` | Join, preflight, deploy/remove, backup/restore, cert renew, upgrade, swap persistence, init options, generic, and HA checks. |
+| `Setup Option Tests` | every pull request (Ubuntu 24.04 smoke test); pull requests to `main` and manual runs (full matrix) | The setup/remove lifecycle across the setup option matrix (`matrices/kubernetes-minors.txt`). |
+| `Setup Distro Tests` | pull requests to `main`; manual runs | The setup/remove lifecycle across `matrices/distro-cloud-images.txt`. |
+| `Scenario Tests` | pull requests to `main`; manual runs | Join, preflight, deploy/remove, backup/restore, cert renew, upgrade, swap persistence, init options, generic, HA, and nodes set up by earlier versions. |
+| `Upstream Check` | weekly; manual runs | Opens an issue per upstream change that needs action (`scripts/check-upstream.sh`). |
 | `docs` | pull requests and pushes to `main` that change `docs/` | Builds the site; deploys it from `main`. |
 | `Release` | `v*` tags | Builds and publishes the release asset. |
 
-The VM workflows skip pushes that only change documentation. A newer push to
-`develop` (or a pull request) cancels the running VM workflow of that branch;
-runs for `main` are not cancelled.
+The full VM matrices run before a release, for the pull request from `develop`
+into `main`, and on demand (Actions > the workflow > Run workflow, for example
+on `develop` before merging a risky change). A newer push to a pull request
+cancels its running VM workflows. Run the matching scenarios locally while
+developing (see above).
 
 ## Configuration
 

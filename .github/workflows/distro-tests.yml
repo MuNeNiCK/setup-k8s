@@ -1,29 +1,26 @@
 name: Setup Distro Tests
 
+# The full VM matrices run before a release (pull requests into main) and on
+# demand (Actions > Run workflow); pull requests into develop run the smoke
+# test of setup-option-tests.yml only.
 on:
-  push:
-    branches: [main, develop]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-  # Weekly run against the current distribution images (the code on main)
-  schedule:
-    - cron: '0 18 * * 0'
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  # One run per branch; a newer push to develop replaces the running one,
-  # runs for main are never cancelled.
-  group: distro-tests-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # One run per pull request (per branch for manual runs); a newer push replaces it
+  group: distro-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # The distribution list lives in test/matrices/distro-cloud-images.txt,
   # shared with ./scenarios/init-cleanup.sh --all.
   matrix:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     outputs:
       distros: ${{ steps.read.outputs.distros }}
