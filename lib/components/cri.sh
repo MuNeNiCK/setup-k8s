@@ -153,12 +153,11 @@ _write_crio_cgroupv1_runtime() {
         log_warn "cgroups v1 and no runc: CRI-O's default runtime may fail to create containers"
         return 0
     fi
+    # The packages and the release tarball define the runc runtime; only
+    # select it (redefining the table would drop its other settings)
     cat > "${_CRIO_CONF_DIR}/${_CRIO_CGROUPV1_CONF}" <<EOF
 [crio.runtime]
 default_runtime = "runc"
-
-[crio.runtime.runtimes.runc]
-runtime_path = "${runc}"
 EOF
 }
 
