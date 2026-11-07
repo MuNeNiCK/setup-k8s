@@ -132,7 +132,8 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
     (packages, holds and locks, repositories and keys, binaries, kubelet
     configuration), removes all distribution packages of the install on
     Alpine and Arch (cri-tools/crictl and cni-plugins were left), and
-    releases the kube-vip VIP.
+    releases the kube-vip VIP. It no longer deletes the containerd init
+    script of the distribution package (Alpine), which broke the next install.
   - HA `init` fails when the control-plane certificates cannot be uploaded;
     CRI-O is restarted to load its configuration and must be running; host
     preparation checks cgroups and shared mount propagation.

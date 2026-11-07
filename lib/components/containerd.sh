@@ -141,12 +141,22 @@ containerd_cleanup() {
     # docker-ce: repository file name of earlier setup-k8s versions (rpm)
     pkg_repo_remove docker docker-ce 2>/dev/null || true
     pkg_repo_remove containers 2>/dev/null || true
-    local bin
+    local bin had_binary=false
+    [ -f "${_CONTAINERD_BIN_DIR}/containerd" ] && had_binary=true
     for bin in containerd containerd-shim-runc-v2 ctr runc; do
-        if [ -f "/usr/local/bin/$bin" ]; then
-            rm -f "/usr/local/bin/$bin"
-            log_info "Removed /usr/local/bin/$bin"
+        if [ -f "${_CONTAINERD_BIN_DIR}/$bin" ]; then
+            rm -f "${_CONTAINERD_BIN_DIR}/$bin"
+            log_info "Removed ${_CONTAINERD_BIN_DIR}/$bin"
         fi
     done
-    rm -f /etc/systemd/system/containerd.service /etc/init.d/containerd
+    # The service files of a binary install; with distribution packages they
+    # belong to the package (e.g. containerd-openrc), which cleanup keeps
+    if [ "$had_binary" = true ]; then
+        # shellcheck disable=SC2086 # space-separated paths
+        rm -f $_CONTAINERD_SERVICE_FILES
+    fi
 }
+
+# Locations of a binary containerd install (overridable for tests)
+_CONTAINERD_BIN_DIR="/usr/local/bin"
+_CONTAINERD_SERVICE_FILES="/etc/systemd/system/containerd.service /etc/init.d/containerd"

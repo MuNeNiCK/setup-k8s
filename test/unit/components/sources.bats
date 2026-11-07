@@ -199,3 +199,17 @@ FAKE
     k8s_remove
     grep -qx 'repo_remove kubernetes kubernetes-apt-keyring' "$CALLS"
 }
+
+@test "cleanup keeps the containerd service files of distribution packages" {
+    pkg_repo_remove() { :; }
+    _CONTAINERD_BIN_DIR="$BATS_TEST_TMPDIR/bin"
+    mkdir -p "$_CONTAINERD_BIN_DIR"
+    _CONTAINERD_SERVICE_FILES="$BATS_TEST_TMPDIR/init.d-containerd"
+    touch "$_CONTAINERD_SERVICE_FILES"
+    containerd_cleanup
+    [ -e "$_CONTAINERD_SERVICE_FILES" ]
+    # A binary install's service file is removed with the binaries
+    touch "$_CONTAINERD_BIN_DIR/containerd"
+    containerd_cleanup
+    [ ! -e "$_CONTAINERD_SERVICE_FILES" ] && [ ! -e "$_CONTAINERD_BIN_DIR/containerd" ]
+}
