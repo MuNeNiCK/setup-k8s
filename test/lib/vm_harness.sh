@@ -185,7 +185,8 @@ poll_vm_command() {
             log_error "Container exited unexpectedly"
             return 1
         fi
-        if $ssh_func "test -f $exit_code_file" >/dev/null 2>&1; then
+        # Non-empty: the file exists before "echo \$? > file" has written to it
+        if $ssh_func "test -s $exit_code_file" >/dev/null 2>&1; then
             break
         fi
         local progress_line

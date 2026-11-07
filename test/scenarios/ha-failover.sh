@@ -116,6 +116,25 @@ _fo_start_vm() {
     log_success "Container $container_name started"
 }
 
+# Print the index of the only control plane that holds the VIP, waiting up to
+# <seconds>. Fails when no node or several nodes hold it.
+_fo_vip_holder() {
+    local wait="$1" elapsed=0 i holders
+    while :; do
+        holders=""
+        for i in $(seq 0 $((NUM_CP_NODES - 1))); do
+            if vm_ssh_root "${_FO_SSH_PORTS[$i]}" "ip -o addr show | grep -qF ' ${_FO_HA_VIP}/'" >/dev/null 2>&1; then
+                holders="${holders} ${i}"
+            fi
+        done
+        set -- $holders
+        if [ $# -eq 1 ]; then echo "$1"; return 0; fi
+        [ "$elapsed" -ge "$wait" ] && return 1
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
+}
+
 run_failover_test() {
     log_info "=== HA Failover Test (3 CP, deploy mode) ==="
     log_info "Distribution: $DISTRO"
@@ -247,15 +266,31 @@ run_failover_test() {
         fi
     done
 
-    # etcd member count
+    # etcd: one running member per control plane
     local etcd_pods
     etcd_pods=$(vm_ssh_root "${_FO_SSH_PORTS[0]}" \
-        "kubectl get pods -n kube-system -l component=etcd --no-headers --kubeconfig=/etc/kubernetes/admin.conf 2>/dev/null | wc -l" \
+        "kubectl get pods -n kube-system -l component=etcd --no-headers --kubeconfig=/etc/kubernetes/admin.conf 2>/dev/null | awk '\$3 == \"Running\"' | wc -l" \
         2>/dev/null | tr -d '[:space:]')
     if [ "$etcd_pods" = "$NUM_CP_NODES" ]; then
-        log_success "CHECK: etcd has $etcd_pods members"
+        log_success "CHECK: etcd has $etcd_pods running members"
     else
-        log_warn "CHECK: etcd members: ${etcd_pods:-0} (expected $NUM_CP_NODES)"
+        log_error "CHECK: etcd running members: ${etcd_pods:-0} (expected $NUM_CP_NODES)"
+        all_pass=false
+    fi
+
+    # kube-vip: exactly one control plane holds the VIP (the leader)
+    local holder
+    if holder=$(_fo_vip_holder 60); then
+        log_success "CHECK: VIP ${_FO_HA_VIP} is held by CP $((holder + 1)) only"
+        if [ "$(vm_ssh_root "${_FO_SSH_PORTS[$holder]}" "curl -sk --connect-timeout 5 https://${_FO_HA_VIP}:6443/readyz" 2>/dev/null)" = "ok" ]; then
+            log_success "CHECK: API server answers on the VIP (CP $((holder + 1)))"
+        else
+            log_error "CHECK: API server does not answer on the VIP (CP $((holder + 1)))"
+            all_pass=false
+        fi
+    else
+        log_error "CHECK: VIP ${_FO_HA_VIP} is not held by exactly one control plane"
+        all_pass=false
     fi
 
     # Show node status for debugging
@@ -263,6 +298,24 @@ run_failover_test() {
         "kubectl get nodes -o wide --kubeconfig=/etc/kubernetes/admin.conf" 2>/dev/null || true
 
     [ "$all_pass" != true ] && return 1
+
+    # --- VIP takeover: stop kube-vip on the leader ---
+    # (the other VMs cannot reach the VIP through their NAT, so the takeover
+    # is checked on the nodes themselves)
+    log_info "=== Step 3b: VIP takeover ==="
+    vm_ssh_root "${_FO_SSH_PORTS[$holder]}" "mv /etc/kubernetes/manifests/kube-vip.yaml /root/kube-vip.yaml"
+    local new_holder elapsed_vip=0 took_over=false
+    while [ "$elapsed_vip" -lt 90 ]; do
+        if new_holder=$(_fo_vip_holder 5) && [ "$new_holder" != "$holder" ]; then took_over=true; break; fi
+        sleep 5; elapsed_vip=$((elapsed_vip + 5))
+    done
+    if [ "$took_over" = true ]; then
+        log_success "CHECK: VIP moved from CP $((holder + 1)) to CP $((new_holder + 1)) after kube-vip stopped"
+    else
+        log_error "CHECK: VIP was not taken over within 90s after kube-vip stopped on CP $((holder + 1))"
+        all_pass=false
+    fi
+    vm_ssh_root "${_FO_SSH_PORTS[$holder]}" "mv /root/kube-vip.yaml /etc/kubernetes/manifests/kube-vip.yaml"
 
     # --- Step 6: Simulate CP failure ---
     log_info "=== Step 4: Simulating CP node failure ==="
@@ -301,12 +354,14 @@ run_failover_test() {
         all_pass=false
     fi
 
-    # Create a test pod
-    vm_ssh_root "${_FO_SSH_PORTS[0]}" \
-        "kubectl run ha-test-pod --image=busybox --restart=Never --kubeconfig=/etc/kubernetes/admin.conf -- sleep 30" >/dev/null 2>&1 || true
-    sleep 5
-    vm_ssh_root "${_FO_SSH_PORTS[0]}" \
-        "kubectl delete pod ha-test-pod --ignore-not-found --kubeconfig=/etc/kubernetes/admin.conf" >/dev/null 2>&1 || true
+    # Writes still work (etcd keeps quorum with 2 of 3 members)
+    if vm_ssh_root "${_FO_SSH_PORTS[0]}" "kubectl --kubeconfig=/etc/kubernetes/admin.conf create configmap ha-failover-probe --from-literal=k=v" >/dev/null 2>&1 \
+        && [ "$(vm_ssh_root "${_FO_SSH_PORTS[0]}" "kubectl --kubeconfig=/etc/kubernetes/admin.conf get configmap ha-failover-probe -o jsonpath='{.data.k}'" 2>/dev/null)" = v ]; then
+        log_success "CHECK: the cluster accepts writes after the CP failure"
+    else
+        log_error "CHECK: the cluster does not accept writes after the CP failure"
+        all_pass=false
+    fi
 
     # --- Step 8: Verify kube-vip manifests ---
     # VIP failover cannot be tested in NAT (passt) mode because VIPs added

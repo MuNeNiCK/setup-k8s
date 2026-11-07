@@ -98,45 +98,6 @@ _api_ready() {
     return 1
 }
 
-# Print what cleanup left behind (empty when clean).
-_leftovers() {
-    _root 'for b in kubeadm kubelet kubectl; do command -v "$b" >/dev/null 2>&1 && echo "binary:$b"; done
-        if command -v dpkg-query >/dev/null 2>&1; then
-            for p in kubeadm kubelet kubectl cri-tools kubernetes-cni cri-o; do
-                dpkg-query -W -f="\${Status}" "$p" 2>/dev/null | grep -q " installed$" && echo "package:$p"
-            done
-        fi
-        if command -v rpm >/dev/null 2>&1; then
-            for p in kubeadm kubelet kubectl cri-tools kubernetes-cni cri-o; do
-                rpm -q "$p" >/dev/null 2>&1 && echo "package:$p"
-            done
-        fi
-        if command -v pacman >/dev/null 2>&1; then
-            for p in kubeadm kubelet kubectl kubeadm-bin kubelet-bin kubectl-bin; do
-                pacman -Q "$p" >/dev/null 2>&1 && echo "package:$p"
-            done
-        fi
-        if command -v apk >/dev/null 2>&1; then
-            for p in kubeadm kubelet kubectl; do
-                apk info -e "$p" >/dev/null 2>&1 && echo "package:$p"
-            done
-        fi
-        if command -v dnf >/dev/null 2>&1 && dnf versionlock list >/dev/null 2>&1; then
-            dnf versionlock list 2>/dev/null | grep -E "^(kube|cri-tools)" | sed "s/^/versionlock:/"
-        fi
-        if command -v zypper >/dev/null 2>&1; then
-            zypper --non-interactive locks 2>/dev/null | grep -o -E "kube(adm|let|ctl)" | sort -u | sed "s/^/zypper-lock:/"
-        fi
-        for f in /etc/yum.repos.d/kubernetes.repo /etc/yum.repos.d/cri-o.repo /etc/yum.repos.d/docker-ce.repo \
-                 /etc/yum.repos.d/docker.repo /etc/apt/sources.list.d/kubernetes.list /etc/apt/sources.list.d/cri-o.list \
-                 /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
-                 /etc/apt/keyrings/crio-apt-keyring.gpg /etc/apt/keyrings/kubernetes.gpg /etc/apt/keyrings/cri-o.gpg \
-                 /etc/apt/keyrings/docker.gpg /etc/zypp/repos.d/kubernetes.repo /etc/zypp/repos.d/cri-o.repo; do
-            [ -e "$f" ] && echo "file:$f"
-        done
-        true' 2>/dev/null
-}
-
 _resolve_versions() {
     local stable major minor
     [ -n "$TO_VERSION" ] && [ -n "$FROM_VERSION" ] && return 0
@@ -196,14 +157,7 @@ run_legacy_test() {
 
     # 3. Current version: cleanup removes everything, including legacy artifacts
     _run_step "cleanup" "sh /root/setup-k8s.sh cleanup --force" || true
-    local left
-    left=$(_leftovers)
-    if [ -z "$left" ]; then
-        log_success "CHECK: nothing left behind after cleanup"
-    else
-        log_error "CHECK: left behind after cleanup: $(echo "$left" | tr '\n' ' ')"
-        ALL_PASS=false
-    fi
+    verify_no_leftovers _root || ALL_PASS=false
 
     # 4. The node can be set up again with the current version
     # shellcheck disable=SC2086 # new_init_args is empty or two words

@@ -338,6 +338,31 @@ CIEOF
         test_passed=false
     fi
 
+    # 2h. Installed component versions are the configured defaults
+    local want got
+    want="v$(_verify_default CONTAINERD_VERSION)"
+    got=$(vm_ssh "containerd --version" 2>/dev/null | awk '{print $3}')
+    if [ "$got" = "$want" ]; then log_success "  containerd ${got}"; else log_error "  containerd '${got}' (expected ${want})"; test_passed=false; fi
+    want="$(_verify_default RUNC_VERSION)"
+    got=$(vm_ssh "runc --version" 2>/dev/null | awk '/^runc version/ {print $3}')
+    if [ "$got" = "$want" ]; then log_success "  runc ${got}"; else log_error "  runc '${got}' (expected ${want})"; test_passed=false; fi
+    want="v$(_verify_default CNI_PLUGINS_VERSION)"
+    got=$(vm_ssh "/opt/cni/bin/bridge --version" 2>&1 | grep -o -E 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
+    if [ "$got" = "$want" ]; then log_success "  CNI plugins ${got}"; else log_error "  CNI plugins '${got}' (expected ${want})"; test_passed=false; fi
+    got=$(vm_ssh "crictl --version" 2>/dev/null | awk '{print $3}')
+    if [ -n "$got" ]; then log_success "  crictl ${got}"; else log_error "  crictl not installed"; test_passed=false; fi
+    # Kubernetes binaries: all at the version of the running control plane
+    local server
+    server=$(vm_ssh "PATH=/usr/local/bin:\$PATH kubectl --kubeconfig=/etc/kubernetes/admin.conf version -o json" 2>/dev/null \
+        | awk -F'"' '/"serverVersion"/ {s = 1} s && /"gitVersion"/ {print $4; exit}')
+    for bin in kubeadm kubelet; do
+        case "$bin" in
+            kubeadm) got=$(vm_ssh "/usr/local/bin/kubeadm version -o short" 2>/dev/null | tr -d '[:space:]') ;;
+            kubelet) got=$(vm_ssh "/usr/local/bin/kubelet --version" 2>/dev/null | awk '{print $2}') ;;
+        esac
+        if [ -n "$server" ] && [ "$got" = "$server" ]; then log_success "  ${bin} ${got}"; else log_error "  ${bin} '${got}' (control plane '${server}')"; test_passed=false; fi
+    done
+
     if [ "$test_passed" = true ]; then
         log_success "Phase 2: Setup verification PASSED"
     else
@@ -412,6 +437,9 @@ CIEOF
     else
         log_success "  /etc/kubernetes cleaned"
     fi
+
+    # 4e. Everything else setup-k8s installs or configures
+    verify_no_leftovers vm_ssh || cleanup_passed=false
 
     if [ "$cleanup_passed" = true ]; then
         log_success "Phase 4: Cleanup verification PASSED"
