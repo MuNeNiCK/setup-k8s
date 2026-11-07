@@ -314,3 +314,59 @@ _case_install_proxy_mode_packages_logic() {
 @test "install_proxy_mode_packages logic" {
     _case_install_proxy_mode_packages_logic
 }
+
+# --- host preparation result ---
+
+_prepare_fixture() {
+    load_modules; quiet_logs
+    _detect_init_system() { echo "${INIT:-systemd}"; }
+    _CGROUP_ROOT="$BATS_TEST_TMPDIR/cgroup"
+    _MOUNTINFO="$BATS_TEST_TMPDIR/mountinfo"
+    mkdir -p "$_CGROUP_ROOT"
+    touch "$_CGROUP_ROOT/cgroup.controllers"
+    echo '22 1 252:0 / / rw,relatime shared:1 - ext4 /dev/vda1 rw' > "$_MOUNTINFO"
+    fake_cmd mount
+    fake_cmd rc-update
+    fake_cmd rc-service
+    [ -s /etc/machine-id ] || skip "no /etc/machine-id on the test host"
+}
+
+@test "host preparation succeeds with cgroups and a shared root mount" {
+    _prepare_fixture
+    system_prepare
+}
+
+@test "host preparation fails when the root mount stays private" {
+    _prepare_fixture
+    echo '22 1 252:0 / / rw,relatime - ext4 /dev/vda1 rw' > "$_MOUNTINFO"
+    INIT=openrc _K8S_SHARED_MOUNT_SCRIPT="$BATS_TEST_TMPDIR/local.d/k8s.start"
+    run system_prepare
+    [ "$status" -ne 0 ]
+}
+
+@test "host preparation fails without usable cgroups" {
+    _prepare_fixture
+    rm -f "$_CGROUP_ROOT/cgroup.controllers"
+    # pretend v1 already mounted (so nothing is mounted) but without memory
+    mkdir -p "$_CGROUP_ROOT/cpu"
+    run system_prepare
+    [ "$status" -ne 0 ]
+}
+
+@test "CRI-O is restarted and must be active afterwards" {
+    load_modules; quiet_logs
+    _service_reload() { :; }
+    _service_enable() { :; }
+    _detect_init_system() { echo systemd; }
+    CALLS="$BATS_TEST_TMPDIR/calls"
+    _service_restart() { echo "restart $1" >> "$CALLS"; }
+    _service_start() { echo "start $1" >> "$CALLS"; }
+    _service_is_active() { [ "${CRIO_UP:-true}" = true ]; }
+    fake_cmd systemctl
+    fake_cmd journalctl
+    _start_crio_with_diagnostics
+    grep -qx 'restart crio' "$CALLS"
+    CRIO_UP=false
+    run _start_crio_with_diagnostics
+    [ "$status" -ne 0 ]
+}

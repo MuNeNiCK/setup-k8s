@@ -42,36 +42,69 @@ _install_crio_tarball() {
         rm -rf "$tmp" "$extract_dir"
         return 1
     fi
-    tar -xzf "$tmp" -C "$extract_dir"
+    if ! tar -xzf "$tmp" -C "$extract_dir"; then
+        log_error "Failed to extract ${url}"
+        rm -rf "$tmp" "$extract_dir"
+        return 1
+    fi
     rm -f "$tmp"
 
     crio_dir=$(find "$extract_dir" -maxdepth 1 -type d -name 'cri-o' | head -1)
     [ -n "$crio_dir" ] || crio_dir="$extract_dir"
 
+    local missing=""
     for bin in crio conmon conmonrs runc crun crictl; do
         src=$(find "$crio_dir" -name "$bin" -type f 2>/dev/null | head -1)
         if [ -n "$src" ]; then
-            install -m 0755 "$src" "/usr/local/bin/$bin"
+            if ! install -m 0755 "$src" "/usr/local/bin/$bin"; then
+                log_error "Failed to install /usr/local/bin/$bin"
+                rm -rf "$extract_dir"
+                return 1
+            fi
             log_info "  Installed $bin to /usr/local/bin/"
         fi
     done
+    # Required: CRI-O, conmon, an OCI runtime, and crictl
+    for bin in crio conmon crictl; do
+        [ -x "/usr/local/bin/$bin" ] || missing="${missing} ${bin}"
+    done
+    if [ ! -x /usr/local/bin/crun ] && [ ! -x /usr/local/bin/runc ]; then
+        missing="${missing} crun/runc"
+    fi
 
     mkdir -p /opt/cni/bin
     cni_dir=$(find "$crio_dir" -type d -name 'cni-plugins' 2>/dev/null | head -1)
-    if [ -n "$cni_dir" ]; then
-        install -m 0755 "$cni_dir"/* /opt/cni/bin/ 2>/dev/null || true
-        log_info "  Installed CNI plugins to /opt/cni/bin/"
+    if [ -n "$cni_dir" ] && ! install -m 0755 "$cni_dir"/* /opt/cni/bin/; then
+        log_error "Failed to install the CNI plugins to /opt/cni/bin/"
+        rm -rf "$extract_dir"
+        return 1
     fi
+    for bin in bridge loopback host-local portmap; do
+        [ -x "/opt/cni/bin/$bin" ] || missing="${missing} cni:${bin}"
+    done
 
     mkdir -p /etc/crio/crio.conf.d /etc/containers
     etc_dir=$(find "$crio_dir" -type d -name 'etc' 2>/dev/null | head -1)
     if [ -n "$etc_dir" ]; then
-        find "$etc_dir" -name '*.conf' -exec cp {} /etc/crio/crio.conf.d/ \; 2>/dev/null || true
-        if [ -f "$etc_dir/containers/policy.json" ]; then
-            cp "$etc_dir/containers/policy.json" /etc/containers/ 2>/dev/null || true
+        if ! find "$etc_dir" -name '*.conf' -exec cp {} /etc/crio/crio.conf.d/ \;; then
+            log_error "Failed to install the CRI-O configuration"
+            rm -rf "$extract_dir"
+            return 1
+        fi
+        if [ -f "$etc_dir/containers/policy.json" ] && ! cp "$etc_dir/containers/policy.json" /etc/containers/; then
+            log_error "Failed to install /etc/containers/policy.json"
+            rm -rf "$extract_dir"
+            return 1
         fi
     fi
     rm -rf "$extract_dir"
+    if [ ! -f /etc/containers/policy.json ]; then
+        missing="${missing} /etc/containers/policy.json"
+    fi
+    if [ -n "$missing" ]; then
+        log_error "The CRI-O release tarball did not provide:${missing}"
+        return 1
+    fi
 }
 
 _crio_artifact_available() {

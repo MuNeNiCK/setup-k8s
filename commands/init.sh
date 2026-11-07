@@ -286,9 +286,9 @@ initialize_cluster() {
         log_info "=== HA Cluster: Control-Plane Join Information ==="
         local cert_output cert_key
         if ! cert_output=$(kubeadm init phase upload-certs --upload-certs); then
-            log_warn "kubeadm upload-certs failed (cluster init succeeded)"
-            log_warn "You can manually run: kubeadm init phase upload-certs --upload-certs"
-            return 0
+            log_error "kubeadm upload-certs failed: additional control planes cannot join"
+            log_error "  The first control plane is initialized; retry with: kubeadm init phase upload-certs --upload-certs"
+            return 1
         fi
         cert_key=$(echo "$cert_output" | tail -1)
         if ! echo "$cert_key" | grep -qE '^[a-f0-9]{64}$'; then
