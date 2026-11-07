@@ -193,7 +193,7 @@ backup_etcd_local() {
     fi
 
     # Save snapshot inside the container
-    local container_snapshot="/var/lib/etcd/snapshot-tmp-$$.db"
+    local container_snapshot="${_ETCD_DATA_DIR}/snapshot-tmp-$$.db"
     log_info "Creating etcd snapshot..."
     if ! _etcdctl_exec "$cid" snapshot save "$container_snapshot"; then
         log_error "etcdctl snapshot save failed"
@@ -201,7 +201,15 @@ backup_etcd_local() {
         return 1
     fi
 
-    # Copy snapshot from host (etcd's /var/lib/etcd is a hostPath mount)
+    # Check the snapshot while it is visible in the container
+    local snapshot_keys
+    if ! snapshot_keys=$(_etcd_snapshot_check "$cid" "$container_snapshot"); then
+        rm -f "$container_snapshot" >/dev/null 2>&1 || true
+        _audit_log "backup" "failed" "reason=snapshot_invalid"
+        return 1
+    fi
+
+    # Copy snapshot from the host side of the data directory mount
     log_info "Copying snapshot to $ETCD_SNAPSHOT_PATH..."
     if ! cp "$container_snapshot" "$ETCD_SNAPSHOT_PATH"; then
         log_error "Failed to copy snapshot from $container_snapshot"
@@ -209,20 +217,19 @@ backup_etcd_local() {
         return 1
     fi
 
-    # Clean up temp snapshot
-    rm -f "$container_snapshot" >/dev/null 2>&1 || true
-
-    # Verify snapshot size
-    local snapshot_size
-    snapshot_size=$(wc -c < "$ETCD_SNAPSHOT_PATH")
-    if [ "$snapshot_size" -lt 100 ]; then
-        log_error "Snapshot file is too small ($snapshot_size bytes), backup may have failed"
-        _audit_log "backup" "failed" "reason=snapshot_too_small size=${snapshot_size}"
+    # The copy must be identical to the checked snapshot
+    if [ "$(sha256sum < "$container_snapshot")" != "$(sha256sum < "$ETCD_SNAPSHOT_PATH")" ]; then
+        log_error "The copied snapshot differs from the checked one"
+        rm -f "$container_snapshot" >/dev/null 2>&1 || true
+        _audit_log "backup" "failed" "reason=snapshot_copy_mismatch"
         return 1
     fi
+    rm -f "$container_snapshot" >/dev/null 2>&1 || true
 
-    _audit_log "backup" "completed" "path=${ETCD_SNAPSHOT_PATH} size=${snapshot_size}"
-    log_info "Etcd backup complete: $ETCD_SNAPSHOT_PATH ($snapshot_size bytes)"
+    local snapshot_size
+    snapshot_size=$(wc -c < "$ETCD_SNAPSHOT_PATH")
+    _audit_log "backup" "completed" "path=${ETCD_SNAPSHOT_PATH} size=${snapshot_size} keys=${snapshot_keys}"
+    log_info "Etcd backup complete: $ETCD_SNAPSHOT_PATH ($snapshot_size bytes, ${snapshot_keys} keys)"
     return 0
 }
 
@@ -276,13 +283,15 @@ _backup_etcd_remote_callback() {
         return 1
     fi
 
-    local snapshot_size
-    snapshot_size=$(wc -c < "$ETCD_SNAPSHOT_PATH")
-    if [ "$snapshot_size" -lt 100 ]; then
-        log_error "Downloaded snapshot is too small ($snapshot_size bytes), backup may have failed"
+    # The node checked its snapshot; the download must be identical
+    local remote_sum local_sum
+    remote_sum=$(_deploy_ssh "$_ETCD_REMOTE_USER" "$_ETCD_REMOTE_HOST" "sha256sum '${remote_snapshot}'" 2>/dev/null | awk '{print $1}') || remote_sum=""
+    local_sum=$(sha256sum "$ETCD_SNAPSHOT_PATH" | awk '{print $1}')
+    if [ -z "$remote_sum" ] || [ "$remote_sum" != "$local_sum" ]; then
+        log_error "The downloaded snapshot differs from the one on the node (sha256 ${local_sum} vs ${remote_sum:-unknown})"
         return 1
     fi
-    log_info "Snapshot downloaded: $ETCD_SNAPSHOT_PATH ($snapshot_size bytes)"
+    log_info "Snapshot downloaded: $ETCD_SNAPSHOT_PATH ($(wc -c < "$ETCD_SNAPSHOT_PATH") bytes, sha256 ${local_sum})"
 }
 
 backup_etcd_remote() {
@@ -392,7 +401,7 @@ restore_etcd_local() {
         return 1
     fi
 
-    local etcd_data_dir="/var/lib/etcd"
+    local etcd_data_dir="$_ETCD_DATA_DIR"
     local use_prepared_restore=false
 
     # Find etcd container and prepare restore tooling before stopping
@@ -543,6 +552,20 @@ restore_etcd_local() {
 
     # Clean up
     rm -rf "$etcd_bin_dir"
+
+    # The restore is complete when the API server serves the restored data
+    log_info "Waiting for the API server..."
+    local api_elapsed=0 api_timeout=180
+    until kubectl --kubeconfig=/etc/kubernetes/admin.conf get --raw /readyz >/dev/null 2>&1; do
+        if [ "$api_elapsed" -ge "$api_timeout" ]; then
+            log_error "The API server did not become ready within ${api_timeout}s after the restore"
+            _audit_log "restore" "failed" "reason=apiserver_not_ready"
+            return 1
+        fi
+        sleep 3
+        api_elapsed=$((api_elapsed + 3))
+    done
+    log_info "API server is ready"
 
     _audit_log "restore" "completed" "path=${ETCD_SNAPSHOT_PATH}"
     log_info "Etcd restore complete!"

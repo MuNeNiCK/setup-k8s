@@ -431,3 +431,44 @@ _case_resolve_etcd_image_ref_ctr_fallback() {
 @test "_resolve_etcd_image_ref ctr fallback" {
     _case_resolve_etcd_image_ref_ctr_fallback
 }
+
+# --- backup verification ---
+
+_fake_etcd_backup() {
+    load_modules; quiet_logs
+    _audit_log() { :; }
+    _find_etcd_container() { echo cid1; }
+    SNAP_DIR="$BATS_TEST_TMPDIR/var-lib-etcd"
+    mkdir -p "$SNAP_DIR"
+    _ETCD_DATA_DIR="$SNAP_DIR"
+    # snapshot save writes a file; status answers per STATUS_RC/STATUS_JSON
+    cat > "$FAKE_BIN/crictl" <<FAKE
+#!/bin/sh
+case "\$*" in
+    *"snapshot save "*) for a in "\$@"; do last="\$a"; done; head -c 20480 /dev/urandom > "\$last" ;;
+    *"snapshot status"*) [ "\${STATUS_RC:-0}" -eq 0 ] || exit "\$STATUS_RC"; echo "\${STATUS_JSON:-{\"hash\":1,\"revision\":5,\"totalKey\":42,\"totalSize\":20480}}" ;;
+esac
+FAKE
+    chmod +x "$FAKE_BIN/crictl"
+    ETCD_SNAPSHOT_PATH="$BATS_TEST_TMPDIR/out/snap.db"
+}
+
+@test "backup checks the snapshot with etcdutl and copies it unchanged" {
+    _fake_etcd_backup
+    backup_etcd_local
+    [ -s "$ETCD_SNAPSHOT_PATH" ]
+    [ -z "$(ls "$SNAP_DIR")" ]
+}
+
+@test "backup fails for a damaged or empty snapshot" {
+    _fake_etcd_backup
+    STATUS_RC=2
+    export STATUS_RC
+    run backup_etcd_local
+    [ "$status" -ne 0 ]
+    [ ! -e "$ETCD_SNAPSHOT_PATH" ]
+    STATUS_RC=0 STATUS_JSON='{"hash":1,"revision":1,"totalKey":0,"totalSize":20480}'
+    export STATUS_RC STATUS_JSON
+    run backup_etcd_local
+    [ "$status" -ne 0 ]
+}
