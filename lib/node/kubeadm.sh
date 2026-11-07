@@ -42,6 +42,25 @@ _kubelet_api_version() {
     echo "$api_ver"
 }
 
+# On cgroups v1 nodes, kubelet of Kubernetes 1.35+ starts only with
+# failCgroupV1: false. Add that kubelet patch to the kubeadm patches (a copy
+# of --patches, if given), which init, join, and upgrade all apply to this
+# node's kubelet configuration. Usage: kubeadm_prepare_node_patches <version>
+kubeadm_prepare_node_patches() {
+    _has_cgroupv2 && return 0
+    k8s_supports cgroupv2-required "$1" || return 0
+    local dir
+    dir=$(mktemp -d /tmp/setup-k8s-patches-XXXXXX)
+    _append_exit_trap "$dir"
+    if [ -n "${KUBEADM_PATCHES_DIR:-}" ]; then
+        cp -R "$KUBEADM_PATCHES_DIR"/. "$dir"/ || return 1
+    fi
+    cat > "${dir}/kubeletconfiguration99setupk8scgroupv1+strategic.yaml" <<'EOF'
+failCgroupV1: false
+EOF
+    KUBEADM_PATCHES_DIR="$dir"
+}
+
 # Print "--patches DIR" when KUBEADM_PATCHES_DIR is set.
 _kubeadm_patches_args() {
     if [ -n "${KUBEADM_PATCHES_DIR:-}" ]; then

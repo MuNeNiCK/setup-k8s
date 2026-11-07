@@ -341,6 +341,7 @@ crio_remove() {
         fi
     done
     rm -f /etc/systemd/system/crio.service /etc/init.d/crio
+    rm -f "${_CRIO_CONF_DIR}/${_CRIO_CGROUPV1_CONF}"
     if [ "$had_binary" = true ]; then
         rm -rf /etc/crio /etc/containers
     fi

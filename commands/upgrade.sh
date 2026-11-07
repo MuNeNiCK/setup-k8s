@@ -85,6 +85,7 @@ upgrade_node_local() {
     # shellcheck disable=SC2034 # K8S_VERSION used by distro functions for repo URLs
     K8S_VERSION="$minor_version"
 
+    kubeadm_prepare_node_patches "$UPGRADE_TARGET_VERSION" || return 1
     log_info "Upgrading node (role: $role) from v${current_version} to v${UPGRADE_TARGET_VERSION}..."
 
     # 1. Upgrade kubeadm package
@@ -102,7 +103,7 @@ upgrade_node_local() {
             log_info "Nodes are NotReady (no CNI plugin?): skipping the ControlPlaneNodesReady and CreateJob checks"
             _preflight_errors="ControlPlaneNodesReady,CreateJob"
         fi
-        if [ "$(_detect_init_system)" != "systemd" ]; then
+        if [ "$(_detect_init_system)" != "systemd" ] || _kubeadm_cgroupv1_allowed; then
             _preflight_errors="${_preflight_errors}${_preflight_errors:+,}SystemVerification"
         fi
         # shellcheck disable=SC2046 # empty or "--patches DIR"

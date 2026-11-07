@@ -121,15 +121,43 @@ _start_crio_with_diagnostics() {
 
 # Write a CRI-O drop-in config with cgroup_manager and pause_image.
 # Usage: _write_crio_config <conf_name> <cgroup_manager>
+# CRI-O drop-in directory (overridable for tests)
+_CRIO_CONF_DIR="/etc/crio/crio.conf.d"
+
 _write_crio_config() {
     local conf_name="$1" cgroup_mgr="$2"
-    mkdir -p /etc/crio/crio.conf.d
-    cat > "/etc/crio/crio.conf.d/${conf_name}" <<EOF
+    mkdir -p "$_CRIO_CONF_DIR"
+    cat > "${_CRIO_CONF_DIR}/${conf_name}" <<EOF
 [crio.runtime]
 cgroup_manager = "${cgroup_mgr}"
 
 [crio.image]
 pause_image = "$(k8s_pause_image)"
+EOF
+    _write_crio_cgroupv1_runtime
+}
+
+# crun (the default OCI runtime) cannot set device permissions on cgroups v1
+# ("write to devices.allow: Operation not permitted"); use runc there. A
+# drop-in that sorts after the packages' own (10-crio.conf sets crun).
+_CRIO_CGROUPV1_CONF="99-setup-k8s-cgroupv1.conf"
+_write_crio_cgroupv1_runtime() {
+    local runc=""
+    rm -f "${_CRIO_CONF_DIR}/${_CRIO_CGROUPV1_CONF}"
+    _has_cgroupv2 && return 0
+    for runc in /usr/libexec/crio/runc "$(command -v runc 2>/dev/null)"; do
+        [ -n "$runc" ] && [ -x "$runc" ] && break
+        runc=""
+    done
+    if [ -z "$runc" ]; then
+        log_warn "cgroups v1 and no runc: CRI-O's default runtime may fail to create containers"
+        return 0
+    fi
+    # The packages and the release tarball define the runc runtime; only
+    # select it (redefining the table would drop its other settings)
+    cat > "${_CRIO_CONF_DIR}/${_CRIO_CGROUPV1_CONF}" <<EOF
+[crio.runtime]
+default_runtime = "runc"
 EOF
 }
 

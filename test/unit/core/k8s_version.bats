@@ -66,13 +66,17 @@ EOF
     [ "$(k8s_pause_image)" = "registry.k8s.io/pause:${_K8S_PAUSE_FALLBACK}" ]
 }
 
-@test "determine_k8s_version rejects cgroups v1 from the cgroupv2-required minimum" {
+@test "determine_k8s_version warns about cgroups v1 from the cgroupv2-required minimum" {
     _has_cgroupv2() { return 1; }
+    log_warn() { echo "WARN: $*"; }
     K8S_VERSION=1.35
     run determine_k8s_version
-    [ "$status" -ne 0 ]
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"failCgroupV1: false"* ]]
     K8S_VERSION=1.34
-    determine_k8s_version
+    run determine_k8s_version
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"cgroups v1"* ]]
 }
 
 @test "nftables proxy mode is rejected below the feature minimum" {

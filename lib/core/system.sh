@@ -171,10 +171,16 @@ system_cleanup() {
     fi
 }
 
-# === kubeadm Preflight Ignore (OpenRC) ===
+# === kubeadm Preflight Ignore (OpenRC, cgroups v1) ===
 
 _kubeadm_preflight_ignore_args() {
-    if [ "$(_detect_init_system)" != "systemd" ]; then
+    if [ "$(_detect_init_system)" != "systemd" ] || _kubeadm_cgroupv1_allowed; then
         echo "--ignore-preflight-errors=SystemVerification"
     fi
+}
+
+# cgroups v1 node with failCgroupV1: false (kubeadm_prepare_node_patches):
+# kubeadm requires skipping its SystemVerification check as well
+_kubeadm_cgroupv1_allowed() {
+    [ -n "${KUBEADM_PATCHES_DIR:-}" ] && [ -f "${KUBEADM_PATCHES_DIR}/kubeletconfiguration99setupk8scgroupv1+strategic.yaml" ]
 }

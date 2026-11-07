@@ -240,3 +240,39 @@ FAKE
     grep -qx 'mode: iptables' "$config"
     if grep -qx 'mode: nftables' "$config"; then return 1; fi
 }
+
+@test "cgroups v1 with Kubernetes 1.35+: kubelet gets failCgroupV1: false through the kubeadm patches" {
+    load_modules; quiet_logs
+    _has_cgroupv2() { return 1; }
+    user_patches="$BATS_TEST_TMPDIR/user-patches"
+    mkdir -p "$user_patches"
+    echo 'shutdownGracePeriod: 30s' > "$user_patches/kubeletconfiguration+strategic.yaml"
+    KUBEADM_PATCHES_DIR="$user_patches"
+    kubeadm_prepare_node_patches 1.37
+    [ "$KUBEADM_PATCHES_DIR" != "$user_patches" ]
+    grep -qx 'failCgroupV1: false' "$KUBEADM_PATCHES_DIR"/kubeletconfiguration99setupk8scgroupv1+strategic.yaml
+    # The user's patches are kept
+    grep -qx 'shutdownGracePeriod: 30s' "$KUBEADM_PATCHES_DIR/kubeletconfiguration+strategic.yaml"
+    [ "$(_kubeadm_patches_args)" = "--patches $KUBEADM_PATCHES_DIR" ]
+}
+
+@test "no kubelet patch on cgroups v2 or before Kubernetes 1.35" {
+    load_modules; quiet_logs
+    KUBEADM_PATCHES_DIR=""
+    _has_cgroupv2() { return 0; }
+    kubeadm_prepare_node_patches 1.37
+    [ -z "$KUBEADM_PATCHES_DIR" ]
+    _has_cgroupv2() { return 1; }
+    kubeadm_prepare_node_patches 1.34
+    [ -z "$KUBEADM_PATCHES_DIR" ]
+}
+
+@test "kubeadm skips SystemVerification on cgroups v1 nodes that allow it" {
+    load_modules; quiet_logs
+    _detect_init_system() { echo systemd; }
+    KUBEADM_PATCHES_DIR=""
+    [ -z "$(_kubeadm_preflight_ignore_args)" ]
+    _has_cgroupv2() { return 1; }
+    kubeadm_prepare_node_patches 1.37
+    [ "$(_kubeadm_preflight_ignore_args)" = "--ignore-preflight-errors=SystemVerification" ]
+}
