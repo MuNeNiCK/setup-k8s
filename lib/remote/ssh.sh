@@ -39,21 +39,25 @@ _with_askpass() {
 
 # Build SSH options string (space-separated, no arrays)
 # Sets: _SSH_OPTS (global string)
+# Usage: _build_deploy_ssh_opts [host]  (per-node port/key from --config)
 _build_deploy_ssh_opts() {
     local known_hosts="${_DEPLOY_KNOWN_HOSTS:-/dev/null}"
+    local port key
+    port=$(node_override "${1:-}" port); port="${port:-$DEPLOY_SSH_PORT}"
+    key=$(node_override "${1:-}" key); key="${key:-$DEPLOY_SSH_KEY}"
     local host_key_policy="${DEPLOY_SSH_HOST_KEY_CHECK:-yes}"
     _SSH_OPTS="-o StrictHostKeyChecking=$host_key_policy -o UserKnownHostsFile=$known_hosts -o LogLevel=ERROR -o ConnectTimeout=10"
     # Prevent interactive prompts in automated mode (BatchMode not used with password auth)
     if [ -z "$DEPLOY_SSH_PASSWORD" ]; then
         # If SSH agent is available and no explicit key/password, skip BatchMode
         # to allow agent-based auth that may prompt for key passphrase
-        if [ -z "${SSH_AUTH_SOCK:-}" ] || [ -n "$DEPLOY_SSH_KEY" ]; then
+        if [ -z "${SSH_AUTH_SOCK:-}" ] || [ -n "$key" ]; then
             _SSH_OPTS="$_SSH_OPTS -o BatchMode=yes"
         fi
     fi
-    _SSH_OPTS="$_SSH_OPTS -p $DEPLOY_SSH_PORT"
-    if [ -n "$DEPLOY_SSH_KEY" ]; then
-        _SSH_OPTS="$_SSH_OPTS -i $DEPLOY_SSH_KEY"
+    _SSH_OPTS="$_SSH_OPTS -p $port"
+    if [ -n "$key" ]; then
+        _SSH_OPTS="$_SSH_OPTS -i $key"
     fi
 }
 
@@ -61,7 +65,7 @@ _build_deploy_ssh_opts() {
 # Usage: _deploy_ssh <user> <host> <command...>
 _deploy_ssh() {
     local user="$1" host="$2"; shift 2
-    _build_deploy_ssh_opts
+    _build_deploy_ssh_opts "$host"
 
     # Strip brackets from IPv6 addresses for SSH (SSH needs user@::1, not user@[::1])
     local ssh_host="$host"
@@ -85,7 +89,7 @@ _deploy_ssh() {
 # Sets: _SCP_OPTS (string), _SCP_HOST (string)
 _build_scp_args() {
     local host="$1"
-    _build_deploy_ssh_opts
+    _build_deploy_ssh_opts "$host"
 
     # Convert -p to -P for scp
     _SCP_OPTS=$(echo "$_SSH_OPTS" | sed "s/ -p / -P /")

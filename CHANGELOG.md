@@ -13,6 +13,10 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Added
 
+- `--config FILE` reads the cluster (nodes and roles, SSH access per node,
+  cluster options, per-node kubelet node IP) from a YAML file for `deploy`,
+  `upgrade`, `remove`, `backup`, `restore`, and `renew`. Read without external
+  tools; command-line options replace those of the file.
 - Running `deploy` again on an existing cluster adds the listed nodes that
   are not in it yet (control planes and workers); the others are left alone.
 - `deploy` saves the admin kubeconfig to `./kubeconfig` (mode 600) on the

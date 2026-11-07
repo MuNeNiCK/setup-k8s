@@ -65,6 +65,8 @@ Global options:
   --audit-syslog          Send audit events to syslog
   --collect-diagnostics   Collect diagnostics on failure
   --resume                Resume an interrupted operation
+  --config FILE           Read the cluster (nodes, SSH, options) from FILE for
+                          deploy, upgrade, remove, backup, restore, and renew
   --version               Print the version and exit
   --help, -h              Display this help message
 
@@ -89,7 +91,7 @@ _show_subcommand_help() {
 
 # shellcheck disable=SC2034 # global flags are read by the loaded modules
 _main() {
-    local _help=false _rest=""
+    local _help=false _rest="" _config="" _cli_opts=""
     ACTION=""
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -112,8 +114,17 @@ _main() {
                 exit 0
                 ;;
             --help|-h) _help=true ;;
+            --config)
+                if [ $# -lt 2 ]; then
+                    echo "Error: --config requires a file" >&2
+                    exit 1
+                fi
+                _config="$2"
+                shift
+                ;;
             *)
                 if [ -n "$ACTION" ]; then
+                    case "$1" in --*) _cli_opts="${_cli_opts} $1" ;; esac
                     _rest="${_rest}$(_posix_shell_quote "$1")"
                 else
                     case " $_SUBCOMMANDS " in
@@ -150,6 +161,18 @@ _main() {
         _init_file_logging "$LOG_DIR"
     fi
 
+    if [ -n "$_config" ]; then
+        case "$ACTION" in
+            deploy|upgrade|remove|backup|restore|renew) ;;
+            *)
+                echo "Error: --config is used by deploy, upgrade, remove, backup, restore, and renew" >&2
+                exit 1
+                ;;
+        esac
+        # Options given on the command line replace those of the file
+        config_load "$ACTION" "$_config" "$_cli_opts" || exit 1
+        _rest="${_CONFIG_ARGS}${_rest}"
+    fi
     eval "set -- $_rest"
     case "$ACTION" in
         init|join)      _run_setup "$@" ;;
