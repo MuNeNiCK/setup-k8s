@@ -7,7 +7,6 @@ centos-stream-10-cloud-amd64
 centos-stream-9-cloud-amd64
 fedora-45-cloud-amd64
 fedora-44-cloud-amd64
-fedora-43-cloud-amd64
 opensuse-tumbleweed-cloud-amd64
 opensuse-leap-16.0-cloud-amd64
 rocky-10-cloud-amd64
