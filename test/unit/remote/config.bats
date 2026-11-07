@@ -106,8 +106,10 @@ _args() { eval "printf '%s\\n' $_CONFIG_ARGS"; }
     [[ "$args" != *"--kubernetes-version"* ]] && [[ "$args" != *"--workers"* ]]
     [[ "$args" == *"--control-planes"* ]] && [[ "$args" == *"--cri"* ]]
     cd "$BATS_TEST_TMPDIR" || return 1
-    mkdir -p kubeadm-patches
-    run sh "$PROJECT_ROOT/setup-k8s.sh" deploy --config "$CFG" --kubernetes-version 1.38 --dry-run
+    mkdir -p kubeadm-patches .ssh keys
+    touch .ssh/id_ed25519 keys/worker
+    chmod 600 .ssh/id_ed25519 keys/worker
+    HOME="$BATS_TEST_TMPDIR" run sh "$PROJECT_ROOT/setup-k8s.sh" deploy --config "$CFG" --kubernetes-version 1.38 --dry-run
     [ "$status" -eq 0 ]
     [ "$(printf '%s\n' "$output" | grep -c -x -- '--kubernetes-version')" -eq 1 ]
     [[ "$output" == *$'--kubernetes-version\n1.38'* ]]
