@@ -265,11 +265,13 @@ FAKE
     fake_cmd runc
     _has_cgroupv2() { return 1; }
     _write_crio_config 02-kubernetes.conf systemd
-    f="$_CRIO_CONF_DIR/02-kubernetes.conf"
+    f="$_CRIO_CONF_DIR/99-setup-k8s-cgroupv1.conf"
     grep -qx 'default_runtime = "runc"' "$f"
     grep -qx '\[crio.runtime.runtimes.runc\]' "$f"
     grep -q '^runtime_path = ".*runc"$' "$f"
+    # Sorts after the packages' drop-ins (10-crio.conf)
+    [ "$(printf '%s\n' 10-crio.conf 99-setup-k8s-cgroupv1.conf 02-kubernetes.conf | sort | tail -n 1)" = 99-setup-k8s-cgroupv1.conf ]
     _has_cgroupv2() { return 0; }
     _write_crio_config 02-kubernetes.conf systemd
-    if grep -q 'default_runtime' "$f"; then return 1; fi
+    [ ! -e "$f" ]
 }
