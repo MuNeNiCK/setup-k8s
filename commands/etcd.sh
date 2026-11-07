@@ -312,7 +312,6 @@ backup_etcd_remote() {
 # --- Local restore ---
 
 # Cleanup handler for etcd manifest restore (uses fixed paths, not local variables)
-_ETCD_MANIFEST_PATH="/etc/kubernetes/manifests/etcd.yaml"
 _ETCD_MANIFEST_TMP_DIR="/tmp/setup-k8s-restore-manifests"
 _ETCD_CONTAINER_RESTORE_NAME="setup-k8s-restore-data"
 _ETCD_CONTAINER_SNAPSHOT_NAME="setup-k8s-restore-snapshot.db"
