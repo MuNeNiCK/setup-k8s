@@ -433,3 +433,14 @@ FAKE
     run backup_etcd_local
     [ "$status" -ne 0 ]
 }
+
+@test "etcdctl uses the local client URL of the manifest (IPv6-only clusters)" {
+    load_modules; quiet_logs
+    _ETCD_MANIFEST_PATH="$BATS_TEST_TMPDIR/etcd.yaml"
+    printf '%s\n' '    - --listen-client-urls=https://[::1]:2379,https://[fd00:10:2::15]:2379' > "$_ETCD_MANIFEST_PATH"
+    fake_cmd crictl
+    _etcdctl_exec cid1 endpoint health
+    fake_calls | grep -q -- '--endpoints=https://\[::1\]:2379 '
+    rm -f "$_ETCD_MANIFEST_PATH"
+    [ "$(_etcd_endpoint)" = "https://127.0.0.1:2379" ]
+}

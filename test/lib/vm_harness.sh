@@ -436,7 +436,7 @@ setup_root_ssh() {
     # OpenSSH refuses key logins for locked accounts ("!" in /etc/shadow,
     # e.g. Alpine cloud images). "*" keeps password login disabled.
     ssh "${SSH_OPTS[@]}" -p "$host_ssh_port" "$LOGIN_USER@localhost" \
-        "$esc sed -i 's/^root:!*:/root:*:/' /etc/shadow" >/dev/null 2>&1 || true
+        "$esc sed -i 's/^root:![^:]*:/root:*:/' /etc/shadow" >/dev/null 2>&1 || true
     local err
     if err=$(ssh "${SSH_OPTS[@]}" -p "$host_ssh_port" "root@localhost" "echo ok" 2>&1 >/dev/null); then
         log_success "[$label] Root SSH access ready (root account unlocked for key login)"

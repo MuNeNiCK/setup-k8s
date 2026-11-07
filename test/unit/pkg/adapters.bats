@@ -268,3 +268,15 @@ EOF
     run pkg_install curl
     [ "$status" -ne 0 ]
 }
+
+@test "pkg_refresh retries a transient failure and fails after three attempts" {
+    DISTRO_PKG=dnf
+    sleep() { :; }
+    TRIES="$BATS_TEST_TMPDIR/tries"; : > "$TRIES"
+    _pkg_dnf_refresh() { echo x >> "$TRIES"; [ "$(wc -l < "$TRIES")" -ge "${OK_AT:-99}" ]; }
+    OK_AT=2 pkg_refresh
+    : > "$TRIES"
+    run pkg_refresh
+    [ "$status" -ne 0 ]
+    [ "$(wc -l < "$TRIES")" -eq 3 ]
+}

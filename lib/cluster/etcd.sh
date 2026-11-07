@@ -110,9 +110,22 @@ _etcd_snapshot_check() {
     echo "$keys"
 }
 
+# etcd static pod manifest (overridable for tests)
+_ETCD_MANIFEST_PATH="/etc/kubernetes/manifests/etcd.yaml"
+
+# Local client endpoint of etcd: the first --listen-client-urls URL of the
+# manifest (https://127.0.0.1:2379, or https://[::1]:2379 on IPv6-only
+# clusters, where etcdctl's default 127.0.0.1 is not served).
+_etcd_endpoint() {
+    local url
+    url=$(sed -n 's/^ *- --listen-client-urls=\([^,]*\).*/\1/p' "$_ETCD_MANIFEST_PATH" 2>/dev/null | head -n 1)
+    echo "${url:-https://127.0.0.1:2379}"
+}
+
 _etcdctl_exec() {
     local cid="$1"; shift
     crictl exec "$cid" etcdctl \
+        --endpoints="$(_etcd_endpoint)" \
         --cacert="$_ETCD_CACERT" \
         --cert="$_ETCD_CERT" \
         --key="$_ETCD_KEY" \
