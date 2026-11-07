@@ -213,3 +213,39 @@ FAKE
     containerd_cleanup
     [ ! -e "$_CONTAINERD_SERVICE_FILES" ] && [ ! -e "$_CONTAINERD_BIN_DIR/containerd" ]
 }
+
+@test "upgrade moves CRI-O from the isv repository to the new minor and checks it" {
+    DISTRO_PKG=apt DISTRO_CRIO_SOURCE=isv
+    VERSION_FILE="$BATS_TEST_TMPDIR/crio-version"
+    echo 1.36.6 > "$VERSION_FILE"
+    cat > "$FAKE_BIN/crio" <<FAKE
+#!/bin/sh
+echo "crio version \$(cat "$VERSION_FILE")"
+FAKE
+    chmod +x "$FAKE_BIN/crio"
+    pkg_repo_add() { echo "repo_add $*" >> "$CALLS"; }
+    pkg_install() { echo "install $*" >> "$CALLS"; echo "${NEW_VERSION:-1.37.3}" > "$VERSION_FILE"; }
+    _crio_prepare_config() { :; }
+    _start_crio_with_diagnostics() { echo restart >> "$CALLS"; }
+    crio_set_minor 1.37
+    grep -q '^repo_add cri-o https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v1.37/deb/ ' "$CALLS"
+    grep -qx 'install --repo cri-o cri-o=1.37' "$CALLS"
+    grep -qx restart "$CALLS"
+    # Already at the minor: nothing to do
+    : > "$CALLS"
+    crio_set_minor 1.37
+    [ ! -s "$CALLS" ]
+    # The package manager kept the old version: fails
+    echo 1.36.6 > "$VERSION_FILE"
+    NEW_VERSION=1.36.6
+    run crio_set_minor 1.37
+    [ "$status" -ne 0 ]
+}
+
+@test "CRI-O from distribution packages is left to the distribution on upgrade" {
+    DISTRO_CRIO_SOURCE=distro
+    fake_cmd crio 0 "crio version 1.35.1"
+    pkg_install() { echo "install $*" >> "$CALLS"; }
+    crio_set_minor 1.36
+    [ ! -s "$CALLS" ]
+}

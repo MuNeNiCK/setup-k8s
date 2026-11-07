@@ -66,10 +66,23 @@ _pkg_dnf_unlock() {
     done
 }
 
+# Newest patch of <minor> available for <name> (installed or not)
+_pkg_dnf_minor_version() {
+    local bin opt=""
+    bin=$(_pkg_dnf_bin)
+    if [ -n "$_PKG_REPO" ] && [ -f "${_DNF_REPOS_DIR}/${_PKG_REPO}.repo" ]; then
+        if _pkg_dnf_is_v5; then opt="--setopt=disable_excludes=${_PKG_REPO}"; else opt="--disableexcludes=${_PKG_REPO}"; fi
+    fi
+    # shellcheck disable=SC2086 # empty or one option
+    "$bin" -q list --showduplicates $opt "$1" 2>/dev/null \
+        | awk -v n="$1" '$1 ~ "^"n"\\." {print $2}' | sed 's/^[0-9]*://; s/-.*//' | _pkg_newest_patch "$2"
+}
+
 _pkg_dnf_install() {
     _pkg_parse_install_args "$@"
     local spec name bin
     bin=$(_pkg_dnf_bin)
+    _pkg_resolve_minor_specs _pkg_dnf_minor_version
     # shellcheck disable=SC2046 # names are space-separated package names
     _pkg_dnf_unlock $(_pkg_spec_names)
     set --

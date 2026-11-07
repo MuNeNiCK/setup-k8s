@@ -44,6 +44,36 @@ pkg_repo_add()           { _pkg_call repo_add "$@"; }
 pkg_repo_remove()        { _pkg_call repo_remove "$@"; }
 pkg_base_dependencies()  { _pkg_call base_deps; }
 
+# Newest MAJOR.MINOR.PATCH of <minor> among the versions on stdin (one per
+# line, release suffix removed). Usage: _pkg_newest_patch <MAJOR.MINOR>
+_pkg_newest_patch() {
+    awk -v m="$1" 'index($0, m ".") == 1 && $0 ~ /^[0-9]+\.[0-9]+\.[0-9]+$/ {
+        split($0, v, "."); if (!n || v[3] + 0 > best) { best = v[3] + 0; n = 1 } }
+        END { if (n) print m "." best }'
+}
+
+# Replace "name=MAJOR.MINOR" in _PKG_SPECS with the newest patch of that minor
+# that <resolver> <name> <minor> finds (unchanged when it finds none), so that
+# installs move to the minor in both directions (upgrade and rollback).
+_pkg_resolve_minor_specs() {
+    local resolver="$1" spec name ver resolved out=""
+    for spec in $_PKG_SPECS; do
+        name="${spec%%=*}"
+        ver="${spec#*=}"
+        if [ "$spec" != "$name" ]; then
+            case "$ver" in
+                *.*.*) ;;
+                *.*)
+                    resolved=$("$resolver" "$name" "$ver")
+                    [ -n "$resolved" ] && spec="${name}=${resolved}"
+                    ;;
+            esac
+        fi
+        out="${out}${out:+ }${spec}"
+    done
+    _PKG_SPECS="$out"
+}
+
 # Mirrors fail transiently (metadata being synced): retry before giving up
 pkg_refresh() {
     local attempt=1

@@ -8,23 +8,29 @@
 #   distro  distribution packages (DISTRO_CRIO_PKGS)
 #   binary  CRI-O release tarball (bundles conmon, runc, crun, crictl, CNI plugins)
 #
-#   crio_install   Install, configure, and start CRI-O
-#   crio_remove    Remove packages, repository, and binaries
+#   crio_install           Install, configure, and start CRI-O
+#   crio_in_use            Succeed when this node runs Kubernetes on CRI-O
+#   crio_set_minor <X.Y>   Move CRI-O to a Kubernetes minor (upgrade, rollback)
+#   crio_remove            Remove packages, repository, and binaries
 
-_crio_from_isv() {
-    local series base
+# isv:cri-o repository of the minor of K8S_VERSION (replaces an earlier one)
+_crio_isv_repo_add() {
+    local series base channel=stable
     series=$(_k8s_minor_version "$K8S_VERSION")
-    local channel=stable
     [ "${K8S_PRERELEASE:-false}" = true ] && channel=prerelease
     base="https://download.opensuse.org/repositories/isv:/cri-o:/${channel}:/v${series}"
     case "$(pkg_format)" in
-        deb) pkg_repo_add cri-o "${base}/deb/" "${base}/deb/Release.key" || return 1 ;;
-        rpm) pkg_repo_add cri-o "${base}/rpm/" "${base}/rpm/repodata/repomd.xml.key" || return 1 ;;
+        deb) pkg_repo_add cri-o "${base}/deb/" "${base}/deb/Release.key" ;;
+        rpm) pkg_repo_add cri-o "${base}/rpm/" "${base}/rpm/repodata/repomd.xml.key" ;;
         *)
             log_error "The isv:cri-o repository provides deb and rpm packages only"
             return 1
             ;;
     esac
+}
+
+_crio_from_isv() {
+    _crio_isv_repo_add || return 1
     pkg_install --repo cri-o cri-o
 }
 
@@ -222,6 +228,58 @@ _crio_prepare_config() {
         _write_crio_config "02-kubernetes.conf" "cgroupfs"
     fi
     mkdir -p /etc/cni/net.d
+}
+
+crio_in_use() {
+    grep -q 'crio\.sock' /etc/crictl.yaml 2>/dev/null || _service_is_active crio
+}
+
+# Installed CRI-O version (MAJOR.MINOR.PATCH); empty when unknown
+crio_installed_version() {
+    command -v crio >/dev/null 2>&1 || return 0
+    crio --version 2>/dev/null | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1
+}
+
+# CRI-O minor versions follow Kubernetes (and setup-k8s installs CRI-O from
+# the repository of the Kubernetes minor), so upgrades and rollbacks move it
+# to the newest patch of <minor>, restart it, and check the running version.
+# Usage: crio_set_minor <MAJOR.MINOR>
+crio_set_minor() {
+    local minor="$1" current
+    current=$(crio_installed_version)
+    if [ "$(_k8s_minor_version "${current:-0.0}")" = "$minor" ]; then
+        log_info "CRI-O ${current} already matches Kubernetes ${minor}"
+        return 0
+    fi
+    log_info "Moving CRI-O ${current:-unknown} to ${minor} (source: ${DISTRO_CRIO_SOURCE})..."
+    case "$DISTRO_CRIO_SOURCE" in
+        isv)
+            K8S_VERSION="$minor"
+            _crio_isv_repo_add || return 1
+            pkg_install --repo cri-o "cri-o=${minor}" || return 1
+            ;;
+        binary)
+            K8S_VERSION="$minor" CRIO_VERSION=""
+            _crio_from_binary || return 1
+            ;;
+        distro)
+            # The distribution decides the CRI-O version (like Kubernetes)
+            log_warn "CRI-O ${current:-unknown} comes from the distribution packages and stays; Kubernetes is ${minor}"
+            return 0
+            ;;
+        *)
+            log_error "Unknown CRI-O source: ${DISTRO_CRIO_SOURCE}"
+            return 1
+            ;;
+    esac
+    _crio_prepare_config
+    _start_crio_with_diagnostics || return 1
+    current=$(crio_installed_version)
+    if [ "$(_k8s_minor_version "${current:-0.0}")" != "$minor" ]; then
+        log_error "CRI-O is ${current:-not installed} after the update (expected ${minor})"
+        return 1
+    fi
+    log_info "CRI-O ${current} is running"
 }
 
 crio_remove() {

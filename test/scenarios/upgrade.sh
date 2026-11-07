@@ -33,6 +33,7 @@ DISTRO="${DISTRO:-ubuntu-24.04-cloud-amd64}"
 FROM_VERSION=""  # MAJOR.MINOR for deploy (e.g., 1.32)
 TO_VERSION=""    # MAJOR.MINOR.PATCH for upgrade (e.g., 1.33.2)
 UPGRADE_EXTRA_ARGS=()
+DEPLOY_EXTRA_ARGS=()
 # Common defaults from vm_harness.sh: VM_MEMORY, VM_CPUS, VM_DISK_SIZE, TIMEOUT_TOTAL, SSH_READY_TIMEOUT
 
 # Docker network
@@ -59,6 +60,7 @@ Options:
   --from-version <ver>    Initial K8s version MAJOR.MINOR (e.g., 1.32)
   --to-version <ver>      Target K8s version MAJOR.MINOR.PATCH (e.g., 1.33.2)
   --upgrade-args ARGS     Extra args for setup-k8s.sh upgrade
+  --deploy-args ARGS      Extra args for setup-k8s.sh deploy (e.g. "--cri crio")
   --memory <MB>           VM memory (default: $VM_MEMORY)
   --cpus <count>          VM CPUs (default: $VM_CPUS)
   --disk-size <size>      VM disk size (default: $VM_DISK_SIZE)
@@ -150,6 +152,7 @@ run_upgrade_test() {
         --ssh-host-key-check accept-new
         --kubernetes-version "$FROM_VERSION"
         --control-plane-endpoint "${CP_DOCKER_IP}:6443"
+        "${DEPLOY_EXTRA_ARGS[@]}"
     )
     log_info "Deploy command: ${deploy_cmd[*]}"
 
@@ -253,6 +256,20 @@ run_upgrade_test() {
         all_pass=false
     fi
 
+    # Check 5c: CRI-O follows the Kubernetes minor on every node
+    if [[ " ${DEPLOY_EXTRA_ARGS[*]} " == *" --cri crio "* ]]; then
+        local port crio_ver
+        for port in "$_CP_SSH_PORT" "$_WORKER_SSH_PORT"; do
+            crio_ver=$(vm_ssh_root "$port" "crio --version" 2>/dev/null | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
+            if [ "$(echo "$crio_ver" | cut -d. -f1,2)" = "$(echo "$TO_VERSION" | cut -d. -f1,2)" ]; then
+                log_success "CHECK 5c: CRI-O ${crio_ver} on the node with SSH port ${port}"
+            else
+                log_error "CHECK 5c: CRI-O '${crio_ver}' on the node with SSH port ${port} (expected $(echo "$TO_VERSION" | cut -d. -f1,2).x)"
+                all_pass=false
+            fi
+        done
+    fi
+
     # Check 6: CP API server responsive
     if vm_ssh_root "$_CP_SSH_PORT" "timeout 30 kubectl get nodes --kubeconfig=/etc/kubernetes/admin.conf" >/dev/null 2>&1; then
         log_success "CHECK 6: CP API server responsive"
@@ -290,6 +307,13 @@ while [[ $# -gt 0 ]]; do
         --help|-h) show_help; exit 0 ;;
         --from-version) _require_arg $# "$1"; FROM_VERSION="$2"; shift 2 ;;
         --to-version) _require_arg $# "$1"; TO_VERSION="$2"; shift 2 ;;
+        --deploy-args)
+            _require_arg $# "$1"
+            _deploy_args_tmp=()
+            read -r -a _deploy_args_tmp <<<"$2"
+            DEPLOY_EXTRA_ARGS+=("${_deploy_args_tmp[@]}")
+            shift 2
+            ;;
         --upgrade-args)
             _require_arg $# "$1"
             read -r -a _upgrade_args_tmp <<< "$2"

@@ -64,6 +64,9 @@ rollback_node_local() {
     log_info "Rolling back Kubernetes packages from v${current:-unknown} to v${target}..."
     k8s_upgrade_kubeadm "$target" || return 1
     k8s_upgrade_node "$target" || return 1
+    if crio_in_use; then
+        crio_set_minor "$(_k8s_minor_version "$target")" || return 1
+    fi
     _upgrade_restart_kubelet || return 1
     _upgrade_verify_local_versions "$target" || return 1
     show_versions
@@ -119,9 +122,12 @@ upgrade_node_local() {
         kubeadm upgrade node $_kubeconfig_arg $(_kubeadm_preflight_ignore_args) $(_kubeadm_patches_args)
     fi
 
-    # 3. Upgrade kubelet + kubectl packages
+    # 3. Upgrade kubelet + kubectl packages (and CRI-O, which follows the minor)
     log_info "Step 3: Upgrading kubelet and kubectl to ${UPGRADE_TARGET_VERSION}..."
-    k8s_upgrade_node "$UPGRADE_TARGET_VERSION"
+    k8s_upgrade_node "$UPGRADE_TARGET_VERSION" || return 1
+    if crio_in_use; then
+        crio_set_minor "$minor_version" || return 1
+    fi
 
     # 4. Restart kubelet and verify
     log_info "Step 4: Restarting kubelet..."
