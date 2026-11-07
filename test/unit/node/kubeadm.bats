@@ -182,7 +182,7 @@ FAKE
     load_modules; quiet_logs
     local dir="$BATS_TEST_TMPDIR/patches"
     mkdir -p "$dir"
-    parse_setup_args --kubernetes-version 1.37.2 --prerelease --image-repository mirror.example.com/k8s --kubeadm-patches "$dir"
+    parse_setup_args --kubernetes-version 1.37.2 --prerelease --image-repository mirror.example.com/k8s --patches "$dir"
     [ "$K8S_VERSION" = 1.37 ]
     [ "$K8S_PATCH_VERSION" = 1.37.2 ]
     [ "$K8S_PRERELEASE" = true ]
@@ -190,7 +190,7 @@ FAKE
     [ "$KUBEADM_PATCHES_DIR" = "$dir" ]
     run parse_setup_args --kubernetes-version 1.37.2.1
     [ "$status" -ne 0 ]
-    run parse_setup_args --kubeadm-patches "$BATS_TEST_TMPDIR/missing"
+    run parse_setup_args --patches "$BATS_TEST_TMPDIR/missing"
     [ "$status" -ne 0 ]
 }
 

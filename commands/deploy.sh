@@ -82,7 +82,7 @@ _deploy_remote_run() {
     shift 3
     if [ -n "${KUBEADM_PATCHES_DIR:-}" ]; then
         remote_run --forward "$DEPLOY_PASSTHROUGH_ARGS" --drop "$drop" "$node" "$desc" "$@" \
-            --kubeadm-patches "$(remote_node_dir "$node")/kubeadm-patches"
+            --patches "$(remote_node_dir "$node")/kubeadm-patches"
     else
         remote_run --forward "$DEPLOY_PASSTHROUGH_ARGS" --drop "$drop" "$node" "$desc" "$@"
     fi
@@ -229,7 +229,7 @@ deploy_cluster() {
             fi
 
             if ! _deploy_remote_run "" "$node" "join control-plane" \
-                join --join-token "$_JOIN_TOKEN" --join-address "$_JOIN_ADDR" --discovery-token-hash "$_JOIN_HASH" \
+                join --token "$_JOIN_TOKEN" --join-address "$_JOIN_ADDR" --discovery-token-ca-cert-hash "$_JOIN_HASH" \
                 --control-plane --certificate-key "$_CERT_KEY"; then
                 log_error "Control-plane join failed for ${_NODE_HOST}. Aborting."
                 if [ "${COLLECT_DIAGNOSTICS:-false}" = true ]; then
@@ -265,7 +265,7 @@ deploy_cluster() {
             # Run in background subshell (HA settings apply to control planes only)
             (
                 _deploy_remote_run "--ha-vip --ha-interface" "$node" "join worker" \
-                    join --join-token "$_JOIN_TOKEN" --join-address "$_JOIN_ADDR" --discovery-token-hash "$_JOIN_HASH"
+                    join --token "$_JOIN_TOKEN" --join-address "$_JOIN_ADDR" --discovery-token-ca-cert-hash "$_JOIN_HASH"
             ) &
             worker_pids="${worker_pids}${worker_pids:+ }$!"
             worker_hosts="${worker_hosts}${worker_hosts:+ }${w_host}"
@@ -366,11 +366,11 @@ show_deploy_help() {
     echo "  --kubernetes-version VER Kubernetes version: MAJOR.MINOR or MAJOR.MINOR.PATCH (e.g., 1.37 or 1.37.2)"
     echo "  --prerelease            Install the next release from the prerelease channels"
     echo "  --image-repository REPO Pull control-plane images from REPO"
-    echo "  --kubeadm-patches DIR   Apply kubeadm patches from local DIR on every node"
+    echo "  --patches DIR   Apply kubeadm patches from local DIR on every node"
     echo "  --pod-network-cidr CIDR Pod network CIDR"
     echo "  --service-cidr CIDR     Service CIDR"
     echo "  --apiserver-advertise-address ADDR, --control-plane-endpoint ENDPOINT,"
-    echo "  --api-server-extra-sans LIST, --kubeadm-config-patch FILE, --kubelet-node-ip IP"
+    echo "  --apiserver-cert-extra-sans LIST, --kubeadm-config-patch FILE, --kubelet-node-ip IP"
     echo "                          Passed to init/join on the nodes (see 'init --help')"
     echo "  --http-proxy URL, --https-proxy URL, --no-proxy LIST"
     echo "                          Proxy settings for every node (see 'init --help')"
@@ -406,10 +406,10 @@ parse_deploy_args() {
                 DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_pair "$DEPLOY_PASSTHROUGH_ARGS" "$1" "$2")
                 shift 2
                 ;;
-            --kubeadm-patches)
+            --patches)
                 _require_value $# "$1" "${2:-}"
                 if [ ! -d "$2" ]; then
-                    log_error "--kubeadm-patches directory not found: $2"
+                    log_error "--patches directory not found: $2"
                     exit 1
                 fi
                 KUBEADM_PATCHES_DIR=$(cd "$2" && pwd)
@@ -419,7 +419,7 @@ parse_deploy_args() {
                 DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_flag "$DEPLOY_PASSTHROUGH_ARGS" "$1")
                 shift
                 ;;
-            --cri|--proxy-mode|--kubernetes-version|--image-repository|--pod-network-cidr|--service-cidr|--apiserver-advertise-address|--control-plane-endpoint|--kubeadm-config-patch|--api-server-extra-sans|--kubelet-node-ip)
+            --cri|--proxy-mode|--kubernetes-version|--image-repository|--pod-network-cidr|--service-cidr|--apiserver-advertise-address|--control-plane-endpoint|--kubeadm-config-patch|--apiserver-cert-extra-sans|--kubelet-node-ip)
                 _require_value $# "$1" "${2:-}"
                 DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_pair "$DEPLOY_PASSTHROUGH_ARGS" "$1" "$2")
                 shift 2

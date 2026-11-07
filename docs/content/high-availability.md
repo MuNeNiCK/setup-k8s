@@ -35,23 +35,21 @@ curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-
 
 ```bash
 curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
-  join \
+  join 192.168.1.100:6443 \
   --control-plane \
   --certificate-key <certificate-key> \
   --ha-vip 192.168.1.100 \
-  --join-token <token> \
-  --join-address 192.168.1.100:6443 \
-  --discovery-token-hash <hash>
+  --token <token> \
+  --discovery-token-ca-cert-hash <hash>
 ```
 
 ## Join workers
 
 ```bash
 curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
-  join \
-  --join-token <token> \
-  --join-address 192.168.1.100:6443 \
-  --discovery-token-hash <hash>
+  join 192.168.1.100:6443 \
+  --token <token> \
+  --discovery-token-ca-cert-hash <hash>
 ```
 
 ## Requirements

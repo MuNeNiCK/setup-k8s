@@ -37,7 +37,7 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
   channels of pkgs.k8s.io and isv:cri-o.
 - `--image-repository REPO` pulls control-plane and pause images from a
   mirror.
-- `--kubeadm-patches DIR` passes kubeadm patches to `init`, `join`, and
+- `--patches DIR` passes kubeadm patches to `init`, `join`, and
   `upgrade`; `deploy` and remote `upgrade` copy the directory to every node.
 - `preflight` reports user namespace support for Pods and the SELinuxMount
   behavior of Kubernetes 1.37+ (information only).

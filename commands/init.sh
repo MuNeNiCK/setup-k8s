@@ -6,7 +6,7 @@
 show_setup_help() {
     cat <<'EOF'
 Usage: setup-k8s.sh init [options]
-       setup-k8s.sh join --join-token TOKEN --join-address ADDR --discovery-token-hash HASH [options]
+       setup-k8s.sh join ADDR --token TOKEN --discovery-token-ca-cert-hash HASH [options]
 
 Initialize a new cluster on this node (init) or join this node to an existing
 cluster (join). Must be run as root.
@@ -20,7 +20,7 @@ Options (init and join):
   --prerelease              Install the next release from the prerelease channels
                             (pkgs.k8s.io / isv:cri-o prerelease; default version: latest)
   --image-repository REPO   Pull control-plane images from REPO instead of registry.k8s.io
-  --kubeadm-patches DIR     Apply kubeadm patches from DIR (kubeadm --patches) on init and join
+  --patches DIR             Apply kubeadm patches from DIR (as kubeadm --patches) on init and join
   --kubelet-node-ip IP      Set the kubelet node IP
   --swap-enabled            Keep swap enabled (NodeSwap, LimitedSwap; Kubernetes 1.30+)
   --distro FAMILY           Override distro family detection (debian, rhel, suse, arch, alpine, generic)
@@ -38,20 +38,20 @@ Options (init):
   --service-cidr CIDR                 Service CIDR (e.g. 10.96.0.0/12)
   --apiserver-advertise-address ADDR  API server advertise address
   --control-plane-endpoint ENDPOINT   Control plane endpoint
-  --api-server-extra-sans LIST        Extra SANs for the API server certificate (comma-separated)
-  --kubeadm-config-patch FILE         Append a kubeadm config file to the generated config
+  --apiserver-cert-extra-sans LIST    Extra SANs for the API server certificate (comma-separated)
+  --kubeadm-config-patch FILE         Merge a kubeadm config file into the generated config
   --ha                                Enable HA mode with kube-vip (requires --ha-vip)
   --ha-vip ADDRESS                    Virtual IP address for HA
   --ha-interface IFACE                Network interface for the VIP (auto-detected if omitted)
 
-Options (join):
-  --join-token TOKEN            Join token
-  --join-address ADDR           Control plane address (host:port)
-  --discovery-token-hash HASH   Discovery token CA cert hash (sha256:...)
-  --control-plane               Join as a control-plane node (HA)
-  --certificate-key KEY         Certificate key for control-plane join
-  --ha-vip ADDRESS              Virtual IP address (with --control-plane)
-  --ha-interface IFACE          Network interface for the VIP
+Options (join; the names follow kubeadm join):
+  ADDR, --join-address ADDR             API server address (host:port), as the first argument or option
+  --token TOKEN                         Bootstrap token
+  --discovery-token-ca-cert-hash HASH   CA certificate hash (sha256:...)
+  --control-plane                       Join as a control-plane node (HA)
+  --certificate-key KEY                 Certificate key for control-plane join
+  --ha-vip ADDRESS                      Virtual IP address (with --control-plane)
+  --ha-interface IFACE                  Network interface for the VIP
 
 Global options such as --dry-run, --verbose and --log-dir are listed in
 'setup-k8s.sh --help'.
@@ -93,17 +93,17 @@ parse_setup_args() {
                 KUBEADM_IMAGE_REPOSITORY="$2"
                 shift 2
                 ;;
-            --kubeadm-patches)
+            --patches)
                 _require_value $# "$1" "${2:-}"
                 if [ ! -d "$2" ]; then
-                    log_error "--kubeadm-patches directory not found: $2"
+                    log_error "--patches directory not found: $2"
                     exit 1
                 fi
                 # shellcheck disable=SC2034 # used by lib/node/kubeadm.sh
                 KUBEADM_PATCHES_DIR=$(cd "$2" && pwd)
                 shift 2
                 ;;
-            --join-token)
+            --token)
                 _require_value $# "$1" "${2:-}"
                 # shellcheck disable=SC2034 # used by validation.sh
                 JOIN_TOKEN="$2"
@@ -115,7 +115,7 @@ parse_setup_args() {
                 JOIN_ADDRESS="$2"
                 shift 2
                 ;;
-            --discovery-token-hash)
+            --discovery-token-ca-cert-hash)
                 _require_value $# "$1" "${2:-}"
                 # shellcheck disable=SC2034 # used by validation.sh
                 DISCOVERY_TOKEN_HASH="$2"
@@ -211,7 +211,7 @@ parse_setup_args() {
                 KUBEADM_CONFIG_PATCH="$2"
                 shift 2
                 ;;
-            --api-server-extra-sans)
+            --apiserver-cert-extra-sans)
                 _require_value $# "$1" "${2:-}"
                 # shellcheck disable=SC2034 # used by helpers.sh
                 API_SERVER_EXTRA_SANS="$2"
@@ -230,6 +230,10 @@ parse_setup_args() {
                 elif _is_proxy_flag "$1"; then
                     _parse_proxy_flag $# "$1" "${2:-}"
                     shift "$_PROXY_SHIFT"
+                elif [ "$ACTION" = join ] && [ -z "$JOIN_ADDRESS" ] && [ "${1#-}" = "$1" ]; then
+                    # kubeadm join <api-server-endpoint>
+                    JOIN_ADDRESS="$1"
+                    shift
                 else
                     log_error "Unknown option: $1"
                     log_error "Run with --help for usage information"
@@ -305,9 +309,8 @@ initialize_cluster() {
         log_info "Certificate key: $cert_key"
         log_info ""
         log_info "To join additional control-plane nodes, run:"
-        log_info "  setup-k8s.sh join --control-plane --certificate-key $cert_key \\"
-        log_info "    --ha-vip ${HA_VIP_ADDRESS} \\"
-        log_info "    --join-token <token> --join-address <address> --discovery-token-hash <hash>"
+        log_info "  setup-k8s.sh join <address> --token <token> --discovery-token-ca-cert-hash <hash> \\"
+        log_info "    --control-plane --certificate-key $cert_key --ha-vip ${HA_VIP_ADDRESS}"
         log_info "================================================="
     fi
 
@@ -456,13 +459,13 @@ _run_setup() {
 validate_join_args() {
     if [ "$ACTION" = "join" ]; then
         if [ -z "$JOIN_TOKEN" ] || [ -z "$JOIN_ADDRESS" ] || [ -z "$DISCOVERY_TOKEN_HASH" ]; then
-            log_error "join requires --join-token, --join-address, and --discovery-token-hash"
+            log_error "join requires --token, --join-address, and --discovery-token-ca-cert-hash"
             exit 1
         fi
-        if ! _validate_join_token_format "$JOIN_TOKEN" "--join-token"; then
+        if ! _validate_join_token_format "$JOIN_TOKEN" "--token"; then
             exit 1
         fi
-        if ! _validate_discovery_hash_format "$DISCOVERY_TOKEN_HASH" "--discovery-token-hash"; then
+        if ! _validate_discovery_hash_format "$DISCOVERY_TOKEN_HASH" "--discovery-token-ca-cert-hash"; then
             exit 1
         fi
         # Validate join address format: host:port (host part must be non-empty)

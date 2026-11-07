@@ -193,7 +193,7 @@ Add API server SANs:
 ```bash
 setup-k8s.sh deploy \
   --control-planes 10.0.0.1 \
-  --api-server-extra-sans lb.example.com,10.0.0.200 \
+  --apiserver-cert-extra-sans lb.example.com,10.0.0.200 \
   --ssh-key ~/.ssh/id_rsa
 ```
 
@@ -208,10 +208,10 @@ setup-k8s.sh deploy \
 
 ### kubeadm patches
 
-`--kubeadm-patches DIR` passes a directory of kubeadm patches (`kubeadm --patches`) to `init`, `join`, and `upgrade`. Patches change the generated manifests of the control-plane components, etcd, the kubelet configuration, CoreDNS, and kube-proxy (for example `kube-apiserver+strategic.yaml` or `kubeproxydaemonset+json.json`); see the [kubeadm documentation](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/control-plane-flags/#patches) for file names.
+`--patches DIR` passes a directory of kubeadm patches (`kubeadm --patches`) to `init`, `join`, and `upgrade`. Patches change the generated manifests of the control-plane components, etcd, the kubelet configuration, CoreDNS, and kube-proxy (for example `kube-apiserver+strategic.yaml` or `kubeproxydaemonset+json.json`); see the [kubeadm documentation](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/control-plane-flags/#patches) for file names.
 
 ```bash
-sudo sh setup-k8s.sh init --kubeadm-patches /etc/setup-k8s/patches
+sudo sh setup-k8s.sh init --patches /etc/setup-k8s/patches
 ```
 
 With `deploy` and remote `upgrade`, the local directory is copied to every node. Use the same patches for `upgrade` as for `init` and `join`; `kubeadm upgrade` regenerates the manifests.

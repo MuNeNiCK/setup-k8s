@@ -130,7 +130,7 @@ run_join_test() {
 
     log_info "=== Phase 3: join worker ==="
     local worker_join_cmd
-    worker_join_cmd="sh /tmp/setup-k8s.sh join --kubernetes-version $(printf '%q' "$K8S_VERSION") --join-address $(printf '%q' "$join_address") --join-token $(printf '%q' "$join_token") --discovery-token-hash $(printf '%q' "$discovery_hash")"
+    worker_join_cmd="sh /tmp/setup-k8s.sh join --kubernetes-version $(printf '%q' "$K8S_VERSION") --join-address $(printf '%q' "$join_address") --token $(printf '%q' "$join_token") --discovery-token-ca-cert-hash $(printf '%q' "$discovery_hash")"
     vm_ssh_root "$_WORKER_SSH_PORT" "nohup bash -c '$worker_join_cmd > /tmp/setup-k8s-join.log 2>&1; echo \$? > /tmp/join-exit-code' </dev/null >/dev/null 2>&1 &"
     if ! poll_vm_command _join_worker_ssh "$worker_container" /tmp/join-exit-code /tmp/setup-k8s-join.log "$TIMEOUT_TOTAL"; then
         vm_ssh_root "$_WORKER_SSH_PORT" "cat /tmp/setup-k8s-join.log" 2>/dev/null || true

@@ -20,7 +20,7 @@ _parse_distro_arg() {
 # Validate join token format: 6 lowercase alphanumeric chars, dot, 16 lowercase alphanumeric chars.
 # Usage: _validate_join_token_format <token> [label]
 _validate_join_token_format() {
-    local token="$1" label="${2:---join-token}"
+    local token="$1" label="${2:---token}"
     if ! echo "$token" | grep -qE '^[a-z0-9]{6}\.[a-z0-9]{16}$'; then
         log_error "$label format is invalid (expected: [a-z0-9]{6}.[a-z0-9]{16}, got: $token)"
         return 1
@@ -30,7 +30,7 @@ _validate_join_token_format() {
 # Validate discovery token hash format: sha256:<64 hex chars>.
 # Usage: _validate_discovery_hash_format <hash> [label]
 _validate_discovery_hash_format() {
-    local hash="$1" label="${2:---discovery-token-hash}"
+    local hash="$1" label="${2:---discovery-token-ca-cert-hash}"
     if ! echo "$hash" | grep -qE '^sha256:[a-f0-9]{64}$'; then
         log_error "$label format is invalid (expected: sha256:<64 hex chars>, got: $hash)"
         return 1

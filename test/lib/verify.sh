@@ -131,9 +131,9 @@ verify_setup() {
         _vcheck "API server advertise address" "${opt[--apiserver-advertise-address]}" \
             "$(_vr "sed -n 's/^ *- --advertise-address=//p' /etc/kubernetes/manifests/kube-apiserver.yaml")"
     fi
-    if [ -n "${opt[--api-server-extra-sans]:-}" ]; then
+    if [ -n "${opt[--apiserver-cert-extra-sans]:-}" ]; then
         local san check
-        for san in ${opt[--api-server-extra-sans]//,/ }; do
+        for san in ${opt[--apiserver-cert-extra-sans]//,/ }; do
             case "$san" in *[!0-9a-fA-F.:]*) check="-checkhost" ;; *) check="-checkip" ;; esac
             _vcheck_true "API server certificate has SAN ${san}" _vr \
                 "openssl x509 -noout -in /etc/kubernetes/pki/apiserver.crt ${check} '${san}' | grep -q 'does match'"

@@ -55,10 +55,10 @@ These options apply to all subcommands. They are handled by the entry point and 
 | `--kubernetes-version VER` | Kubernetes version: MAJOR.MINOR (latest patch) or MAJOR.MINOR.PATCH (pinned) | latest stable | `--kubernetes-version 1.37.2` |
 | `--prerelease` | Install the next release from the prerelease channels (pkgs.k8s.io, isv:cri-o) | — | `--prerelease` |
 | `--image-repository REPO` | Pull control-plane images from REPO instead of registry.k8s.io | — | `--image-repository registry.example.com/k8s` |
-| `--kubeadm-patches DIR` | Apply kubeadm patches from DIR (`kubeadm --patches`); with `deploy`, a local directory copied to every node | — | `--kubeadm-patches ./patches` |
-| `--join-token TOKEN` | Join token (join only) | — | `--join-token abcdef.1234567890abcdef` |
-| `--join-address ADDR` | Control plane address (join only) | — | `--join-address 192.168.1.10:6443` |
-| `--discovery-token-hash HASH` | Discovery token hash (join only) | — | `--discovery-token-hash sha256:abc...` |
+| `--patches DIR` | Apply kubeadm patches from DIR (`kubeadm --patches`); with `deploy`, a local directory copied to every node | — | `--patches ./patches` |
+| `--token TOKEN` | Join token (join only) | — | `--token abcdef.1234567890abcdef` |
+| `ADDR`, `--join-address ADDR` | API server address (join only); the first argument, as in `kubeadm join` | — | `join 192.168.1.10:6443 …` |
+| `--discovery-token-ca-cert-hash HASH` | Discovery token hash (join only) | — | `--discovery-token-ca-cert-hash sha256:abc...` |
 | `--control-plane` | Join as control-plane node (join only, HA cluster) | — | `--control-plane` |
 | `--certificate-key KEY` | Certificate key for control-plane join | — | `--certificate-key abc123` |
 | `--ha` | Enable HA mode with kube-vip (init only) | — | `--ha` |
@@ -92,7 +92,7 @@ These options are shared across all remote subcommands: `deploy`, `upgrade`, `re
 
 ### Deploy Options
 
-Options specific to the `deploy` subcommand. Init/join options like `--cri`, `--proxy-mode`, `--kubernetes-version`, `--prerelease`, `--image-repository`, `--pod-network-cidr`, `--service-cidr`, and `--control-plane-endpoint` are passed through to remote nodes; `--kubeadm-patches` copies the local directory to every node.
+Options specific to the `deploy` subcommand. Init/join options like `--cri`, `--proxy-mode`, `--kubernetes-version`, `--prerelease`, `--image-repository`, `--pod-network-cidr`, `--service-cidr`, and `--control-plane-endpoint` are passed through to remote nodes; `--patches` copies the local directory to every node.
 
 | Option | Description | Default | Example |
 |--------|-------------|---------|---------|
@@ -101,7 +101,7 @@ Options specific to the `deploy` subcommand. Init/join options like `--cri`, `--
 | `--ha-vip ADDRESS` | VIP for HA (required when >1 control-plane) | — | `--ha-vip 10.0.0.100` |
 | `--ha-interface IFACE` | Network interface for VIP | auto-detect | `--ha-interface eth0` |
 | `--kubeadm-config-patch FILE` | Extra kubeadm config YAML: documents of a generated kind replace its top-level fields, others are added (see [Configuration](configuration.md#kubeadm-configuration)) | — | `--kubeadm-config-patch custom.yaml` |
-| `--api-server-extra-sans NAMES` | Additional SANs for the API server certificate (comma-separated) | — | `--api-server-extra-sans lb.example.com,10.0.0.200` |
+| `--apiserver-cert-extra-sans NAMES` | Additional SANs for the API server certificate (comma-separated) | — | `--apiserver-cert-extra-sans lb.example.com,10.0.0.200` |
 | `--kubelet-node-ip IP` | Set kubelet `--node-ip` on all nodes | — | `--kubelet-node-ip 10.0.0.1` |
 | `--http-proxy URL`, `--https-proxy URL`, `--no-proxy LIST` | Proxy for every node (see [HTTP proxy](configuration.md#http-proxy)) | — | `--https-proxy http://proxy:3128` |
 
@@ -126,7 +126,7 @@ Options for the `upgrade` subcommand when orchestrating remotely via SSH.
 | `--kubernetes-version VER` | Target version in MAJOR.MINOR.PATCH format | — (required) | `--kubernetes-version 1.33.2` |
 | `--skip-drain` | Skip drain/uncordon for all nodes | — | `--skip-drain` |
 | `--no-rollback` | Disable automatic rollback on upgrade failure | — | `--no-rollback` |
-| `--kubeadm-patches DIR` | Apply kubeadm patches from DIR during the upgrade (remote mode: local directory copied to every node) | — | `--kubeadm-patches ./patches` |
+| `--patches DIR` | Apply kubeadm patches from DIR during the upgrade (remote mode: local directory copied to every node) | — | `--patches ./patches` |
 | `--rollback-to VER` | Local mode: reinstall kubeadm, kubelet, and kubectl at VER after a failed upgrade (instead of `--kubernetes-version`) | — | `--rollback-to 1.36.6` |
 | `--auto-step-upgrade` | Automatically step through intermediate minor versions (e.g., 1.31 → 1.32 → 1.33) | — | `--auto-step-upgrade` |
 

@@ -21,8 +21,8 @@ _case_parse_setup_args() {
 
         ACTION="join"
         parse_setup_args --cri crio --kubernetes-version 1.31 \
-            --join-token abc --join-address 1.2.3.4:6443 \
-            --discovery-token-hash sha256:xyz \
+            --token abc --join-address 1.2.3.4:6443 \
+            --discovery-token-ca-cert-hash sha256:xyz \
             --proxy-mode ipvs --install-helm true --install-kustomize true \
             --pod-network-cidr 10.244.0.0/16 --service-cidr 10.96.0.0/12
 
@@ -438,4 +438,20 @@ FAKE
     export UPLOAD_OK
     run initialize_cluster
     [ "$status" -eq 0 ]
+}
+
+@test "join takes the API server address as its first argument, like kubeadm join" {
+    load_modules; quiet_logs
+    ACTION="join"
+    parse_setup_args 10.0.0.1:6443 --token abcdef.0123456789abcdef --discovery-token-ca-cert-hash sha256:0123
+    [ "$JOIN_ADDRESS" = 10.0.0.1:6443 ] && [ "$JOIN_TOKEN" = abcdef.0123456789abcdef ]
+    JOIN_ADDRESS=""
+    parse_setup_args --join-address 10.0.0.2:6443
+    [ "$JOIN_ADDRESS" = 10.0.0.2:6443 ]
+    # A second address and an address on init are errors
+    run parse_setup_args 10.0.0.3:6443
+    [ "$status" -ne 0 ]
+    ACTION=init JOIN_ADDRESS=""
+    run parse_setup_args 10.0.0.1:6443
+    [ "$status" -ne 0 ]
 }

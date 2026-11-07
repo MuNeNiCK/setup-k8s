@@ -230,7 +230,7 @@ show_upgrade_help() {
     echo "    --no-rollback             Disable automatic rollback on failure"
     echo "    --auto-step-upgrade       Automatically step through intermediate minor versions"
     echo "    --rollback-to VER         Reinstall packages at VER after a failed upgrade (replaces --kubernetes-version)"
-    echo "    --kubeadm-patches DIR     Apply kubeadm patches from DIR (use the same patches as on init/join)"
+    echo "    --patches DIR     Apply kubeadm patches from DIR (use the same patches as on init/join)"
     echo "    --distro FAMILY           Override distro family detection"
     echo "    --http-proxy URL, --https-proxy URL, --no-proxy LIST"
     echo "                              Proxy for package downloads (see 'init --help')"
@@ -311,10 +311,10 @@ parse_upgrade_local_args() {
                 UPGRADE_FIRST_CONTROL_PLANE=true
                 shift
                 ;;
-            --kubeadm-patches)
+            --patches)
                 _require_value $# "$1" "${2:-}"
                 if [ ! -d "$2" ]; then
-                    log_error "--kubeadm-patches directory not found: $2"
+                    log_error "--patches directory not found: $2"
                     exit 1
                 fi
                 # shellcheck disable=SC2034 # used by lib/node/kubeadm.sh and lib/cluster/upgrade.sh
@@ -361,10 +361,10 @@ parse_upgrade_deploy_args() {
     while [ $# -gt 0 ]; do
         case $1 in
             --help|-h) show_upgrade_help ;;
-            --kubeadm-patches)
+            --patches)
                 _require_value $# "$1" "${2:-}"
                 if [ ! -d "$2" ]; then
-                    log_error "--kubeadm-patches directory not found: $2"
+                    log_error "--patches directory not found: $2"
                     exit 1
                 fi
                 # shellcheck disable=SC2034 # used by lib/node/kubeadm.sh and lib/cluster/upgrade.sh

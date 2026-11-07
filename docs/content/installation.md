@@ -77,22 +77,20 @@ kubeadm token create --print-join-command
 Join as a worker node:
 ```bash
 curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
-  join \
+  join <address> \
   --cri containerd \
-  --join-token <token> \
-  --join-address <address> \
-  --discovery-token-hash <hash>
+  --token <token> \
+  --discovery-token-ca-cert-hash <hash>
 ```
 
 Join as a control-plane node (HA cluster):
 ```bash
 curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
-  join \
+  join <address> \
   --control-plane \
   --certificate-key <key> \
-  --join-token <token> \
-  --join-address <address> \
-  --discovery-token-hash <hash>
+  --token <token> \
+  --discovery-token-ca-cert-hash <hash>
 ```
 
 Note: The joining node must use the same CRI as the existing cluster.
