@@ -31,5 +31,5 @@ jobs:
 
       - name: Update issues
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: sh scripts/upstream-issues.sh findings
