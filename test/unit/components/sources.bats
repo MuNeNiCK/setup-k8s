@@ -213,3 +213,73 @@ FAKE
     containerd_cleanup
     [ ! -e "$_CONTAINERD_SERVICE_FILES" ] && [ ! -e "$_CONTAINERD_BIN_DIR/containerd" ]
 }
+
+@test "upgrade moves CRI-O from the isv repository to the new minor and checks it" {
+    DISTRO_PKG=apt DISTRO_CRIO_SOURCE=isv
+    VERSION_FILE="$BATS_TEST_TMPDIR/crio-version"
+    echo 1.36.6 > "$VERSION_FILE"
+    cat > "$FAKE_BIN/crio" <<FAKE
+#!/bin/sh
+echo "crio version \$(cat "$VERSION_FILE")"
+FAKE
+    chmod +x "$FAKE_BIN/crio"
+    pkg_repo_add() { echo "repo_add $*" >> "$CALLS"; }
+    pkg_install() { echo "install $*" >> "$CALLS"; echo "${NEW_VERSION:-1.37.3}" > "$VERSION_FILE"; }
+    _crio_prepare_config() { :; }
+    _start_crio_with_diagnostics() { echo restart >> "$CALLS"; }
+    crio_set_minor 1.37
+    grep -q '^repo_add cri-o https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v1.37/deb/ ' "$CALLS"
+    grep -qx 'install --repo cri-o cri-o=1.37' "$CALLS"
+    grep -qx restart "$CALLS"
+    # Already at the minor: nothing to do
+    : > "$CALLS"
+    crio_set_minor 1.37
+    [ ! -s "$CALLS" ]
+    # The package manager kept the old version: fails
+    echo 1.36.6 > "$VERSION_FILE"
+    NEW_VERSION=1.36.6
+    run crio_set_minor 1.37
+    [ "$status" -ne 0 ]
+}
+
+@test "CRI-O from distribution packages is left to the distribution on upgrade" {
+    DISTRO_CRIO_SOURCE=distro
+    fake_cmd crio 0 "crio version 1.35.1"
+    pkg_install() { echo "install $*" >> "$CALLS"; }
+    crio_set_minor 1.36
+    [ ! -s "$CALLS" ]
+}
+
+@test "SELinux: CRI-O gets a module that lets systemd attach its device filters" {
+    STATE="$BATS_TEST_TMPDIR/modules"; : > "$STATE"
+    cat > "$FAKE_BIN/semodule" <<FAKE
+#!/bin/sh
+echo "semodule \$*" >> "$FAKE_LOG"
+case "\$1" in
+    -l) cat "$STATE" ;;
+    -i) cat "\$2" > "$BATS_TEST_TMPDIR/module.cil"; basename "\$2" .cil >> "$STATE" ;;
+    -r) : > "$STATE" ;;
+esac
+FAKE
+    chmod +x "$FAKE_BIN/semodule"
+    fake_cmd getenforce 0 Enforcing
+    _crio_selinux_module_install
+    grep -qxF '(allow init_t container_runtime_t (bpf (prog_run)))' "$BATS_TEST_TMPDIR/module.cil"
+    _crio_selinux_module_loaded
+    # Installed once
+    : > "$FAKE_LOG"
+    _crio_selinux_module_install
+    if fake_calls | grep -q 'semodule -i'; then return 1; fi
+    # Removed with CRI-O
+    DISTRO_PKG=""
+    crio_remove
+    run _crio_selinux_module_loaded
+    [ "$status" -ne 0 ]
+}
+
+@test "SELinux disabled or absent: no module" {
+    fake_cmd getenforce 0 Disabled
+    fake_cmd semodule
+    _crio_selinux_module_install
+    if fake_calls | grep -q 'semodule -i'; then return 1; fi
+}

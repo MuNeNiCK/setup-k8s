@@ -8,23 +8,29 @@
 #   distro  distribution packages (DISTRO_CRIO_PKGS)
 #   binary  CRI-O release tarball (bundles conmon, runc, crun, crictl, CNI plugins)
 #
-#   crio_install   Install, configure, and start CRI-O
-#   crio_remove    Remove packages, repository, and binaries
+#   crio_install           Install, configure, and start CRI-O
+#   crio_in_use            Succeed when this node runs Kubernetes on CRI-O
+#   crio_set_minor <X.Y>   Move CRI-O to a Kubernetes minor (upgrade, rollback)
+#   crio_remove            Remove packages, repository, and binaries
 
-_crio_from_isv() {
-    local series base
+# isv:cri-o repository of the minor of K8S_VERSION (replaces an earlier one)
+_crio_isv_repo_add() {
+    local series base channel=stable
     series=$(_k8s_minor_version "$K8S_VERSION")
-    local channel=stable
     [ "${K8S_PRERELEASE:-false}" = true ] && channel=prerelease
     base="https://download.opensuse.org/repositories/isv:/cri-o:/${channel}:/v${series}"
     case "$(pkg_format)" in
-        deb) pkg_repo_add cri-o "${base}/deb/" "${base}/deb/Release.key" || return 1 ;;
-        rpm) pkg_repo_add cri-o "${base}/rpm/" "${base}/rpm/repodata/repomd.xml.key" || return 1 ;;
+        deb) pkg_repo_add cri-o "${base}/deb/" "${base}/deb/Release.key" ;;
+        rpm) pkg_repo_add cri-o "${base}/rpm/" "${base}/rpm/repodata/repomd.xml.key" ;;
         *)
             log_error "The isv:cri-o repository provides deb and rpm packages only"
             return 1
             ;;
     esac
+}
+
+_crio_from_isv() {
+    _crio_isv_repo_add || return 1
     pkg_install --repo cri-o cri-o
 }
 
@@ -187,11 +193,51 @@ _crio_from_binary() {
     _install_crio_service
 }
 
+# --- SELinux ---
+
+# With the systemd cgroup driver, systemd attaches the eBPF device filter that
+# crun (CRI-O's default OCI runtime) creates for each container. SELinux
+# policies without this rule (openSUSE Leap 16) deny it ("systemd failed to
+# install eBPF device filter") and no container starts. The module adds only
+# that rule; cleanup removes it.
+_CRIO_SELINUX_MODULE="setup-k8s-crio-bpf"
+
+_crio_selinux_enabled() {
+    case "$(getenforce 2>/dev/null)" in
+        Enforcing|Permissive) return 0 ;;
+    esac
+    return 1
+}
+
+_crio_selinux_module_loaded() {
+    command -v semodule >/dev/null 2>&1 && semodule -l 2>/dev/null | awk '{print $1}' | grep -qx "$_CRIO_SELINUX_MODULE"
+}
+
+_crio_selinux_module_install() {
+    _crio_selinux_enabled || return 0
+    _crio_selinux_module_loaded && return 0
+    if ! command -v semodule >/dev/null 2>&1; then
+        log_error "SELinux is enabled but semodule is missing: cannot allow systemd to attach CRI-O's device filters"
+        return 1
+    fi
+    local dir
+    dir=$(mktemp -d)
+    printf '%s\n' '(allow init_t container_runtime_t (bpf (prog_run)))' > "${dir}/${_CRIO_SELINUX_MODULE}.cil"
+    if ! semodule -i "${dir}/${_CRIO_SELINUX_MODULE}.cil"; then
+        rm -rf "$dir"
+        log_error "Failed to install the SELinux module ${_CRIO_SELINUX_MODULE}"
+        return 1
+    fi
+    rm -rf "$dir"
+    log_info "Installed the SELinux module ${_CRIO_SELINUX_MODULE} (systemd may attach CRI-O's device filters)"
+}
+
 # --- interface ---
 
 crio_install() {
     log_info "Installing CRI-O (source: ${DISTRO_CRIO_SOURCE})..."
     cri_install_selinux_policy
+    _crio_selinux_module_install || return 1
     case "$DISTRO_CRIO_SOURCE" in
         isv) _crio_from_isv || return 1 ;;
         distro)
@@ -224,8 +270,63 @@ _crio_prepare_config() {
     mkdir -p /etc/cni/net.d
 }
 
+crio_in_use() {
+    grep -q 'crio\.sock' /etc/crictl.yaml 2>/dev/null || _service_is_active crio
+}
+
+# Installed CRI-O version (MAJOR.MINOR.PATCH); empty when unknown
+crio_installed_version() {
+    command -v crio >/dev/null 2>&1 || return 0
+    crio --version 2>/dev/null | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1
+}
+
+# CRI-O minor versions follow Kubernetes (and setup-k8s installs CRI-O from
+# the repository of the Kubernetes minor), so upgrades and rollbacks move it
+# to the newest patch of <minor>, restart it, and check the running version.
+# Usage: crio_set_minor <MAJOR.MINOR>
+crio_set_minor() {
+    local minor="$1" current
+    current=$(crio_installed_version)
+    if [ "$(_k8s_minor_version "${current:-0.0}")" = "$minor" ]; then
+        log_info "CRI-O ${current} already matches Kubernetes ${minor}"
+        return 0
+    fi
+    log_info "Moving CRI-O ${current:-unknown} to ${minor} (source: ${DISTRO_CRIO_SOURCE})..."
+    case "$DISTRO_CRIO_SOURCE" in
+        isv)
+            K8S_VERSION="$minor"
+            _crio_isv_repo_add || return 1
+            pkg_install --repo cri-o "cri-o=${minor}" || return 1
+            ;;
+        binary)
+            K8S_VERSION="$minor" CRIO_VERSION=""
+            _crio_from_binary || return 1
+            ;;
+        distro)
+            # The distribution decides the CRI-O version (like Kubernetes)
+            log_warn "CRI-O ${current:-unknown} comes from the distribution packages and stays; Kubernetes is ${minor}"
+            return 0
+            ;;
+        *)
+            log_error "Unknown CRI-O source: ${DISTRO_CRIO_SOURCE}"
+            return 1
+            ;;
+    esac
+    _crio_prepare_config
+    _start_crio_with_diagnostics || return 1
+    current=$(crio_installed_version)
+    if [ "$(_k8s_minor_version "${current:-0.0}")" != "$minor" ]; then
+        log_error "CRI-O is ${current:-not installed} after the update (expected ${minor})"
+        return 1
+    fi
+    log_info "CRI-O ${current} is running"
+}
+
 crio_remove() {
     local rc=0 bin had_binary=false
+    if _crio_selinux_module_loaded; then
+        semodule -r "$_CRIO_SELINUX_MODULE" >/dev/null || { log_error "Failed to remove the SELinux module ${_CRIO_SELINUX_MODULE}"; rc=1; }
+    fi
     if [ -n "${DISTRO_PKG:-}" ]; then
         # Only CRI-O itself; shared tools (conmon, crun, iptables-nft) may be
         # used by other software and are left to the package manager.

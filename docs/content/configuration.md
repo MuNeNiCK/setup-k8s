@@ -143,6 +143,33 @@ sudo PAUSE_IMAGE_VERSION=3.10.2 sh setup-k8s.sh init
 
 Supported generic architectures are `amd64` and `arm64`.
 
+## HTTP proxy
+
+For nodes that reach the internet through a proxy:
+
+```bash
+sudo sh setup-k8s.sh init \
+  --http-proxy http://proxy.example.com:3128 \
+  --https-proxy http://proxy.example.com:3128 \
+  --no-proxy .example.com,10.0.0.0/8
+```
+
+- setup-k8s uses the proxy for its downloads and the package manager, and
+  writes it to the service environment of the container runtime (a systemd
+  drop-in `10-setup-k8s-proxy.conf`, or `/etc/conf.d/<runtime>` on OpenRC),
+  which pulls the images. It checks that the restarted runtime uses it.
+- `--no-proxy` is extended with the destinations inside the cluster:
+  loopback, the node's addresses, the API server address and control plane
+  endpoint, the HA VIP, the Service network (`--service-cidr`, default
+  `10.96.0.0/12`), the Pod network (`--pod-network-cidr`), and `.svc`,
+  `.cluster.local`. Without `--pod-network-cidr`, add your CNI plugin's Pod
+  network to `--no-proxy`.
+- Without the options, the `http_proxy`, `https_proxy`, and `no_proxy`
+  environment variables are used (run `sudo -E` to keep them).
+- `deploy` and remote `upgrade` pass the options to every node; local
+  `upgrade` uses them for the package downloads. `cleanup` removes the
+  runtime's proxy settings.
+
 ## kubeadm configuration
 
 Append custom kubeadm YAML with `--kubeadm-config-patch`:

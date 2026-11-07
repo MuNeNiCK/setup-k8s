@@ -280,3 +280,31 @@ EOF
     [ "$status" -ne 0 ]
     [ "$(wc -l < "$TRIES")" -eq 3 ]
 }
+
+@test "dnf and zypper: a minor version installs its newest patch, also when older than installed" {
+    DISTRO_PKG=dnf
+    cat > "$FAKE_BIN/dnf" <<'FAKE'
+#!/bin/sh
+echo "dnf $*" >> "$FAKE_LOG"
+case "$*" in
+    --version) echo 4.20.0 ;;
+    *"list --showduplicates"*) printf '%s\n' 'Installed Packages' 'cri-o.x86_64  1.37.3-150500.1.1  @cri-o' 'Available Packages' \
+        'cri-o.x86_64  1.36.2-150500.1.1  cri-o' 'cri-o.x86_64  1.36.10-150500.1.1  cri-o' ;;
+esac
+exit 0
+FAKE
+    chmod +x "$FAKE_BIN/dnf"
+    fake_cmd rpm 0 "1.37.3"
+    pkg_install cri-o=1.36
+    fake_calls | grep -qx 'dnf install -y cri-o-1.36.10-\*'
+    fake_calls | grep -qx 'dnf downgrade -y cri-o-1.36.10'
+
+    DISTRO_PKG=zypper
+    : > "$FAKE_LOG"
+    fake_cmd zypper 0 'S  | Name  | Type    | Version            | Arch   | Repository
+---+-------+---------+--------------------+--------+-----------
+i+ | cri-o | package | 1.36.6-150500.1.1  | x86_64 | cri-o
+v  | cri-o | package | 1.37.2-150500.1.1  | x86_64 | cri-o'
+    pkg_install cri-o=1.37
+    fake_calls | grep -q 'zypper --non-interactive install -y --allow-vendor-change --replacefiles --oldpackage cri-o=1.37.2$'
+}

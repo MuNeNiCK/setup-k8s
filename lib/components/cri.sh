@@ -95,6 +95,8 @@ EOF
 
 # Finalize containerd setup: configure TOML and crictl
 _finalize_containerd_setup() {
+    # Before the restart in configure_containerd_toml
+    proxy_configure_runtime containerd
     configure_containerd_toml
     configure_crictl
 }
@@ -133,6 +135,7 @@ EOF
 
 # Finalize CRI-O setup: start service with diagnostics and configure crictl.
 _finalize_crio_setup() {
+    proxy_configure_runtime crio
     _start_crio_with_diagnostics || return 1
     configure_crictl
 }

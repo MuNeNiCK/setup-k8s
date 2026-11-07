@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# shellcheck disable=SC2034 # tests set globals read by the modules under test
 # Ported from test/unit/test_upgrade.sh
 
 setup() {
@@ -362,6 +363,7 @@ FAKE
     _upgrade_verify_local_versions() { :; }
     show_versions() { :; }
     _detect_init_system() { echo systemd; }
+    crio_in_use() { return 1; }
     fake_cmd kubeadm
     UPGRADE_TARGET_VERSION=1.37.2
     fake_cmd kubectl 0 "cp1 NotReady control-plane 1m v1.36.6"
@@ -371,4 +373,30 @@ FAKE
     fake_cmd kubectl 0 "cp1 Ready control-plane 1m v1.36.6"
     upgrade_node_local
     fake_calls | grep -qx 'kubeadm upgrade apply v1.37.2 --yes'
+}
+
+@test "node upgrade and rollback move CRI-O to the Kubernetes minor" {
+    load_modules; quiet_logs
+    CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
+    _detect_node_role() { echo worker; }
+    _get_current_k8s_version() { echo 1.36.6; }
+    k8s_upgrade_kubeadm() { echo "kubeadm $1" >> "$CALLS"; }
+    k8s_upgrade_node() { echo "node $1" >> "$CALLS"; }
+    crio_in_use() { return 0; }
+    crio_set_minor() { echo "crio $1" >> "$CALLS"; }
+    _upgrade_restart_kubelet() { echo restart >> "$CALLS"; }
+    _upgrade_verify_local_versions() { :; }
+    show_versions() { :; }
+    fake_cmd kubeadm
+    UPGRADE_TARGET_VERSION=1.37.2
+    upgrade_node_local
+    [ "$(cat "$CALLS")" = "kubeadm 1.37.2
+node 1.37.2
+crio 1.37
+restart" ]
+    : > "$CALLS"
+    _get_current_k8s_version() { echo 1.37.2; }
+    UPGRADE_ROLLBACK_VERSION=1.36.6
+    rollback_node_local
+    grep -qx 'crio 1.36' "$CALLS"
 }

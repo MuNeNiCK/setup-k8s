@@ -101,6 +101,7 @@ cleanup_installed_components() {
         log_info "Removed /opt/cni/bin/"
     fi
     system_cleanup
+    proxy_cleanup
     _service_reload
 
     local left
@@ -142,6 +143,7 @@ _cleanup_leftovers() {
             if pkg_installed "$name"; then echo "package ${name}"; fi
         done
     fi
+    if _crio_selinux_module_loaded; then echo "selinux-module ${_CRIO_SELINUX_MODULE}"; fi
     if command -v apt-mark >/dev/null 2>&1; then
         apt-mark showhold 2>/dev/null | grep -E '^(kube|cri-tools$|cri-o$)' | sed 's/^/hold /'
     fi
@@ -157,7 +159,8 @@ _cleanup_leftovers() {
                 yum.repos.d/kubernetes.repo yum.repos.d/cri-o.repo yum.repos.d/docker.repo \
                 yum.repos.d/docker-ce.repo yum.repos.d/containers.repo \
                 zypp/repos.d/kubernetes.repo zypp/repos.d/cri-o.repo zypp/repos.d/containers.repo \
-                default/kubelet sysconfig/kubelet systemd/system/kubelet.service init.d/kubelet; do
+                default/kubelet sysconfig/kubelet systemd/system/kubelet.service init.d/kubelet \
+                systemd/system/containerd.service.d/10-setup-k8s-proxy.conf systemd/system/crio.service.d/10-setup-k8s-proxy.conf; do
         if [ -e "${_CLEANUP_ETC}/${file}" ]; then echo "file ${_CLEANUP_ETC}/${file}"; fi
     done
     for file in kubernetes systemd/system/kubelet.service.d; do

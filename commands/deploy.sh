@@ -372,6 +372,8 @@ show_deploy_help() {
     echo "  --apiserver-advertise-address ADDR, --control-plane-endpoint ENDPOINT,"
     echo "  --api-server-extra-sans LIST, --kubeadm-config-patch FILE, --kubelet-node-ip IP"
     echo "                          Passed to init/join on the nodes (see 'init --help')"
+    echo "  --http-proxy URL, --https-proxy URL, --no-proxy LIST"
+    echo "                          Proxy settings for every node (see 'init --help')"
     echo "  --resume                Resume a previously interrupted deploy"
     _show_help_footer "  " "Show deployment plan and exit"
     echo ""
@@ -432,7 +434,10 @@ parse_deploy_args() {
                 shift 2
                 ;;
             *)
-                if _parse_remote_ssh_args $# "$1" "${2:-}"; then
+                if _is_proxy_flag "$1"; then
+                    _parse_proxy_flag $# "$1" "${2:-}"
+                    shift "$_PROXY_SHIFT"
+                elif _parse_remote_ssh_args $# "$1" "${2:-}"; then
                     shift "$_REMOTE_SSH_SHIFT"
                 else
                     log_error "Unknown deploy option: $1"
@@ -441,6 +446,7 @@ parse_deploy_args() {
                 ;;
         esac
     done
+    DEPLOY_PASSTHROUGH_ARGS=$(proxy_forward_args "$DEPLOY_PASSTHROUGH_ARGS")
 }
 
 # Validate deploy arguments

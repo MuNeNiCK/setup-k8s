@@ -10,8 +10,16 @@ _pkg_zypper_base_deps() {
     echo "curl iptables iproute2 ethtool conntrack-tools socat kmod"
 }
 
+# Newest patch of <minor> available for <name> (installed or not)
+_pkg_zypper_minor_version() {
+    zypper --non-interactive search -s --match-exact "$1" 2>/dev/null \
+        | awk -F'|' -v n="$1" '{ gsub(/ /, "", $2); gsub(/ /, "", $4); if ($2 == n) print $4 }' \
+        | sed 's/-.*//' | _pkg_newest_patch "$2"
+}
+
 _pkg_zypper_install() {
     _pkg_parse_install_args "$@"
+    _pkg_resolve_minor_specs _pkg_zypper_minor_version
     local spec name names
     names=$(_pkg_spec_names)
     set --

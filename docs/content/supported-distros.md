@@ -16,7 +16,7 @@ Rows dated 2026-11-06 or later were verified with Kubernetes v1.37.2 after the p
 | CentOS Stream | 10 | 2026-06-09 | Tested | |
 | CentOS Stream | 9 | 2026-06-09 | Tested | |
 | Rocky Linux | 10 | 2026-06-09 | Tested | |
-| Rocky Linux | 9 | 2026-11-06 | Tested | Verified with CRI-O |
+| Rocky Linux | 9 | 2026-11-07 | Tested | Verified with CRI-O |
 | Rocky Linux | 8 | 2026-06-09 | Partial | cgroups v1 only; requires Kubernetes 1.34 or earlier (no longer supported upstream) |
 | AlmaLinux | 10 | 2026-06-09 | Tested | |
 | AlmaLinux | 9 | 2026-06-09 | Tested | |
@@ -26,7 +26,7 @@ Rows dated 2026-11-06 or later were verified with Kubernetes v1.37.2 after the p
 | Fedora | 44 | 2026-11-06 | Tested | |
 | Fedora | 43 | 2026-06-09 | Tested | |
 | openSUSE | Tumbleweed | 2026-06-09 | Tested | |
-| openSUSE | Leap 16.0 | 2026-11-06 | Tested | containerd from Virtualization:containers |
+| openSUSE | Leap 16.0 | 2026-11-07 | Tested | containerd from Virtualization:containers; verified with CRI-O (SELinux module, see [CRI-O](#cri-o-and-selinux)) |
 | SLES | 15 SP5 | - | Untested | Subscription required |
 | Alpine Linux | 3.24 | 2026-11-07 | Tested | OpenRC, cgroupfs; Kubernetes 1.36 (distribution package) |
 | Alpine Linux | 3.23 | 2026-11-06 | Tested | OpenRC, cgroupfs; Kubernetes 1.34 (distribution package) |
@@ -58,3 +58,12 @@ On Alpine and Arch the Kubernetes version is the one the distribution ships; it 
 ## Notes
 
 Kubernetes 1.35+ fails on cgroups v1 by default. Use `--kubernetes-version 1.34` or earlier on distributions limited to cgroups v1, or migrate the node to cgroups v2.
+
+## CRI-O and SELinux
+
+With SELinux enabled, CRI-O installs add the policy module `setup-k8s-crio-bpf`.
+It contains one rule: systemd may attach the eBPF device filters that crun
+creates for each container. Without it, openSUSE Leap 16 denies them and no
+container starts (`systemd failed to install eBPF device filter`). `cleanup`
+removes the module. The SELinux mode is not changed.
+

@@ -30,6 +30,9 @@ if command -v apk >/dev/null 2>&1; then
         apk info -e "$p" >/dev/null 2>&1 && echo "package:$p"
     done
 fi
+if command -v semodule >/dev/null 2>&1; then
+    semodule -l 2>/dev/null | awk '{print $1}' | grep -x 'setup-k8s.*' | sed 's/^/selinux-module:/'
+fi
 if command -v dnf >/dev/null 2>&1 && dnf versionlock list >/dev/null 2>&1; then
     dnf versionlock list 2>/dev/null | grep -o -E '(kubeadm|kubelet|kubectl|cri-tools|cri-o)' | sort -u | sed 's/^/versionlock:/'
 fi

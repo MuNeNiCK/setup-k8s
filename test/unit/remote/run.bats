@@ -73,6 +73,7 @@ setup() {
     k8s_upgrade_kubeadm() { echo "kubeadm $1" >> "$CALLS"; }
     k8s_upgrade_node() { echo "node $1" >> "$CALLS"; }
     _get_current_k8s_version() { echo 1.37.2; }
+    crio_in_use() { return 1; }
     _upgrade_restart_kubelet() { echo "restart kubelet" >> "$CALLS"; }
     _upgrade_verify_local_versions() { echo "verify $1" >> "$CALLS"; }
     show_versions() { :; }
