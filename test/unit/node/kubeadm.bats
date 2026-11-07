@@ -266,3 +266,13 @@ FAKE
     kubeadm_prepare_node_patches 1.34
     [ -z "$KUBEADM_PATCHES_DIR" ]
 }
+
+@test "kubeadm skips SystemVerification on cgroups v1 nodes that allow it" {
+    load_modules; quiet_logs
+    _detect_init_system() { echo systemd; }
+    KUBEADM_PATCHES_DIR=""
+    [ -z "$(_kubeadm_preflight_ignore_args)" ]
+    _has_cgroupv2() { return 1; }
+    kubeadm_prepare_node_patches 1.37
+    [ "$(_kubeadm_preflight_ignore_args)" = "--ignore-preflight-errors=SystemVerification" ]
+}

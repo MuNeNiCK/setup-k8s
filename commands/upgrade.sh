@@ -103,7 +103,7 @@ upgrade_node_local() {
             log_info "Nodes are NotReady (no CNI plugin?): skipping the ControlPlaneNodesReady and CreateJob checks"
             _preflight_errors="ControlPlaneNodesReady,CreateJob"
         fi
-        if [ "$(_detect_init_system)" != "systemd" ]; then
+        if [ "$(_detect_init_system)" != "systemd" ] || _kubeadm_cgroupv1_allowed; then
             _preflight_errors="${_preflight_errors}${_preflight_errors:+,}SystemVerification"
         fi
         # shellcheck disable=SC2046 # empty or "--patches DIR"
