@@ -174,41 +174,6 @@ _case_help_contains_backup_restore() {
 }
 
 # ============================================================
-# Test: etcd.sh core functions defined
-# ============================================================
-_case_etcd_functions_defined() {
-    echo "=== Test: etcd.sh core functions defined ==="
-    (
-        load_modules
-        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
-        _audit_log() { :; }
-        _require_value() { :; }
-        _parse_common_ssh_args() { :; }
-        _SSH_SHIFT=0
-
-        local has_backup="false"
-        type backup_etcd_local >/dev/null 2>&1 && has_backup="true"
-        _assert_eq "backup_etcd_local defined" "true" "$has_backup"
-
-        local has_restore="false"
-        type restore_etcd_local >/dev/null 2>&1 && has_restore="true"
-        _assert_eq "restore_etcd_local defined" "true" "$has_restore"
-
-        local has_find_container="false"
-        type _find_etcd_container >/dev/null 2>&1 && has_find_container="true"
-        _assert_eq "_find_etcd_container defined" "true" "$has_find_container"
-
-        local has_etcdctl="false"
-        type _etcdctl_exec >/dev/null 2>&1 && has_etcdctl="true"
-        _assert_eq "_etcdctl_exec defined" "true" "$has_etcdctl"
-
-        local has_extract="false"
-        type _extract_etcd_binaries >/dev/null 2>&1 && has_extract="true"
-        _assert_eq "_extract_etcd_binaries defined" "true" "$has_extract"
-    )
-}
-
-# ============================================================
 # Test: etcd backup path variables (deep)
 # ============================================================
 _case_etcd_backup_path_variables() {
@@ -408,10 +373,6 @@ _case_resolve_etcd_image_ref_ctr_fallback() {
     _case_help_contains_backup_restore
 }
 
-@test "etcd.sh core functions defined" {
-    _case_etcd_functions_defined
-}
-
 @test "etcd backup path variables" {
     _case_etcd_backup_path_variables
 }
@@ -467,8 +428,8 @@ FAKE
     run backup_etcd_local
     [ "$status" -ne 0 ]
     [ ! -e "$ETCD_SNAPSHOT_PATH" ]
-    STATUS_RC=0 STATUS_JSON='{"hash":1,"revision":1,"totalKey":0,"totalSize":20480}'
-    export STATUS_RC STATUS_JSON
+    export STATUS_RC=0
+    export STATUS_JSON='{"hash":1,"revision":1,"totalKey":0,"totalSize":20480}'
     run backup_etcd_local
     [ "$status" -ne 0 ]
 }

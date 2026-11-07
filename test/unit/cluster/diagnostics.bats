@@ -1,33 +1,20 @@
 #!/usr/bin/env bats
-# Ported from test/unit/test_diagnostics.sh
+# Diagnostics collection (lib/cluster/diagnostics.sh).
 
 setup() {
     load '../helpers/common'
-}
-
-# File-local module loader
-_load_diagnostics_test_modules() {
     load_modules
+    quiet_logs
 }
 
-# ============================================================
-# Test: diagnostics functions exist
-# ============================================================
-_case_diagnostics_functions() {
-    echo "=== Test: diagnostics functions exist ==="
-    (
-        _load_diagnostics_test_modules
-
-        local has_remote="false"
-        type _collect_diagnostics >/dev/null 2>&1 && has_remote="true"
-        _assert_eq "_collect_diagnostics defined" "true" "$has_remote"
-
-        local has_local="false"
-        type _collect_local_diagnostics >/dev/null 2>&1 && has_local="true"
-        _assert_eq "_collect_local_diagnostics defined" "true" "$has_local"
-    )
-}
-
-@test "diagnostics functions exist" {
-    _case_diagnostics_functions
+@test "local diagnostics save kubelet, containerd, and system information" {
+    fake_cmd hostname 0 node1
+    fake_cmd journalctl 0 "-- log line --"
+    fake_cmd df 0 "/dev/vda1 40G"
+    fake_cmd free 0 "Mem: 4096"
+    _collect_local_diagnostics "$BATS_TEST_TMPDIR/diag"
+    grep -q 'log line' "$BATS_TEST_TMPDIR/diag/node1-kubelet.log"
+    grep -q 'log line' "$BATS_TEST_TMPDIR/diag/node1-containerd.log"
+    grep -q '/dev/vda1' "$BATS_TEST_TMPDIR/diag/node1-system.log"
+    fake_calls | grep -q '^journalctl -u kubelet'
 }

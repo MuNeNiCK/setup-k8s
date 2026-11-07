@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# shellcheck disable=SC2034 # tests set globals read by the modules under test
 # Ported from test/unit/test_parsing_validation.sh
 
 setup() {

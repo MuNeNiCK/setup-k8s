@@ -7,68 +7,6 @@ setup() {
 }
 
 # ============================================================
-# Test: kernel version comparison logic
-# ============================================================
-_case_kernel_version_comparison() {
-    echo "=== Test: kernel version comparison ==="
-    # Simulate the fixed comparison from networking.sh
-    _check_kernel() {
-        local major="$1" minor="$2"
-        if [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 13 ]; }; then
-            echo "too_old"
-        elif [ "$major" -lt 4 ] || { [ "$major" -eq 4 ] && [ "$minor" -lt 14 ]; }; then
-            echo "limited"
-        else
-            echo "ok"
-        fi
-    }
-    _assert_eq "kernel 2.6 too old" "too_old" "$(_check_kernel 2 6)"
-    _assert_eq "kernel 3.10 too old" "too_old" "$(_check_kernel 3 10)"
-    _assert_eq "kernel 3.12 too old" "too_old" "$(_check_kernel 3 12)"
-    _assert_eq "kernel 3.13 limited" "limited" "$(_check_kernel 3 13)"
-    _assert_eq "kernel 4.0 limited" "limited" "$(_check_kernel 4 0)"
-    _assert_eq "kernel 4.13 limited" "limited" "$(_check_kernel 4 13)"
-    _assert_eq "kernel 4.14 ok" "ok" "$(_check_kernel 4 14)"
-    _assert_eq "kernel 5.15 ok" "ok" "$(_check_kernel 5 15)"
-    _assert_eq "kernel 6.1 ok" "ok" "$(_check_kernel 6 1)"
-}
-
-# ============================================================
-# Test: networking.sh core functions defined
-# ============================================================
-_case_networking_functions_defined() {
-    echo "=== Test: networking.sh core functions defined ==="
-    (
-        load_modules
-        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
-
-        local has_check_ipvs="false"
-        type check_ipvs_availability >/dev/null 2>&1 && has_check_ipvs="true"
-        _assert_eq "check_ipvs_availability defined" "true" "$has_check_ipvs"
-
-        local has_check_nftables="false"
-        type check_nftables_availability >/dev/null 2>&1 && has_check_nftables="true"
-        _assert_eq "check_nftables_availability defined" "true" "$has_check_nftables"
-
-        local has_configure="false"
-        type configure_network_settings >/dev/null 2>&1 && has_configure="true"
-        _assert_eq "configure_network_settings defined" "true" "$has_configure"
-
-        local has_enable="false"
-        type enable_kernel_modules >/dev/null 2>&1 && has_enable="true"
-        _assert_eq "enable_kernel_modules defined" "true" "$has_enable"
-
-        local has_cleanup="false"
-        type cleanup_cni >/dev/null 2>&1 && has_cleanup="true"
-        _assert_eq "cleanup_cni defined" "true" "$has_cleanup"
-
-        local has_reset="false"
-        type reset_iptables >/dev/null 2>&1 && has_reset="true"
-        _assert_eq "reset_iptables defined" "true" "$has_reset"
-    )
-}
-
-# ============================================================
 # Test: network options defaults
 # ============================================================
 _case_network_options_defaults() {
@@ -279,20 +217,12 @@ _case_install_proxy_mode_packages_logic() {
     [ -z "$(fake_calls)" ]
 }
 
-@test "kernel version comparison" {
-    _case_kernel_version_comparison
-}
-
 @test "network options defaults" {
     _case_network_options_defaults
 }
 
 @test "parse network options" {
     _case_parse_network_options
-}
-
-@test "networking.sh core functions defined" {
-    _case_networking_functions_defined
 }
 
 @test "enable_kernel_modules iptables mode module list" {

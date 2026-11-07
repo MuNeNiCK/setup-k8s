@@ -187,24 +187,6 @@ _case_upgrade_rollback_flag() {
 }
 
 # ============================================================
-# Test: rollback helper functions exist
-# ============================================================
-_case_rollback_functions() {
-    echo "=== Test: rollback helper functions ==="
-    (
-        load_modules
-
-        local has_record="false"
-        type _record_pre_upgrade_versions >/dev/null 2>&1 && has_record="true"
-        _assert_eq "_record_pre_upgrade_versions defined" "true" "$has_record"
-
-        local has_rollback="false"
-        type _rollback_node >/dev/null 2>&1 && has_rollback="true"
-        _assert_eq "_rollback_node defined" "true" "$has_rollback"
-    )
-}
-
-# ============================================================
 # Test: auto-step-upgrade default
 # ============================================================
 _case_auto_step_upgrade_default() {
@@ -228,22 +210,6 @@ _case_parse_auto_step_upgrade() {
 
         parse_upgrade_local_args --kubernetes-version 1.33.2 --auto-step-upgrade
         _assert_eq "UPGRADE_AUTO_STEP parsed (local)" "true" "$UPGRADE_AUTO_STEP"
-    )
-}
-
-# ============================================================
-# Test: _compute_upgrade_steps function defined
-# ============================================================
-_case_compute_upgrade_steps_defined() {
-    echo "=== Test: _compute_upgrade_steps function defined ==="
-    (
-        load_modules
-        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
-        _require_value() { :; }
-
-        local has_func="false"
-        type _compute_upgrade_steps >/dev/null 2>&1 && has_func="true"
-        _assert_eq "_compute_upgrade_steps defined" "true" "$has_func"
     )
 }
 
@@ -283,20 +249,12 @@ _case_compute_upgrade_steps_defined() {
     _case_upgrade_rollback_flag
 }
 
-@test "rollback helper functions" {
-    _case_rollback_functions
-}
-
 @test "auto-step-upgrade default" {
     _case_auto_step_upgrade_default
 }
 
 @test "parse --auto-step-upgrade" {
     _case_parse_auto_step_upgrade
-}
-
-@test "_compute_upgrade_steps function defined" {
-    _case_compute_upgrade_steps_defined
 }
 
 # --- node resolution, verification, kubelet restart ---
@@ -376,7 +334,8 @@ w1 10.0.2.15 w1'
     _service_reload() { :; }
     _service_restart() { :; }
     _service_is_active() { [ "${KUBELET_UP:-true}" = true ]; }
-    _upgrade_restart_kubelet
+    run _upgrade_restart_kubelet
+    [ "$status" -eq 0 ]
     KUBELET_UP=false
     run _upgrade_restart_kubelet
     [ "$status" -ne 0 ]

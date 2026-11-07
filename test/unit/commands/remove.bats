@@ -178,7 +178,7 @@ _fake_remove_cluster() {
             *) true ;;
         esac
     }
-    REMOVE_CONTROL_PLANES=10.0.0.1 REMOVE_NODES=10.0.0.2 DEPLOY_SSH_USER=root
+    REMOVE_CONTROL_PLANES=10.0.0.1 REMOVE_NODES=10.0.0.2
 }
 
 @test "remove succeeds only when the node is gone from the cluster" {
