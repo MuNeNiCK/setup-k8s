@@ -24,7 +24,6 @@ Rows dated 2026-11-06 or later were verified with Kubernetes v1.37.2 after the p
 | Oracle Linux | 9 | 2026-06-09 | Tested | |
 | Fedora | 45 | 2026-11-07 | Tested | Verified with containerd and CRI-O |
 | Fedora | 44 | 2026-11-06 | Tested | |
-| Fedora | 43 | 2026-06-09 | Tested | |
 | openSUSE | Tumbleweed | 2026-06-09 | Tested | |
 | openSUSE | Leap 16.0 | 2026-11-07 | Tested | containerd from Virtualization:containers; verified with CRI-O (SELinux module, see [CRI-O](#cri-o-and-selinux)) |
 | SLES | 15 SP5 | - | Untested | Subscription required |

@@ -32,7 +32,8 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 - A weekly upstream check (`scripts/check-upstream.sh`) opens an issue for
   each upstream change that needs action: new Kubernetes minors and
   prereleases, end of life of tested Kubernetes minors and distributions,
-  component updates (patch, minor, major), and new distribution releases.
+  component updates (patch, minor, major; for containerd, the end of life
+  of the pinned minor or a newer LTS minor), and new distribution releases.
   Dependabot updates GitHub Actions.
 - `--proxy-mode auto` (the new default): nftables on Kubernetes 1.33+ with
   Linux 5.13+, iptables otherwise. `preflight --proxy-mode auto` shows the
@@ -65,6 +66,7 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Changed
 
+- Fedora 43 (end of life 2026-12-01) is no longer tested.
 - The full VM matrices run for pull requests into `main` (before a release)
   and on demand, instead of on every push to `develop` and `main` and weekly.
   Every pull request still runs the Ubuntu 24.04 smoke test.

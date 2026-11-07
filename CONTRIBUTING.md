@@ -156,7 +156,8 @@ change is handled:
   pkgs.k8s.io, CRI-O, and cri-tools releases for it
 - a tested Kubernetes minor or distribution within 60 days of its end of life
 - a component default in `lib/core/defaults.sh` with a newer release
-  (patch, minor, or major), and a newer containerd minor
+  (patch, minor, or major), the end of life of the pinned containerd minor,
+  and a newer containerd LTS minor
 - a newer release of a tested distribution in the image catalog, or a test
   image missing from it
 

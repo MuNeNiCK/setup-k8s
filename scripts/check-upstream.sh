@@ -12,7 +12,7 @@
 #   kubernetes-prerelease-X.Y   a prerelease of the next minor is available
 #   kubernetes-eol-X.Y          a tested minor reaches its end of life within 60 days (or has)
 #   component-NAME              a component default in lib/core/defaults.sh is outdated
-#   component-containerd-minor  a newer containerd minor than the pinned one is released
+#   component-containerd-minor  the pinned containerd minor nears its end of life, or a newer LTS minor exists
 #   distro-missing-ID           a test image is no longer in the image catalog
 #   distro-eol-ID               a tested distribution reaches its end of life within 60 days (or has)
 #   distro-new-ID               a newer release of a tested distribution is in the catalog
@@ -212,7 +212,7 @@ EOF
 }
 
 check_components() {
-    local name var repo prefix scenarios current latest versions newer
+    local name var repo prefix scenarios current latest versions eol_date
     # name|variable|repository|tag prefix|scenarios
     while IFS='|' read -r name var repo prefix scenarios; do
         current=$(default_of "$var")
@@ -239,17 +239,44 @@ EOF
             "generic.sh, init-cleanup.sh on distributions without containerd 2 packages" \
             "This is the latest patch release of $(minor_of "$current")."
     fi
-    newer=$(printf '%s\n' "$versions" | ver_max)
-    if ver_gt "$(minor_of "$newer")" "$(minor_of "$current")"; then
-        finding component-containerd-minor "containerd $(minor_of "$newer") is released (the default follows $(minor_of "$current"))" <<EOF
-containerd ${newer} is released; \`CONTAINERD_VERSION\` follows $(minor_of "$current") (${current}).
-Check the release notes and the Kubernetes compatibility before moving:
-https://containerd.io/releases/ and https://github.com/containerd/containerd/releases
+    # The pinned minor: follow containerd's support table (RELEASES.md).
+    # Report when it nears its end of life, or when a newer LTS minor exists.
+    local table minor row status eol newest_lts days
+    table=$(fetch https://raw.githubusercontent.com/containerd/containerd/main/RELEASES.md \
+        | sed -n 's/^| *\[\([0-9][0-9]*\.[0-9][0-9]*\)\]([^)]*) *| *\([^|]*[^ |]\) *| *[^|]*| *\([^|]*[^ |]\) *|.*/\1|\2|\3/p')
+    [ -n "$table" ] || die "cannot read the containerd support table"
+    minor=$(minor_of "$current")
+    row=$(printf '%s\n' "$table" | awk -F'|' -v m="$minor" '$1 == m')
+    status=$(printf '%s' "$row" | cut -d'|' -f2)
+    eol=$(printf '%s' "$row" | cut -d'|' -f3)
+    newest_lts=$(printf '%s\n' "$table" | awk -F'|' '$2 == "LTS" { print $1 ".0" }' | ver_max | cut -d. -f1,2)
+    days=99999
+    eol_date=$(printf '%s' "$eol" | sed 's/\*//' | awk '{
+        split("January February March April May June July August September October November December", n, " ")
+        for (i = 1; i <= 12; i++) if (n[i] == $1) m = i
+        d = ($3 == "" ? 1 : $2 + 0); y = ($3 == "" ? $2 : $3)
+        if (m) printf "%04d-%02d-%02d", y, m, d }')
+    [ -n "$eol_date" ] && days=$(days_until "$eol_date")
+    if [ -z "$row" ] || [ "$status" = "End of Life" ] || [ "$days" -le "$WARN_DAYS" ]; then
+        finding component-containerd-minor "containerd ${minor} ${status:-is not in the support table}${eol:+ (end of life: ${eol})}: move the default" <<EOF
+\`CONTAINERD_VERSION\` follows containerd ${minor} (${current}); containerd lists it as
+"${status:-unknown}"${eol:+ with end of life ${eol}}. The newest LTS minor is ${newest_lts:-unknown}.
+Support table: https://github.com/containerd/containerd/blob/main/RELEASES.md
 
 To do:
 
-- [ ] Decide whether to move the default to $(minor_of "$newer")
-- [ ] If so, update \`CONTAINERD_VERSION\`, run generic.sh and the distro matrix, and add a CHANGELOG entry
+- [ ] Move \`CONTAINERD_VERSION\` to the newest LTS minor (check the Kubernetes compatibility table)
+- [ ] Run generic.sh and the distro matrix; add a CHANGELOG entry
+EOF
+    elif [ -n "$newest_lts" ] && ver_gt "$newest_lts" "$minor"; then
+        finding component-containerd-minor "containerd ${newest_lts} LTS is available (the default follows ${minor})" <<EOF
+containerd ${newest_lts} is a long-term support release; \`CONTAINERD_VERSION\` follows ${minor} (${current}).
+Support table: https://github.com/containerd/containerd/blob/main/RELEASES.md
+
+To do:
+
+- [ ] Move \`CONTAINERD_VERSION\` to ${newest_lts} (check the Kubernetes compatibility table)
+- [ ] Run generic.sh and the distro matrix; add a CHANGELOG entry
 EOF
     fi
 }
