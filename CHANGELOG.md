@@ -13,6 +13,12 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Added
 
+- HTTP proxy support: `--http-proxy`, `--https-proxy`, `--no-proxy` for
+  `init`, `join`, `deploy`, and `upgrade` (default: the proxy environment
+  variables). The proxy is used for downloads and the package manager and
+  set for the container runtime's image pulls; the cluster's own addresses
+  and networks are always excluded. `test/scenarios/proxy.sh` verifies it
+  with all other outbound connections blocked.
 - `test/scenarios/legacy-upgrade.sh` sets a node up with an earlier
   setup-k8s version and manages it with the current one (upgrade, cleanup,
   new init).
@@ -117,6 +123,11 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Fixed
 
+- `upgrade` left CRI-O and its repository on the earlier Kubernetes minor.
+  CRI-O now moves to the target minor on each node (and back on rollback)
+  and is checked after the restart. dnf and zypper install the newest patch
+  of a requested minor (they installed by name, which does not upgrade or
+  downgrade an installed package).
 - Commands no longer report success without checking the result:
   - `renew` fails without crictl, waits until the control-plane components
     run in new containers and the API server is ready, and checks that each

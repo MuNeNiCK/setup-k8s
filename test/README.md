@@ -45,6 +45,8 @@ Subcommand scenarios:
 ./scenarios/swap-reboot.sh --distro ubuntu-24.04-cloud-amd64   # swap stays off across reboots
 ./scenarios/options.sh --distro ubuntu-24.04-cloud-amd64       # patch version, image repository, kubeadm patches, Helm, Kustomize
 ./scenarios/legacy-upgrade.sh --distro rocky-9-cloud-amd64    # node set up by an earlier setup-k8s: upgrade, cleanup, init
+./scenarios/proxy.sh --distro ubuntu-24.04-cloud-amd64          # through an HTTP proxy, all other outbound HTTP(S) blocked
+./scenarios/upgrade.sh --deploy-args "--cri crio"                # CRI-O follows the Kubernetes minor
 ./scenarios/upgrade.sh --distro ubuntu-24.04-cloud-amd64
 ./scenarios/upgrade.sh --distro ubuntu-24.04-cloud-amd64 --upgrade-args "--skip-drain --no-rollback"
 ./scenarios/generic.sh --host-distro ubuntu-24.04-cloud-amd64
