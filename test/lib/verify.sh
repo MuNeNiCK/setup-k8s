@@ -21,7 +21,8 @@ VERIFY_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 _verify_fail=0
 _VERIFY_RUN=""
 # Run a shell command line on the VM as root
-_vr() { printf '%s\n' "$1" | $_VERIFY_RUN "sh -s" 2>/dev/null; }
+# (sudo's secure_path may lack /usr/local/bin, where binary installs go)
+_vr() { printf 'PATH=/usr/local/sbin:/usr/local/bin:$PATH\n%s\n' "$1" | $_VERIFY_RUN "sh -s" 2>/dev/null; }
 _vcheck() {
     local desc="$1" want="$2" got="$3"
     if [ "$got" = "$want" ]; then
