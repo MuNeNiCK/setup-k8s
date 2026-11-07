@@ -122,71 +122,11 @@ EOF
     fake_calls | grep -qx 'dnf install -y --setopt=disable_excludes=kubernetes kubeadm-1.37.2-\*'
 }
 
-# Fake dnf whose "versionlock list" prints $1 (dnf4 or dnf5 format).
-_fake_dnf_with_versionlock() {
-    cat > "$FAKE_BIN/dnf" <<FAKE
-#!/bin/sh
-echo "dnf \$*" >> "$FAKE_LOG"
-case "\$*" in
-    --version) echo "$2" ;;
-    "versionlock list") printf '%s\n' "$1" ;;
-esac
-exit 0
-FAKE
-    chmod +x "$FAKE_BIN/dnf"
-}
-
-@test "dnf4: versionlock entries of earlier versions are removed before installing" {
-    DISTRO_PKG=dnf
-    _fake_dnf_with_versionlock 'kubelet-0:1.36.6-150500.1.1.*
-kubeadm-0:1.36.6-150500.1.1.*
-kubectl-0:1.36.6-150500.1.1.*' 4.20.0
-    pkg_install kubeadm=1.37.2 kubelet=1.37.2 cri-tools
-    fake_calls | grep -qx 'dnf versionlock delete kubeadm'
-    fake_calls | grep -qx 'dnf versionlock delete kubelet'
-    if fake_calls | grep -q 'versionlock delete cri-tools'; then return 1; fi
-    # the locks are gone before the install transaction
-    [ "$(fake_calls | grep -n 'versionlock delete kubelet' | cut -d: -f1)" -lt "$(fake_calls | grep -n ' install -y' | cut -d: -f1)" ]
-}
-
-@test "dnf5: versionlock entries are removed before removing packages" {
-    DISTRO_PKG=dnf
-    _fake_dnf_with_versionlock '# Added by versionlock add command
-Package name: kubelet
-evr = 1.36.6-150500.1.1' "dnf5 version 5.2.13.1"
-    fake_cmd rpm 0
-    pkg_remove kubelet kubeadm
-    fake_calls | grep -qx 'dnf versionlock delete kubelet'
-    if fake_calls | grep -q 'versionlock delete kubeadm'; then return 1; fi
-    fake_calls | grep -qx 'dnf remove -y kubelet kubeadm'
-}
-
-@test "dnf, apt, zypper: repo_remove removes every given repository" {
-    DISTRO_PKG=dnf
-    mkdir -p "$_DNF_REPOS_DIR"
-    touch "$_DNF_REPOS_DIR/docker.repo" "$_DNF_REPOS_DIR/docker-ce.repo" "$_DNF_REPOS_DIR/other.repo"
-    pkg_repo_remove docker docker-ce
-    [ ! -e "$_DNF_REPOS_DIR/docker.repo" ] && [ ! -e "$_DNF_REPOS_DIR/docker-ce.repo" ] && [ -e "$_DNF_REPOS_DIR/other.repo" ]
-
-    DISTRO_PKG=apt
-    mkdir -p "$_APT_SOURCES_DIR" "$_APT_KEYRING_DIR"
-    touch "$_APT_SOURCES_DIR/kubernetes.list" "$_APT_KEYRING_DIR/kubernetes.gpg" "$_APT_KEYRING_DIR/kubernetes-apt-keyring.gpg"
-    pkg_repo_remove kubernetes kubernetes-apt-keyring
-    [ -z "$(find "$_APT_SOURCES_DIR" "$_APT_KEYRING_DIR" -type f)" ]
-
-    DISTRO_PKG=zypper
-    fake_cmd zypper
-    pkg_repo_remove cri-o legacy
-    fake_calls | grep -qx 'zypper --non-interactive removerepo cri-o'
-    fake_calls | grep -qx 'zypper --non-interactive removerepo legacy'
-}
-
 @test "pacman: a package that only provides a name is not that package" {
     DISTRO_PKG=pacman
-    fake_cmd pacman 0 'kubeadm-bin
-kubelet-bin
+    fake_cmd pacman 0 'kubeadm-git
 containerd'
-    pkg_installed kubeadm-bin
+    pkg_installed kubeadm-git
     pkg_installed containerd
     run ! pkg_installed kubeadm
 }

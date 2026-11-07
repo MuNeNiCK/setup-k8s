@@ -163,41 +163,16 @@ FAKE
     grep -qx 'download https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.37.0/crictl-v1.37.0-linux-amd64.tar.gz https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.37.0/crictl-v1.37.0-linux-amd64.tar.gz.sha256' "$CALLS"
 }
 
-@test "Arch: AUR packages of earlier versions are replaced on install and removed on cleanup" {
-    DISTRO_PKG=pacman DISTRO_K8S_SOURCE=distro K8S_VERSION=1.37
+@test "cleanup removes the distribution packages of the install (cni-plugins kept with --preserve-cni)" {
+    DISTRO_PKG=pacman DISTRO_K8S_SOURCE=distro
     DISTRO_K8S_PKGS="kubeadm kubelet kubectl crictl cni-plugins"
-    DISTRO_K8S_LEGACY_PKGS="kubeadm-bin kubelet-bin kubectl-bin"
-    pkg_installed() { case "$1" in kubeadm-bin|kubelet-bin|kubectl-bin) return 0 ;; esac; return 1; }
     pkg_remove() { echo "remove $*" >> "$CALLS"; }
-    pkg_available_version() { echo 1.37.2; }
-    _enable_and_start_kubelet() { :; }
-    fake_cmd kubeadm
-    k8s_install
-    grep -qx 'remove kubeadm-bin kubelet-bin kubectl-bin' "$CALLS"
-    [ "$(grep -n '^remove' "$CALLS" | cut -d: -f1)" -lt "$(grep -n '^install' "$CALLS" | cut -d: -f1)" ]
-
-    : > "$CALLS"
-    k8s_upgrade_kubeadm 1.37.3
-    grep -qx 'remove kubeadm-bin' "$CALLS"
-    : > "$CALLS"
-    k8s_upgrade_node 1.37.3
-    grep -qx 'remove kubelet-bin kubectl-bin' "$CALLS"
-
-    : > "$CALLS"
     _k8s_remove_binaries() { :; }
     k8s_remove
-    grep -q '^remove kubeadm kubelet kubectl crictl cni-plugins kubelet-openrc kubeadm-bin kubelet-bin kubectl-bin$' "$CALLS"
-    # --preserve-cni keeps the CNI plugins package
+    grep -qx 'remove kubeadm kubelet kubectl crictl cni-plugins kubelet-openrc' "$CALLS"
     : > "$CALLS"
     PRESERVE_CNI=true k8s_remove
-    grep -q '^remove kubeadm kubelet kubectl crictl kubelet-openrc kubeadm-bin kubelet-bin kubectl-bin$' "$CALLS"
-}
-
-@test "cleanup also removes repository files of earlier versions" {
-    DISTRO_PKG=apt DISTRO_K8S_SOURCE=pkgs
-    _k8s_remove_binaries() { :; }
-    k8s_remove
-    grep -qx 'repo_remove kubernetes kubernetes-apt-keyring' "$CALLS"
+    grep -qx 'remove kubeadm kubelet kubectl crictl kubelet-openrc' "$CALLS"
 }
 
 @test "cleanup keeps the containerd service files of distribution packages" {

@@ -1,7 +1,6 @@
 #!/bin/sh
 # Run on a VM as root after "setup-k8s.sh cleanup": print what is left of a
-# Kubernetes installation (one item per line; nothing when clean). Covers the
-# names used by the current and earlier setup-k8s versions.
+# Kubernetes installation (one item per line; nothing when clean).
 
 for p in kubelet kube-apiserver kube-controller-manager kube-scheduler etcd kube-proxy kube-vip; do
     pgrep -x "$p" >/dev/null 2>&1 && echo "process:$p"
@@ -21,7 +20,7 @@ if command -v rpm >/dev/null 2>&1; then
     done
 fi
 if command -v pacman >/dev/null 2>&1; then
-    for p in kubeadm kubelet kubectl crictl cni-plugins kubeadm-bin kubelet-bin kubectl-bin cri-o; do
+    for p in kubeadm kubelet kubectl crictl cni-plugins cri-o; do
         pacman -Qq 2>/dev/null | grep -qxF "$p" && echo "package:$p"
     done
 fi
@@ -33,17 +32,13 @@ fi
 if command -v semodule >/dev/null 2>&1; then
     semodule -l 2>/dev/null | awk '{print $1}' | grep -x 'setup-k8s.*' | sed 's/^/selinux-module:/'
 fi
-if command -v dnf >/dev/null 2>&1 && dnf versionlock list >/dev/null 2>&1; then
-    dnf versionlock list 2>/dev/null | grep -o -E '(kubeadm|kubelet|kubectl|cri-tools|cri-o)' | sort -u | sed 's/^/versionlock:/'
-fi
 if command -v zypper >/dev/null 2>&1; then
     zypper --non-interactive locks 2>/dev/null | grep -o -E '\b(kubeadm|kubelet|kubectl|cri-tools|cri-o)\b' | sort -u | sed 's/^/lock:/'
 fi
 for f in /etc/yum.repos.d/kubernetes.repo /etc/yum.repos.d/cri-o.repo /etc/yum.repos.d/docker.repo \
-         /etc/yum.repos.d/docker-ce.repo /etc/yum.repos.d/containers.repo \
+         /etc/yum.repos.d/containers.repo \
          /etc/apt/sources.list.d/kubernetes.list /etc/apt/sources.list.d/cri-o.list /etc/apt/sources.list.d/docker.list \
          /etc/apt/keyrings/kubernetes.gpg /etc/apt/keyrings/cri-o.gpg /etc/apt/keyrings/docker.gpg \
-         /etc/apt/keyrings/kubernetes-apt-keyring.gpg /etc/apt/keyrings/crio-apt-keyring.gpg \
          /etc/zypp/repos.d/kubernetes.repo /etc/zypp/repos.d/cri-o.repo /etc/zypp/repos.d/containers.repo \
          /etc/default/kubelet /etc/sysconfig/kubelet /etc/systemd/system/kubelet.service /etc/init.d/kubelet \
          /etc/crictl.yaml; do

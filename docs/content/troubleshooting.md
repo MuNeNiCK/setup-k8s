@@ -43,8 +43,6 @@ systemctl list-units --type=swap --all
 journalctl -u kubelet -b | grep -i swap
 ```
 
-Nodes set up with an earlier version of setup-k8s may only have had fstab swap entries disabled; run `sudo swapoff -a` and disable the remaining swap unit (`sudo systemctl mask <unit>` or a drop-in as above), or rerun `init` after `cleanup`.
-
 ## nftables Mode Issues
 - Check kernel module availability:
 ```bash

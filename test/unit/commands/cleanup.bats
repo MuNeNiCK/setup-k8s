@@ -30,12 +30,12 @@ setup() {
     command() { if [ "$1" = -v ]; then case "$2" in kubelet) echo /usr/bin/kubelet; return 0 ;; apt-mark) return 0 ;; kubeadm|kubectl|crio|dnf|zypper) return 1 ;; esac; fi; builtin command "$@"; }
     fake_cmd apt-mark 0 "kubeadm"
     mkdir -p "$_CLEANUP_ETC/apt/keyrings" "$_CLEANUP_ETC/kubernetes" "$_CLEANUP_ETC/yum.repos.d"
-    touch "$_CLEANUP_ETC/apt/keyrings/kubernetes-apt-keyring.gpg" "$_CLEANUP_ETC/yum.repos.d/docker-ce.repo"
+    touch "$_CLEANUP_ETC/apt/keyrings/kubernetes.gpg" "$_CLEANUP_ETC/yum.repos.d/docker.repo"
     left=$(_cleanup_leftovers)
     [[ "$left" == *"binary /usr/bin/kubelet"* ]]
     [[ "$left" == *"hold kubeadm"* ]]
-    [[ "$left" == *"apt/keyrings/kubernetes-apt-keyring.gpg"* ]]
-    [[ "$left" == *"yum.repos.d/docker-ce.repo"* ]]
+    [[ "$left" == *"apt/keyrings/kubernetes.gpg"* ]]
+    [[ "$left" == *"yum.repos.d/docker.repo"* ]]
     [[ "$left" == *"directory $_CLEANUP_ETC/kubernetes"* ]]
 }
 

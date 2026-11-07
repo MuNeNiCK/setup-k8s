@@ -18,8 +18,6 @@
 #   DISTRO_CODENAME               apt suite for the Docker repository
 #   DISTRO_OBS_REPO               OBS project path for the obs containerd source
 #   DISTRO_K8S_PKGS               package names for the distro Kubernetes source
-#   DISTRO_K8S_LEGACY_PKGS        packages installed by earlier setup-k8s versions
-#                                 that the distro packages replace (removed first)
 #   DISTRO_CONTAINERD_PKGS        package names for the distro containerd source
 #   DISTRO_CRIO_PKGS              package names for the distro CRI-O source
 #   DISTRO_KMOD_PKG               package that provides br_netfilter when the module is missing
@@ -52,7 +50,6 @@ _distro_apply_family() {
     DISTRO_CODENAME=""
     DISTRO_OBS_REPO=""
     DISTRO_K8S_PKGS=""
-    DISTRO_K8S_LEGACY_PKGS=""
     DISTRO_CONTAINERD_PKGS=""
     DISTRO_CRIO_PKGS=""
     DISTRO_KMOD_PKG=""
@@ -115,8 +112,6 @@ _distro_apply_family() {
             DISTRO_CONTAINERD_SOURCE=distro
             DISTRO_CRIO_SOURCE=distro
             DISTRO_K8S_PKGS="kubeadm kubelet kubectl crictl cni-plugins"
-            # Earlier setup-k8s versions installed these from the AUR
-            DISTRO_K8S_LEGACY_PKGS="kubeadm-bin kubelet-bin kubectl-bin"
             DISTRO_CONTAINERD_PKGS="containerd"
             DISTRO_CRIO_PKGS="iptables-nft cri-o"
             ;;
