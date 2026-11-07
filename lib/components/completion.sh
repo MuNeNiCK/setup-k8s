@@ -53,6 +53,8 @@ _setup_tool_completion() {
                     return 1
                 fi
                 log_info "$tool bash completion installed to /etc/bash_completion.d/"
+            else
+                log_warn "/etc/bash_completion.d not found (bash-completion not installed): $tool bash completion skipped"
             fi
 
             # User-specific alias (completion is loaded system-wide above)
