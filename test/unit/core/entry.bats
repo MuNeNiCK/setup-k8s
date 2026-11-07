@@ -99,7 +99,8 @@ setup() {
 
 @test "the source entry point alone (earlier raw/main URL) points to the release asset" {
     cp "$PROJECT_ROOT/setup-k8s.sh" "$BATS_TEST_TMPDIR/setup-k8s.sh"
-    run sh -s -- init < "$BATS_TEST_TMPDIR/setup-k8s.sh"
+    # From a directory without the repository (as after curl ... | sh)
+    run sh -c 'cd "$1" && sh -s -- init < setup-k8s.sh' _ "$BATS_TEST_TMPDIR"
     [ "$status" -eq 1 ]
     [[ "$output" == *"releases/latest/download/setup-k8s.sh | sudo sh -s --"* ]]
 }
