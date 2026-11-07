@@ -278,7 +278,7 @@ _upgrade_single_node() {
         set -- "$@" --first-control-plane
     fi
     if [ -n "${KUBEADM_PATCHES_DIR:-}" ]; then
-        set -- "$@" --kubeadm-patches "$(remote_node_dir "$node")/kubeadm-patches"
+        set -- "$@" --patches "$(remote_node_dir "$node")/kubeadm-patches"
     fi
     local upgrade_rc=0
     if [ -n "$_hook_data" ]; then

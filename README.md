@@ -20,10 +20,9 @@ curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-
 ### Join Cluster
 ```sh
 curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
-  join \
-  --join-token <token> \
-  --join-address <address> \
-  --discovery-token-hash <hash>
+  join <address> \
+  --token <token> \
+  --discovery-token-ca-cert-hash <hash>
 ```
 
 ### Deploy Multi-Node Cluster via SSH

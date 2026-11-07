@@ -21,8 +21,8 @@ setup() {
 }
 
 @test "remote_run uses sudo -n for non-root users" {
-    remote_run admin@10.0.0.2 "join" join --join-token abc
-    grep -q "^admin@10.0.0.2|join|sudo -n sh '/tmp/sk-b/setup-k8s.sh' 'join' '--join-token' 'abc' $" "$RUNS"
+    remote_run admin@10.0.0.2 "join" join --token abc
+    grep -q "^admin@10.0.0.2|join|sudo -n sh '/tmp/sk-b/setup-k8s.sh' 'join' '--token' 'abc' $" "$RUNS"
 }
 
 @test "remote_run forwards collected args and drops flags with their values" {
@@ -116,8 +116,8 @@ verify 1.36.6" ]
 @test "deploy passes each node its own copy of the kubeadm patches" {
     KUBEADM_PATCHES_DIR="$BATS_TEST_TMPDIR/patches"
     DEPLOY_PASSTHROUGH_ARGS=$(_passthrough_add_pair "" --ha-vip 10.0.0.100)
-    _deploy_remote_run "--ha-vip --ha-interface" admin@10.0.0.2 "join worker" join --join-token abc
-    [ "$(cut -d'|' -f3 "$RUNS")" = "sudo -n sh '/tmp/sk-b/setup-k8s.sh' 'join' '--join-token' 'abc' '--kubeadm-patches' '/tmp/sk-b/kubeadm-patches' " ]
+    _deploy_remote_run "--ha-vip --ha-interface" admin@10.0.0.2 "join worker" join --token abc
+    [ "$(cut -d'|' -f3 "$RUNS")" = "sudo -n sh '/tmp/sk-b/setup-k8s.sh' 'join' '--token' 'abc' '--patches' '/tmp/sk-b/kubeadm-patches' " ]
 }
 
 @test "deploy forwards the cluster's kube-proxy mode to joining nodes" {

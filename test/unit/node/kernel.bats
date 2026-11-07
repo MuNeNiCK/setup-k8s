@@ -35,7 +35,7 @@ _case_parse_network_options() {
         tmpfile=$(mktemp /tmp/test-patch-XXXXXX)
         echo "test: true" > "$tmpfile"
 
-        parse_setup_args --api-server-extra-sans "foo.example.com,10.0.0.5" --kubelet-node-ip "192.168.1.10" --kubeadm-config-patch "$tmpfile"
+        parse_setup_args --apiserver-cert-extra-sans "foo.example.com,10.0.0.5" --kubelet-node-ip "192.168.1.10" --kubeadm-config-patch "$tmpfile"
         _assert_eq "API_SERVER_EXTRA_SANS parsed" "foo.example.com,10.0.0.5" "$API_SERVER_EXTRA_SANS"
         _assert_eq "KUBELET_NODE_IP parsed" "192.168.1.10" "$KUBELET_NODE_IP"
         _assert_eq "KUBEADM_CONFIG_PATCH parsed" "$tmpfile" "$KUBEADM_CONFIG_PATCH"

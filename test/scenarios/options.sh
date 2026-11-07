@@ -5,7 +5,7 @@
 # generated configuration, then checks the result on the node:
 #   - --kubernetes-version MAJOR.MINOR.PATCH pins packages and control plane
 #   - default --proxy-mode auto selects nftables on a current kernel
-#   - --kubeadm-patches (local directory copied to the node) is applied
+#   - --patches (local directory copied to the node) is applied
 #   - --image-repository is written to the kubeadm configuration
 #   - --install-helm / --install-kustomize install the pinned versions
 #   - the pause image of the runtime matches the installed kubeadm
@@ -94,7 +94,7 @@ EOF
         --ssh-key "$SSH_KEY_DIR/id_test" --ssh-host-key-check accept-new
         --kubernetes-version "$K8S_VERSION"
         --image-repository "$IMAGE_REPOSITORY"
-        --kubeadm-patches "$patches"
+        --patches "$patches"
         --install-helm true --install-kustomize true
     )
     log_info "Command: ${deploy_cmd[*]}"

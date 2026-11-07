@@ -15,7 +15,7 @@ _case_parse_ha_args() {
 
         ACTION="join"
         parse_setup_args --control-plane --certificate-key mykey123 \
-            --join-token abc --join-address 1.2.3.4:6443 --discovery-token-hash sha256:xyz
+            --token abc --join-address 1.2.3.4:6443 --discovery-token-ca-cert-hash sha256:xyz
 
         _assert_eq "JOIN_AS_CONTROL_PLANE" "true" "$JOIN_AS_CONTROL_PLANE"
         _assert_eq "CERTIFICATE_KEY" "mykey123" "$CERTIFICATE_KEY"
