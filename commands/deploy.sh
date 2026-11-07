@@ -130,8 +130,15 @@ deploy_dry_run() {
 # (minus <drop>) and the node's copy of the kubeadm patches.
 # Usage: _deploy_remote_run <drop> <node> <description> <subcommand> [args...]
 _deploy_remote_run() {
-    local drop="$1" node="$2" desc="$3"
+    local drop="$1" node="$2" desc="$3" node_ip
     shift 3
+    # Per-node kubelet node IP (--config nodes[].node-ip)
+    _parse_node_address "$node"
+    node_ip=$(node_override "$_NODE_HOST" node-ip)
+    if [ -n "$node_ip" ]; then
+        drop="${drop}${drop:+ }--kubelet-node-ip"
+        set -- "$@" --kubelet-node-ip "$node_ip"
+    fi
     if [ -n "${KUBEADM_PATCHES_DIR:-}" ]; then
         remote_run --forward "$DEPLOY_PASSTHROUGH_ARGS" --drop "$drop" "$node" "$desc" "$@" \
             --patches "$(remote_node_dir "$node")/kubeadm-patches"

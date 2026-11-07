@@ -62,6 +62,9 @@ sh setup-k8s.sh \
 
 ## Add nodes
 
+With a [cluster file](cluster-file.md), add the node to `nodes` and run
+`deploy --config cluster.yaml` again.
+
 Run `deploy` again with the extended node lists. When the first control
 plane already runs a cluster, deploy does not initialize it again: it joins
 the listed nodes that are not in the cluster yet (found by address or

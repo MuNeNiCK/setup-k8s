@@ -118,8 +118,31 @@ run_deploy_test() {
 
     # A marker object: it must survive the rerun (no second init)
     vm_ssh_root "$_CP_SSH_PORT" "kubectl --kubeconfig=/etc/kubernetes/admin.conf create configmap deploy-rerun-marker --from-literal=k=v" >/dev/null 2>&1 || true
-    log_info "=== Running deploy again with the worker added ==="
-    run_with_timeout rerun_exit_code "$log_file" "${deploy_cmd[@]}" --workers "$WORKER_DOCKER_IP"
+    # The rerun reads the cluster from a cluster file (--config)
+    local cluster_file cri_line=""
+    cluster_file="$(host_workdir)/cluster.yaml"
+    [ -n "$DEPLOY_CRI" ] && cri_line="  cri: ${DEPLOY_CRI}"
+    cat > "$cluster_file" <<CLUSTER
+nodes:
+  - address: ${CP_DOCKER_IP}
+    role: control-plane
+  - address: ${WORKER_DOCKER_IP}
+    role: worker
+    ssh:
+      port: 2222
+ssh:
+  user: root
+  port: 2222
+  key: ${SSH_KEY_DIR}/id_test
+  host-key-check: accept-new
+kubernetes:
+  version: "${K8S_VERSION}"
+${cri_line}
+network:
+  control-plane-endpoint: ${CP_DOCKER_IP}:6443
+CLUSTER
+    log_info "=== Running deploy again with the worker added (cluster file) ==="
+    run_with_timeout rerun_exit_code "$log_file" sh "$HOST_BUNDLE" deploy --config "$cluster_file"
 
     # deploy saves the admin kubeconfig in its working directory
     local kubeconfig_file
