@@ -147,3 +147,24 @@ _case_audit_logging() {
 @test "audit logging" {
     _case_audit_logging
 }
+
+@test "a local command records started and completed, or failed with the exit status" {
+    run sh -c 'SCRIPT_DIR="$1"; . "$1/lib/core/bootstrap.sh"; _source_all_modules; _LOG_FILE="$2"; LOG_LEVEL=0
+               _audit_start init "version=1.37"; _audit_done; exit 0' _ "$PROJECT_ROOT" "$BATS_TEST_TMPDIR/ok.log"
+    [ "$status" -eq 0 ]
+    grep -q 'op=init outcome=started' "$BATS_TEST_TMPDIR/ok.log"
+    grep -q 'op=init outcome=completed' "$BATS_TEST_TMPDIR/ok.log"
+    run sh -c 'SCRIPT_DIR="$1"; . "$1/lib/core/bootstrap.sh"; _source_all_modules; _LOG_FILE="$2"; LOG_LEVEL=0
+               _audit_start cleanup; exit 3' _ "$PROJECT_ROOT" "$BATS_TEST_TMPDIR/fail.log"
+    [ "$status" -eq 3 ]
+    grep -q 'op=cleanup outcome=failed .*details=exit=3' "$BATS_TEST_TMPDIR/fail.log"
+    if grep -q 'outcome=completed' "$BATS_TEST_TMPDIR/fail.log"; then return 1; fi
+}
+
+@test "--audit-syslog sends the records to syslog" {
+    load_modules
+    fake_cmd logger
+    _AUDIT_SYSLOG=true
+    _audit_log init started "x=1"
+    fake_calls | grep -q '^logger -t setup-k8s AUDIT: .*op=init outcome=started'
+}

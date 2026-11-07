@@ -179,3 +179,82 @@ _case_parse_renew_unknown_option() {
 @test "parse_renew_local_args unknown option" {
     _case_parse_renew_unknown_option
 }
+
+# --- renewal verification ---
+# Fake kubeadm/crictl/kubectl. kubeadm reports the expiry from
+# $STATE/expiry (renew rewrites it to $RENEWED_DATE); crictl reports the
+# container ID from $STATE/cid-<name> and "stop" gives it a new ID unless
+# NO_RESTART names the component.
+_fake_control_plane() {
+    STATE="$BATS_TEST_TMPDIR/cp"
+    mkdir -p "$STATE"
+    echo "2027-01-01T00:00:00Z" > "$STATE/expiry"
+    RENEWED_DATE="${RENEWED_DATE:-2027-11-07T00:00:00Z}"
+    for c in kube-apiserver kube-controller-manager kube-scheduler etcd; do echo "old-$c" > "$STATE/cid-$c"; done
+    cat > "$FAKE_BIN/kubeadm" <<FAKE
+#!/bin/sh
+case "\$*" in
+    "certs check-expiration -o json")
+        d=\$(cat "$STATE/expiry")
+        printf '{\n "certificates": [\n  {\n   "name": "admin.conf",\n   "expirationDate": "%s"\n  },\n  {\n   "name": "apiserver",\n   "expirationDate": "%s"\n  }\n ],\n "certificateAuthorities": [\n  {\n   "name": "ca",\n   "expirationDate": "2035-01-01T00:00:00Z"\n  }\n ]\n}\n' "\$d" "\$d" ;;
+    "certs check-expiration") echo "CERTIFICATE EXPIRES" ;;
+    "certs renew"*) echo "$RENEWED_DATE" > "$STATE/expiry" ;;
+esac
+FAKE
+    cat > "$FAKE_BIN/crictl" <<FAKE
+#!/bin/sh
+case "\$1" in
+    ps) for a in "\$@"; do case "\$a" in --name=*) n=\${a#--name=^}; n=\${n%\\\$} ;; esac; done; cat "$STATE/cid-\$n" ;;
+    stop) for c in kube-apiserver kube-controller-manager kube-scheduler etcd; do
+              [ "\$(cat "$STATE/cid-\$c")" = "\$2" ] && [ "\${NO_RESTART:-}" != "\$c" ] && echo "new-\$c" > "$STATE/cid-\$c"; done ;;
+esac
+exit 0
+FAKE
+    chmod +x "$FAKE_BIN/kubeadm" "$FAKE_BIN/crictl"
+    fake_cmd kubectl 0
+    sleep() { :; }
+}
+
+@test "renewal restarts the components and verifies the new expiry" {
+    load_modules; quiet_logs; _fake_control_plane
+    _RENEW_APISERVER_MANIFEST="$BATS_TEST_TMPDIR/kube-apiserver.yaml"
+    touch "$_RENEW_APISERVER_MANIFEST"
+    RENEW_CERTS=all RENEW_CHECK_ONLY=false
+    run renew_certs_local
+    [ "$status" -eq 0 ]
+    [ "$(cat "$STATE/cid-kube-apiserver")" = new-kube-apiserver ]
+    [ "$(cat "$STATE/cid-etcd")" = new-etcd ]
+}
+
+@test "renewal fails when crictl is missing" {
+    load_modules; quiet_logs; _fake_control_plane
+    rm -f "$FAKE_BIN/crictl"
+    command() { if [ "$1" = -v ] && [ "$2" = crictl ]; then return 1; fi; builtin command "$@"; }
+    RENEW_CERTS=all
+    run _restart_control_plane_components
+    [ "$status" -ne 0 ]
+}
+
+@test "renewal fails when a component does not restart" {
+    load_modules; quiet_logs; _fake_control_plane
+    RENEW_CERTS=apiserver
+    NO_RESTART=kube-scheduler
+    export NO_RESTART
+    run _restart_control_plane_components
+    [ "$status" -ne 0 ]
+}
+
+@test "renewal fails when a certificate still has the old expiry" {
+    load_modules; quiet_logs
+    RENEWED_DATE="2027-01-01T00:00:00Z" _fake_control_plane
+    RENEW_CERTS=apiserver
+    before=$(_renew_expiry_dates)
+    kubeadm certs renew apiserver
+    run _renew_verify_expiry "$before" "$(_renew_expiry_dates)"
+    [ "$status" -ne 0 ]
+    # A later expiry passes; certificate authorities are not listed
+    echo "2027-11-07T00:00:00Z" > "$STATE/expiry"
+    run _renew_verify_expiry "$before" "$(_renew_expiry_dates)"
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s\n' "$before" | awk '{print $1}' | tr '\n' ' ')" = "admin.conf apiserver " ]
+}

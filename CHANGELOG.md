@@ -13,6 +13,14 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Added
 
+- `test/scenarios/legacy-upgrade.sh` sets a node up with an earlier
+  setup-k8s version and manages it with the current one (upgrade, cleanup,
+  new init).
+- A weekly upstream check (`scripts/check-upstream.sh`) opens an issue for
+  each upstream change that needs action: new Kubernetes minors and
+  prereleases, end of life of tested Kubernetes minors and distributions,
+  component updates (patch, minor, major), and new distribution releases.
+  Dependabot updates GitHub Actions.
 - `--proxy-mode auto` (the new default): nftables on Kubernetes 1.33+ with
   Linux 5.13+, iptables otherwise. `preflight --proxy-mode auto` shows the
   resolved mode.
@@ -44,6 +52,12 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Changed
 
+- The VM tests check what each run asks for (Kubernetes version, runtime,
+  proxy mode, networking, swap, kubeadm patches, tools, completion, logging),
+  that cleanup leaves nothing behind, that the HA VIP serves the API server
+  and moves when the leader fails, that renewed certificates are new and
+  served, and exact versions after upgrades. Unit tests that only checked
+  that functions exist were removed.
 - kube-proxy runs in nftables mode by default where the node supports it (see
   `--proxy-mode auto`); use `--proxy-mode iptables` for the previous default.
 - containerd 1.x: `preflight` fails for Kubernetes 1.38+ (the first release
@@ -100,6 +114,54 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 
 ### Fixed
 
+- Commands no longer report success without checking the result:
+  - `renew` fails without crictl, waits until the control-plane components
+    run in new containers and the API server is ready, and checks that each
+    renewed certificate expires later than before.
+  - `upgrade` checks that the cluster reports the target version for each
+    node's kubelet and for the API server, that kubelet stays running, and
+    fails when a node stays cordoned. kubeadm's node-readiness checks are
+    skipped only while nodes are NotReady (no CNI plugin).
+  - `remove` succeeds only when the node object is gone; nodes are found by
+    address or hostname, never by guessing the address as the node name.
+  - `backup` checks the snapshot with `etcdutl snapshot status` and that the
+    copy (or download) is identical; `restore` waits for the API server.
+  - `status` exits 1 when kubelet, the container runtime, the API server, or
+    etcd does not work and 2 when Kubernetes is not set up (always 0 before).
+  - `cleanup` checks for leftovers independently of the removal steps
+    (packages, holds and locks, repositories and keys, binaries, kubelet
+    configuration), removes all distribution packages of the install on
+    Alpine and Arch (cri-tools/crictl and cni-plugins were left), and
+    releases the kube-vip VIP. It no longer deletes the containerd init
+    script of the distribution package (Alpine), which broke the next install.
+  - HA `init` fails when the control-plane certificates cannot be uploaded;
+    CRI-O is restarted to load its configuration and must be running; host
+    preparation checks cgroups and shared mount propagation.
+- `--audit-syslog` had no effect on `init`, `join`, `cleanup`, and local
+  `upgrade`: they now write started, completed, and failed records.
+- `--kubeadm-config-patch` with a `KubeletConfiguration` or
+  `KubeProxyConfiguration` together with `--swap-enabled` or `--proxy-mode`
+  made kubeadm reject the config (two documents of one kind); such documents
+  are now merged.
+- `init` and `join` with `--dry-run` installed base packages, refreshed the
+  package indexes, and prepared the host before printing "no changes made".
+- Remote commands (deploy, upgrade, backup, restore, renew): a command that
+  finished at the last poll was reported as a timeout, a remote process that
+  died without an exit status was only noticed at the timeout, and the exit
+  status file could be read before it was written.
+- `deploy` reported success when the API server or etcd was unhealthy after
+  the joins, and could fail because a node object appeared a few seconds
+  after `kubeadm join` returned. It now requires the API server, etcd, and
+  every node to be registered (waiting up to 2 minutes for registration);
+  NotReady nodes and Pending CoreDNS before a CNI plugin is installed are
+  reported, not failures. `--resume` no longer joins workers again that
+  already joined.
+- Nodes set up by earlier setup-k8s versions can be upgraded and cleaned up:
+  versionlock entries on RHEL-family distributions (which blocked upgrades
+  and new installs) are removed, Arch AUR `*-bin` packages are replaced by
+  the official packages, and cleanup removes repository and key files with
+  the earlier names (`docker-ce.repo`, `kubernetes-apt-keyring.gpg`,
+  `crio-apt-keyring.gpg`).
 - Swap came back after a reboot when it was enabled by a systemd swap unit
   that is not in `/etc/fstab` (for example a swap file unit), so kubelet did
   not start. All systemd swap units now get a drop-in that keeps them from

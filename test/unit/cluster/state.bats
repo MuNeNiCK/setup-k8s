@@ -12,44 +12,6 @@ _load_state_test_modules() {
 }
 
 # ============================================================
-# Test: state module functions defined
-# ============================================================
-_case_state_functions_defined() {
-    echo "=== Test: state module functions defined ==="
-    (
-        _load_state_test_modules
-
-        local has_init="false"
-        type _state_init >/dev/null 2>&1 && has_init="true"
-        _assert_eq "_state_init defined" "true" "$has_init"
-
-        local has_set="false"
-        type _state_set >/dev/null 2>&1 && has_set="true"
-        _assert_eq "_state_set defined" "true" "$has_set"
-
-        local has_get="false"
-        type _state_get >/dev/null 2>&1 && has_get="true"
-        _assert_eq "_state_get defined" "true" "$has_get"
-
-        local has_mark="false"
-        type _state_mark_step >/dev/null 2>&1 && has_mark="true"
-        _assert_eq "_state_mark_step defined" "true" "$has_mark"
-
-        local has_find="false"
-        type _state_find_resume >/dev/null 2>&1 && has_find="true"
-        _assert_eq "_state_find_resume defined" "true" "$has_find"
-
-        local has_load="false"
-        type _state_load >/dev/null 2>&1 && has_load="true"
-        _assert_eq "_state_load defined" "true" "$has_load"
-
-        local has_complete="false"
-        type _state_complete >/dev/null 2>&1 && has_complete="true"
-        _assert_eq "_state_complete defined" "true" "$has_complete"
-    )
-}
-
-# ============================================================
 # Test: state set/get
 # ============================================================
 _case_state_set_get() {
@@ -138,10 +100,6 @@ _case_resume_enabled_default() {
         load_modules
         _assert_eq "RESUME_ENABLED default" "false" "$RESUME_ENABLED"
     )
-}
-
-@test "state module functions defined" {
-    _case_state_functions_defined
 }
 
 @test "state set/get" {

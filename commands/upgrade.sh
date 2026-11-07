@@ -11,6 +11,41 @@
 
 # --- Local Upgrade ---
 
+# Restart kubelet and wait until it stays active (a kubelet that cannot start
+# with the new version or configuration restarts in a loop).
+_upgrade_restart_kubelet() {
+    _service_reload
+    if ! _service_restart kubelet; then
+        log_error "kubelet failed to restart"
+        return 1
+    fi
+    local stable=0 elapsed=0
+    while [ "$elapsed" -lt 90 ]; do
+        if _service_is_active kubelet; then
+            stable=$((stable + 1))
+            # active on three consecutive checks (10 s apart)
+            [ "$stable" -ge 3 ] && return 0
+        else
+            stable=0
+        fi
+        sleep 10
+        elapsed=$((elapsed + 10))
+    done
+    log_error "kubelet is not running after the restart"
+    return 1
+}
+
+# Succeed when kubeadm and kubelet report <version>.
+_upgrade_verify_local_versions() {
+    local version="$1" kubeadm_v kubelet_v
+    kubeadm_v=$(kubeadm version -o short 2>/dev/null) || kubeadm_v=""
+    kubelet_v=$(kubelet --version 2>/dev/null | awk '{print $2}') || kubelet_v=""
+    if [ "$kubeadm_v" != "v${version}" ] || [ "$kubelet_v" != "v${version}" ]; then
+        log_error "Installed versions: kubeadm ${kubeadm_v:-none}, kubelet ${kubelet_v:-none} (expected v${version})"
+        return 1
+    fi
+}
+
 # Reinstall kubeadm, kubelet, and kubectl at an earlier version after a failed
 # upgrade (run with sudo). kubeadm restores its own control-plane manifests
 # when "kubeadm upgrade" fails, so only the packages are rolled back.
@@ -29,10 +64,8 @@ rollback_node_local() {
     log_info "Rolling back Kubernetes packages from v${current:-unknown} to v${target}..."
     k8s_upgrade_kubeadm "$target" || return 1
     k8s_upgrade_node "$target" || return 1
-    _service_reload
-    if ! _service_restart kubelet; then
-        log_warn "kubelet restart returned non-zero. It may take a moment to stabilize."
-    fi
+    _upgrade_restart_kubelet || return 1
+    _upgrade_verify_local_versions "$target" || return 1
     show_versions
     log_info "Rollback to v${target} complete"
 }
@@ -58,12 +91,19 @@ upgrade_node_local() {
     # 2. Run kubeadm upgrade
     if [ "$role" = "first-control-plane" ]; then
         log_info "Step 2: Running kubeadm upgrade apply v${UPGRADE_TARGET_VERSION}..."
-        local _preflight_errors="ControlPlaneNodesReady,CreateJob"
+        # kubeadm checks that all control-plane nodes are Ready and runs a
+        # Job; both fail before a CNI plugin is installed (nodes NotReady).
+        # Skip them only in that case.
+        local _preflight_errors=""
+        if kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes --no-headers 2>/dev/null | awk '$2 != "Ready" {found = 1} END {exit !found}'; then
+            log_info "Nodes are NotReady (no CNI plugin?): skipping the ControlPlaneNodesReady and CreateJob checks"
+            _preflight_errors="ControlPlaneNodesReady,CreateJob"
+        fi
         if [ "$(_detect_init_system)" != "systemd" ]; then
-            _preflight_errors="${_preflight_errors},SystemVerification"
+            _preflight_errors="${_preflight_errors}${_preflight_errors:+,}SystemVerification"
         fi
         # shellcheck disable=SC2046 # empty or "--patches DIR"
-        kubeadm upgrade apply "v${UPGRADE_TARGET_VERSION}" --yes --ignore-preflight-errors="${_preflight_errors}" $(_kubeadm_patches_args)
+        kubeadm upgrade apply "v${UPGRADE_TARGET_VERSION}" --yes ${_preflight_errors:+--ignore-preflight-errors=$_preflight_errors} $(_kubeadm_patches_args)
     else
         log_info "Step 2: Running kubeadm upgrade node..."
         # On workers, the default kubelet kubeconfig may lack permissions to read
@@ -83,12 +123,10 @@ upgrade_node_local() {
     log_info "Step 3: Upgrading kubelet and kubectl to ${UPGRADE_TARGET_VERSION}..."
     k8s_upgrade_node "$UPGRADE_TARGET_VERSION"
 
-    # 4. Restart kubelet
+    # 4. Restart kubelet and verify
     log_info "Step 4: Restarting kubelet..."
-    _service_reload
-    if ! _service_restart kubelet; then
-        log_warn "kubelet restart returned non-zero. It may take a moment to stabilize."
-    fi
+    _upgrade_restart_kubelet || return 1
+    _upgrade_verify_local_versions "$UPGRADE_TARGET_VERSION" || return 1
 
     show_versions
     log_info "Node upgrade complete (role: $role)!"
@@ -371,10 +409,13 @@ validate_upgrade_deploy_args() {
 _upgrade_node_local_main() {
     _ensure_distro_detected
     if [ -n "$UPGRADE_ROLLBACK_VERSION" ]; then
-        rollback_node_local
+        _audit_start rollback "version=${UPGRADE_ROLLBACK_VERSION}"
+        rollback_node_local || return 1
     else
-        upgrade_node_local
+        _audit_start upgrade "version=${UPGRADE_TARGET_VERSION}"
+        upgrade_node_local || return 1
     fi
+    _audit_done
 }
 
 _run_upgrade() {

@@ -286,9 +286,9 @@ initialize_cluster() {
         log_info "=== HA Cluster: Control-Plane Join Information ==="
         local cert_output cert_key
         if ! cert_output=$(kubeadm init phase upload-certs --upload-certs); then
-            log_warn "kubeadm upload-certs failed (cluster init succeeded)"
-            log_warn "You can manually run: kubeadm init phase upload-certs --upload-certs"
-            return 0
+            log_error "kubeadm upload-certs failed: additional control planes cannot join"
+            log_error "  The first control plane is initialized; retry with: kubeadm init phase upload-certs --upload-certs"
+            return 1
         fi
         cert_key=$(echo "$cert_output" | tail -1)
         if ! echo "$cert_key" | grep -qE '^[a-f0-9]{64}$'; then
@@ -359,6 +359,25 @@ _run_setup() {
         detect_distribution
     fi
 
+    # A dry run changes nothing: no package installs or index refreshes, and
+    # no host preparation. Values that need missing tools (curl) are reported
+    # as resolved at install time.
+    if [ "$DRY_RUN" = true ]; then
+        if ! command -v curl >/dev/null 2>&1 && [ -z "$K8S_VERSION" ] && [ "${DISTRO_K8S_SOURCE:-}" != distro ]; then
+            log_info "curl is not installed; the latest stable Kubernetes version is resolved during setup"
+            K8S_VERSION="(latest stable)"
+        else
+            determine_k8s_version || exit 1
+        fi
+        resolve_proxy_mode
+        case "$K8S_VERSION" in
+            [0-9]*) validate_proxy_mode; validate_swap_enabled ;;
+        esac
+        validate_ha_args
+        _setup_dry_run
+        exit 0
+    fi
+
     log_info "Installing dependencies..."
     install_node_dependencies
     determine_k8s_version
@@ -367,11 +386,7 @@ _run_setup() {
     validate_swap_enabled
     validate_ha_args
 
-    if [ "$DRY_RUN" = true ]; then
-        _setup_dry_run
-        exit 0
-    fi
-
+    _audit_start "$ACTION" "version=${K8S_VERSION} cri=${CRI} proxy=${PROXY_MODE}"
     log_info "Starting Kubernetes initialization script..."
     log_info "Action: ${ACTION}"
     log_info "Container Runtime: ${CRI}"
@@ -422,6 +437,7 @@ _run_setup() {
     setup_helm
     setup_kustomize
     setup_k8s_shell_completion
+    _audit_done
     log_info "Setup completed successfully!"
 }
 

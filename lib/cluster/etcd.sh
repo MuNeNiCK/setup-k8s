@@ -8,6 +8,8 @@
 _ETCD_CERT="/etc/kubernetes/pki/etcd/server.crt"
 _ETCD_KEY="/etc/kubernetes/pki/etcd/server.key"
 _ETCD_CACERT="/etc/kubernetes/pki/etcd/ca.crt"
+# etcd data directory (a hostPath mount: the same path on the host and in the container)
+_ETCD_DATA_DIR="/var/lib/etcd"
 
 # Check whether a crictl container inspect output is the etcd static pod container.
 _is_etcd_container_id() {
@@ -90,9 +92,40 @@ _containerd_platform() {
 
 # Run etcdctl inside the etcd container with TLS args
 # Usage: _etcdctl_exec <container_id> <etcdctl_args...>
+# Check a snapshot file inside the etcd container with etcdutl (bbolt
+# consistency check). Prints the number of keys; fails for a damaged or
+# empty snapshot. The path must be visible in the container (/var/lib/etcd).
+# Usage: _etcd_snapshot_check <container_id> <path>
+_etcd_snapshot_check() {
+    local cid="$1" path="$2" status keys
+    if ! status=$(crictl exec "$cid" etcdutl snapshot status "$path" -w json 2>/dev/null); then
+        log_error "The snapshot is damaged (etcdutl snapshot status failed)"
+        return 1
+    fi
+    keys=$(printf '%s\n' "$status" | sed -n 's/.*"totalKey":\([0-9]*\).*/\1/p')
+    if [ -z "$keys" ] || [ "$keys" -eq 0 ]; then
+        log_error "The snapshot contains no keys: ${status}"
+        return 1
+    fi
+    echo "$keys"
+}
+
+# etcd static pod manifest (overridable for tests)
+_ETCD_MANIFEST_PATH="/etc/kubernetes/manifests/etcd.yaml"
+
+# Local client endpoint of etcd: the first --listen-client-urls URL of the
+# manifest (https://127.0.0.1:2379, or https://[::1]:2379 on IPv6-only
+# clusters, where etcdctl's default 127.0.0.1 is not served).
+_etcd_endpoint() {
+    local url
+    url=$(sed -n 's/^ *- --listen-client-urls=\([^,]*\).*/\1/p' "$_ETCD_MANIFEST_PATH" 2>/dev/null | head -n 1)
+    echo "${url:-https://127.0.0.1:2379}"
+}
+
 _etcdctl_exec() {
     local cid="$1"; shift
     crictl exec "$cid" etcdctl \
+        --endpoints="$(_etcd_endpoint)" \
         --cacert="$_ETCD_CACERT" \
         --cert="$_ETCD_CERT" \
         --key="$_ETCD_KEY" \

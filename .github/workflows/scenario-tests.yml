@@ -39,6 +39,14 @@ jobs:
             command: ./scenarios/swap-reboot.sh --distro ubuntu-24.04-cloud-amd64
           - name: options
             command: ./scenarios/options.sh --distro ubuntu-24.04-cloud-amd64
+          - name: legacy-upgrade-ubuntu
+            command: ./scenarios/legacy-upgrade.sh --distro ubuntu-24.04-cloud-amd64
+          - name: legacy-upgrade-rocky9
+            command: ./scenarios/legacy-upgrade.sh --distro rocky-9-cloud-amd64
+          - name: legacy-upgrade-arch
+            command: ./scenarios/legacy-upgrade.sh --distro archlinux-cloud-amd64 --no-upgrade
+          - name: legacy-upgrade-alpine
+            command: ./scenarios/legacy-upgrade.sh --distro alpine-3.23-cloud-amd64 --no-upgrade
           - name: upgrade
             command: ./scenarios/upgrade.sh --distro ubuntu-24.04-cloud-amd64
           - name: upgrade-skip-drain

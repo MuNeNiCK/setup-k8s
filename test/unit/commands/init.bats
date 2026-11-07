@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# shellcheck disable=SC2034 # tests set globals read by the modules under test
 # Ported from test/unit/test_parsing_validation.sh
 
 setup() {
@@ -413,4 +414,28 @@ _case_validate_node_addresses() {
 
 @test "_validate_node_addresses" {
     _case_validate_node_addresses
+}
+
+@test "HA init fails when the control-plane certificates cannot be uploaded" {
+    load_modules; quiet_logs
+    deploy_kube_vip() { :; }
+    _configure_kubelet_node_ip() { :; }
+    generate_kubeadm_config() { mktemp; }
+    _verify_kube_vip_kubeconfig() { :; }
+    _configure_kubectl() { :; }
+    cat > "$FAKE_BIN/kubeadm" <<'FAKE'
+#!/bin/sh
+case "$*" in
+    "init phase upload-certs --upload-certs") [ -n "$UPLOAD_OK" ] && { echo "[upload-certs] done"; echo "$(printf 'a%.0s' $(seq 64))"; exit 0; }; exit 1 ;;
+esac
+exit 0
+FAKE
+    chmod +x "$FAKE_BIN/kubeadm"
+    HA_ENABLED=true HA_VIP_ADDRESS=10.0.0.100
+    run initialize_cluster
+    [ "$status" -ne 0 ]
+    UPLOAD_OK=1
+    export UPLOAD_OK
+    run initialize_cluster
+    [ "$status" -eq 0 ]
 }

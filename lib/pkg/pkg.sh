@@ -22,7 +22,7 @@
 #                                       Add a signed repository. For deb, SUITE
 #                                       defaults to "/" (flat repository). For rpm,
 #                                       URL is the baseurl.
-#   pkg_repo_remove ID                  Remove a repository added with pkg_repo_add
+#   pkg_repo_remove ID...               Remove repositories added with pkg_repo_add
 #   pkg_base_dependencies               Print the native names of tools every node needs
 #   pkg_format                          Print deb, rpm, apk, or pacman
 
@@ -36,7 +36,6 @@ _pkg_call() {
     "_pkg_${DISTRO_PKG}_${op}" "$@"
 }
 
-pkg_refresh()            { _pkg_call refresh "$@"; }
 pkg_install()            { _pkg_call install "$@"; }
 pkg_remove()             { _pkg_call remove "$@"; }
 pkg_installed()          { _pkg_call installed "$@"; }
@@ -44,6 +43,19 @@ pkg_available_version()  { _pkg_call available_version "$@"; }
 pkg_repo_add()           { _pkg_call repo_add "$@"; }
 pkg_repo_remove()        { _pkg_call repo_remove "$@"; }
 pkg_base_dependencies()  { _pkg_call base_deps; }
+
+# Mirrors fail transiently (metadata being synced): retry before giving up
+pkg_refresh() {
+    local attempt=1
+    until _pkg_call refresh "$@"; do
+        if [ "$attempt" -ge 3 ]; then
+            return 1
+        fi
+        log_warn "Refreshing the package indexes failed (attempt ${attempt}/3); retrying in $((attempt * 10))s..."
+        sleep $((attempt * 10))
+        attempt=$((attempt + 1))
+    done
+}
 
 pkg_format() {
     case "${DISTRO_PKG:-}" in

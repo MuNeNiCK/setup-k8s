@@ -220,3 +220,23 @@ FAKE
     run determine_k8s_version
     [ "$status" -ne 0 ]
 }
+
+@test "a config patch of a generated kind is merged, not added as a second document" {
+    load_modules; quiet_logs
+    _kubeadm_defaults() { :; }
+    _kubeadm_api_version() { echo kubeadm.k8s.io/v1beta4; }
+    _kubeproxy_api_version() { echo kubeproxy.config.k8s.io/v1alpha1; }
+    _kubelet_api_version() { echo kubelet.config.k8s.io/v1beta1; }
+    patch="$BATS_TEST_TMPDIR/patch.yaml"
+    printf '%s\n' 'apiVersion: kubelet.config.k8s.io/v1beta1' 'kind: KubeletConfiguration' 'shutdownGracePeriod: 30s' \
+        '---' 'apiVersion: kubeproxy.config.k8s.io/v1alpha1' 'kind: KubeProxyConfiguration' 'mode: iptables' > "$patch"
+    SWAP_ENABLED=true PROXY_MODE=nftables KUBEADM_CONFIG_PATCH="$patch"
+    config=$(generate_kubeadm_config)
+    [ "$(grep -c '^kind: KubeletConfiguration' "$config")" -eq 1 ]
+    [ "$(grep -c '^kind: KubeProxyConfiguration' "$config")" -eq 1 ]
+    grep -qx 'failSwapOn: false' "$config"
+    grep -qx 'shutdownGracePeriod: 30s' "$config"
+    # The patch's fields win
+    grep -qx 'mode: iptables' "$config"
+    if grep -qx 'mode: nftables' "$config"; then return 1; fi
+}

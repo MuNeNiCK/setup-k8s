@@ -32,65 +32,64 @@ _check_ssh_connectivity() {
 
 # --- Shared Node Name Resolution ---
 
-# Resolve a node's Kubernetes node name from its host IP/hostname via kubectl.
-# Tries: 1) match by InternalIP address, 2) match by Hostname, 3) SSH to target and get its hostname
+# Resolve a node's Kubernetes node name from its address.
+# 1) a node with exactly one matching address (InternalIP/Hostname/...);
+# 2) otherwise (no or several matches, e.g. nodes behind NAT sharing an
+#    address) the node whose name is the target's hostname.
+# Prints the name. Returns 0 when found, 1 when no node matches, 2 when the
+# node list could not be read (the API server did not answer).
 # Usage: _get_node_name <cp_user> <cp_host> <target_host>
-# Requires: _deploy_ssh, _parse_node_address, _DEPLOY_ALL_NODES, _csv_count, _csv_get
 _get_node_name() {
     local user="$1" host="$2" target_host="$3"
     local pfx; pfx=$(_sudo_prefix "$user")
-    local node_name=""
     local stripped="${target_host#[}"
     stripped="${stripped%]}"
 
-    # Try matching by InternalIP or Hostname address
-    local nodes_info
-    nodes_info=$(_deploy_ssh "$user" "$host" "${pfx}kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o jsonpath='{range .items[*]}{.metadata.name}{\" \"}{range .status.addresses[*]}{.address}{\" \"}{end}{\"\\n\"}{end}'" 2>/dev/null) || true
-    if [ -n "$nodes_info" ]; then
-        node_name=$(echo "$nodes_info" | while read -r name addrs; do
-            for addr in $addrs; do
-                if [ "$addr" = "$stripped" ] || [ "$addr" = "$target_host" ]; then
-                    echo "$name"
-                    return 0
-                fi
-            done
-        done)
-    fi
-
-    # Fallback: SSH to the target node and get its hostname, then match against node names
-    if [ -z "$node_name" ]; then
-        _parse_node_address "$target_host"
-        local target_user="$_NODE_USER" target_actual_host="$_NODE_HOST"
-        # For bare IPs passed as target_host, re-parse with the original node address
-        # Find the matching node from _DEPLOY_ALL_NODES
-        local _all_cnt _ni
-        _all_cnt=$(_csv_count "$_DEPLOY_ALL_NODES")
-        _ni=0
-        while [ "$_ni" -lt "$_all_cnt" ]; do
-            local _node_entry
-            _node_entry=$(_csv_get "$_DEPLOY_ALL_NODES" "$_ni")
-            local _check_host="${_node_entry#*@}"
-            if [ "$_check_host" = "$target_host" ] || [ "$_check_host" = "$stripped" ]; then
-                _parse_node_address "$_node_entry"
-                target_user="$_NODE_USER"
-                target_actual_host="$_NODE_HOST"
-                break
-            fi
-            _ni=$((_ni + 1))
-        done
-        local remote_hostname
-        remote_hostname=$(_deploy_ssh "$target_user" "$target_actual_host" "hostname" 2>/dev/null | tr -d '[:space:]') || true
-        if [ -n "$remote_hostname" ] && [ -n "$nodes_info" ]; then
-            node_name=$(echo "$nodes_info" | while read -r name _addrs; do
-                if [ "$name" = "$remote_hostname" ]; then
-                    echo "$name"
-                    return 0
-                fi
-            done)
+    local nodes_info="" attempt=0
+    while [ "$attempt" -lt 3 ]; do
+        if nodes_info=$(_deploy_ssh "$user" "$host" "${pfx}kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o jsonpath='{range .items[*]}{.metadata.name}{\" \"}{range .status.addresses[*]}{.address}{\" \"}{end}{\"\\n\"}{end}'" 2>/dev/null) && [ -n "$nodes_info" ]; then
+            break
         fi
+        nodes_info=""
+        attempt=$((attempt + 1))
+        sleep 3
+    done
+    if [ -z "$nodes_info" ]; then
+        log_error "  Could not list the cluster nodes from ${host}"
+        return 2
     fi
 
-    echo "$node_name"
+    local matches
+    matches=$(printf '%s\n' "$nodes_info" | awk -v a="$stripped" -v b="$target_host" '
+        { for (i = 2; i <= NF; i++) if ($i == a || $i == b) { print $1; break } }')
+    if [ "$(printf '%s\n' "$matches" | grep -c .)" -eq 1 ]; then
+        echo "$matches"
+        return 0
+    fi
+
+    # By hostname, using the SSH address of the node as given on the command line
+    local target_user target_actual_host _node_entry _i=0 _cnt
+    _parse_node_address "$target_host"
+    target_user="$_NODE_USER" target_actual_host="$_NODE_HOST"
+    _cnt=$(_csv_count "$_DEPLOY_ALL_NODES")
+    while [ "$_i" -lt "$_cnt" ]; do
+        _node_entry=$(_csv_get "$_DEPLOY_ALL_NODES" "$_i")
+        case "${_node_entry#*@}" in
+            "$target_host"|"$stripped")
+                _parse_node_address "$_node_entry"
+                target_user="$_NODE_USER" target_actual_host="$_NODE_HOST"
+                break
+                ;;
+        esac
+        _i=$((_i + 1))
+    done
+    local remote_hostname
+    remote_hostname=$(_deploy_ssh "$target_user" "$target_actual_host" "hostname" 2>/dev/null | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]') || remote_hostname=""
+    if [ -n "$remote_hostname" ] && printf '%s\n' "$nodes_info" | awk '{print $1}' | grep -qxF "$remote_hostname"; then
+        echo "$remote_hostname"
+        return 0
+    fi
+    return 1
 }
 
 # --- Remote temp directory ---
@@ -119,7 +118,12 @@ _create_remote_tmpdir() {
 
 # --- Remote Execution ---
 
-# Execute a command on a remote node via nohup + polling
+# Execute a command on a remote node via nohup + polling.
+# The command runs detached (it survives a dropped SSH connection) and writes
+# its exit status atomically (temp file + mv) when it ends. Each poll reports
+# "done", "running" (with the last log line), or "gone" when the process
+# ended without an exit status (killed, OOM, reboot), which fails at once
+# instead of waiting for the timeout.
 # Usage: _deploy_exec_remote <user> <host> <description> <command>
 _deploy_exec_remote() {
     local user="$1" host="$2" desc="$3" cmd="$4"
@@ -134,6 +138,7 @@ _deploy_exec_remote() {
     local remote_script="${remote_dir}/run.sh"
     local log_file="${remote_dir}/run.log"
     local exit_file="${remote_dir}/run.exit"
+    local pid_file="${remote_dir}/run.pid"
 
     # Write command to remote script via stdin
     if ! printf '%s\n' "$cmd" | _deploy_ssh "$user" "$host" "cat > '$remote_script' && chmod 700 '$remote_script'"; then
@@ -142,34 +147,48 @@ _deploy_exec_remote() {
         return 1
     fi
 
-    # Launch via nohup (nohup wraps the entire command to ensure exit-code file is written)
-    if ! _deploy_ssh "$user" "$host" "nohup sh -c 'sh \"$remote_script\" > \"$log_file\" 2>&1; echo \$? > \"$exit_file\"' </dev/null >/dev/null 2>&1 &"; then
+    # Launch detached; the exit status appears only when complete
+    if ! _deploy_ssh "$user" "$host" "nohup sh -c 'sh \"$remote_script\" > \"$log_file\" 2>&1; echo \$? > \"$exit_file.tmp\" && mv \"$exit_file.tmp\" \"$exit_file\"' </dev/null >/dev/null 2>&1 & echo \$! > '$pid_file'"; then
         log_error "[$host] Failed to launch remote command"
         _deploy_ssh "$user" "$host" "rm -rf '$remote_dir'" >/dev/null 2>&1 || true
         return 1
     fi
 
     # Poll for completion
-    local elapsed=0 _last_poll_err=""
+    local poll="if [ -f '$exit_file' ]; then echo done; elif kill -0 \"\$(cat '$pid_file' 2>/dev/null)\" 2>/dev/null; then echo running; tail -n 1 '$log_file' 2>/dev/null; else echo gone; fi"
+    local elapsed=0 state="" reply="" _last_poll_err=""
     while [ "$elapsed" -lt "$DEPLOY_REMOTE_TIMEOUT" ]; do
         sleep "$DEPLOY_POLL_INTERVAL"
         elapsed=$((elapsed + DEPLOY_POLL_INTERVAL))
-
-        if _last_poll_err=$(_deploy_ssh "$user" "$host" "test -f '$exit_file'" 2>&1 >/dev/null); then
-            break
+        if ! reply=$(_deploy_ssh "$user" "$host" "$poll" 2>&1); then
+            # Transient SSH failure: keep waiting
+            _last_poll_err="$reply"
+            continue
         fi
-
-        # Show progress
-        local progress_line
-        progress_line=$(_deploy_ssh "$user" "$host" "tail -1 '$log_file'" 2>/dev/null || true)
-        if [ -n "$progress_line" ]; then
-            log_info "[$host] [${elapsed}s] $progress_line"
-        fi
+        state=$(printf '%s\n' "$reply" | head -n 1)
+        case "$state" in
+            done) break ;;
+            gone)
+                # The status may have been written between the two tests
+                if _deploy_ssh "$user" "$host" "test -f '$exit_file'" >/dev/null 2>&1; then
+                    state="done"
+                fi
+                break
+                ;;
+            running)
+                reply=$(printf '%s\n' "$reply" | sed -n '2p')
+                [ -n "$reply" ] && log_info "[$host] [${elapsed}s] $reply"
+                ;;
+        esac
     done
 
-    if [ "$elapsed" -ge "$DEPLOY_REMOTE_TIMEOUT" ]; then
-        log_error "[$host] Timeout after ${DEPLOY_REMOTE_TIMEOUT}s: $desc"
-        [ -n "$_last_poll_err" ] && log_error "[$host] Last poll error: $_last_poll_err"
+    if [ "$state" != "done" ]; then
+        if [ "$state" = gone ]; then
+            log_error "[$host] The remote command ended without an exit status (killed or the node restarted): $desc"
+        else
+            log_error "[$host] Timeout after ${DEPLOY_REMOTE_TIMEOUT}s: $desc"
+            [ -n "$_last_poll_err" ] && log_error "[$host] Last poll error: $_last_poll_err"
+        fi
         log_error "[$host] Remote log:"
         _deploy_ssh "$user" "$host" "cat '$log_file'" || true
         _deploy_ssh "$user" "$host" "rm -rf '$remote_dir'" >/dev/null 2>&1 || true
@@ -178,8 +197,7 @@ _deploy_exec_remote() {
 
     # Retrieve exit code
     local remote_exit
-    remote_exit=$(_deploy_ssh "$user" "$host" "cat '$exit_file'" || echo "1")
-    remote_exit=$(echo "$remote_exit" | tr -d '[:space:]')
+    remote_exit=$(_deploy_ssh "$user" "$host" "cat '$exit_file'" 2>/dev/null | tr -d '[:space:]') || remote_exit=""
 
     if ! echo "$remote_exit" | grep -qE '^[0-9]+$'; then
         log_error "[$host] Invalid exit code from remote: '$remote_exit'"

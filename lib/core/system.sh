@@ -141,6 +141,26 @@ system_prepare() {
             mount -t cgroup -o "${subsys}" "cgroup_${subsys}" "/sys/fs/cgroup/${subsys}" 2>/dev/null || true
         done
     fi
+
+    # The individual steps above are attempts (services may be missing or
+    # already done); check the result that kubelet and the runtimes need.
+    if [ ! -e "${_CGROUP_ROOT}/cgroup.controllers" ] && [ ! -e "${_CGROUP_ROOT}/memory/memory.limit_in_bytes" ]; then
+        log_error "cgroups are not available (/sys/fs/cgroup has neither cgroup v2 nor the v1 memory controller)"
+        return 1
+    fi
+    if ! _root_mount_is_shared; then
+        log_error "The root mount is not shared (mount --make-rshared / failed); kubelet volume mounts would not propagate"
+        return 1
+    fi
+}
+
+# Paths read by the checks above (overridable for tests)
+_CGROUP_ROOT="/sys/fs/cgroup"
+_MOUNTINFO="/proc/self/mountinfo"
+
+# Succeed when "/" has shared mount propagation (systemd sets it by default).
+_root_mount_is_shared() {
+    awk '$5 == "/" { for (i = 7; i <= NF && $i != "-"; i++) if ($i ~ /^shared:/) found = 1 } END { exit !found }' "$_MOUNTINFO" 2>/dev/null
 }
 
 # Remove host preparation artifacts created by system_prepare.

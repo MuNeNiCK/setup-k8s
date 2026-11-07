@@ -47,14 +47,11 @@ SSH_OPTS=("${SSH_BASE_OPTS[@]}")
 # Global cleanup state (must be module-level for EXIT trap)
 _VM_CONTAINER_NAME=""
 _WATCHDOG_PID=""
-_CLOUD_INIT_USER_DATA=""
 
 _e2e_cleanup_vm_container() {
     _cleanup_vm_container "$_WATCHDOG_PID" "$_VM_CONTAINER_NAME"
     _WATCHDOG_PID=""
     _VM_CONTAINER_NAME=""
-    rm -f "$_CLOUD_INIT_USER_DATA"
-    _CLOUD_INIT_USER_DATA=""
 }
 
 # Help message
@@ -175,27 +172,10 @@ run_vm_container() {
         -e "DISK_SIZE=$VM_DISK_SIZE"
     )
 
-    # Alpine: cloud image has no bash/sudo/openssh pre-installed
-    case "$distro" in
-        alpine-*)
-            _CLOUD_INIT_USER_DATA=$(mktemp /tmp/cloud-init-userdata.XXXXXX.yaml)
-            cat > "$_CLOUD_INIT_USER_DATA" <<'CIEOF'
-#cloud-config
-packages:
-  - bash
-  - ca-certificates
-  - curl
-  - sudo
-  - openssh
-runcmd:
-  - ["sh", "-c", "rc-update add sshd default && rc-service sshd start"]
-CIEOF
-            _docker_run_args+=(
-                -v "$_CLOUD_INIT_USER_DATA:/cloud-init-userdata.yaml:ro"
-                -e "CLOUD_INIT_USER_DATA=/cloud-init-userdata.yaml"
-            )
-            ;;
-    esac
+    # Distribution-specific arguments (e.g. Alpine cloud-init user-data)
+    local _distro_args=()
+    mapfile -t _distro_args < <(_vm_distro_run_args "$distro" "$VM_DATA_DIR")
+    _docker_run_args+=("${_distro_args[@]}")
 
     if [ -n "$VM_GUEST_IP6" ]; then
         _docker_run_args+=(-e "NETWORK_GUEST_IP6=$VM_GUEST_IP6")
@@ -350,9 +330,20 @@ PATCH"
         log_info "API server is not responsive"
     fi
 
+    # What the setup arguments asked for
+    local options_ok=false
+    if [ "$api_responsive" = "true" ]; then
+        # setup_extra_args_str holds printf %q-quoted words
+        local -a _verify_args=()
+        eval "_verify_args=(${setup_extra_args_str})"
+        if verify_setup vm_ssh "$distro" "$k8s_version_val" "${_verify_args[@]}"; then
+            options_ok=true
+        fi
+    fi
+
     local setup_test_status="failed"
     if [ "$setup_exit_code" -eq 0 ] && [ "$status_exit_code" -eq 0 ] && \
-       [ "$kubelet_status" = "active" ] && [ "$api_responsive" = "true" ]; then
+       [ "$kubelet_status" = "active" ] && [ "$api_responsive" = "true" ] && [ "$options_ok" = true ]; then
         setup_test_status="success"
         log_success "Setup test: SUCCESS"
     else
@@ -383,47 +374,17 @@ PATCH"
 
         # --- Phase 4: Verify cleanup ---
         log_info "Verifying cleanup..."
-        local kubelet_active kubelet_enabled
-        if vm_ssh "test -x /usr/bin/systemctl || test -x /bin/systemctl" >/dev/null 2>&1; then
-            kubelet_active=$(vm_ssh "systemctl is-active kubelet" 2>/dev/null) || kubelet_active="inactive"
-            kubelet_enabled=$(vm_ssh "systemctl is-enabled kubelet" 2>/dev/null) || kubelet_enabled="disabled"
-        elif vm_ssh "test -x /sbin/rc-service || test -x /usr/sbin/rc-service" >/dev/null 2>&1; then
-            if vm_ssh "rc-service kubelet status" >/dev/null 2>&1; then
-                kubelet_active="active"
-            else
-                kubelet_active="inactive"
-            fi
-            if vm_ssh "rc-update show default 2>/dev/null | grep -q kubelet" >/dev/null 2>&1; then
-                kubelet_enabled="enabled"
-            else
-                kubelet_enabled="disabled"
-            fi
+        local leftovers
+        leftovers=$(vm_ssh "sh -s" < "$SCRIPT_DIR/lib/leftovers.sh" 2>/dev/null)
+        services_stopped=true config_cleaned=true packages_removed=true
+        if grep -q '^service:' <<<"$leftovers"; then services_stopped=false; fi
+        if grep -q -E '^(file|directory):' <<<"$leftovers"; then config_cleaned=false; fi
+        if grep -q -E '^(binary|package|hold|lock|versionlock):' <<<"$leftovers"; then packages_removed=false; fi
+        if [ -n "$leftovers" ]; then
+            log_error "CHECK: left behind after cleanup: $(echo "$leftovers" | tr '\n' ' ')"
         else
-            kubelet_active="inactive"
-            kubelet_enabled="disabled"
+            log_success "CHECK: nothing left behind after cleanup"
         fi
-
-        if [ "$(echo "$kubelet_active" | tr -d '[:space:]')" = "active" ] || [ "$(echo "$kubelet_enabled" | tr -d '[:space:]')" = "enabled" ]; then
-            services_stopped="false"
-        else
-            services_stopped="true"
-        fi
-
-        if vm_ssh "test -d /etc/kubernetes && ls -A /etc/kubernetes 2>/dev/null | head -1 | grep -q ." >/dev/null 2>&1; then
-            config_cleaned="false"
-        elif vm_ssh "test -f /etc/default/kubelet" >/dev/null 2>&1; then
-            config_cleaned="false"
-        else
-            config_cleaned="true"
-        fi
-
-        packages_removed="true"
-        for cmd in kubeadm kubectl kubelet; do
-            if vm_ssh "command -v $cmd" >/dev/null 2>&1; then
-                packages_removed="false"
-                break
-            fi
-        done
 
         if [ "$cleanup_exit_code" -eq 0 ] && [ "$services_stopped" = "true" ] && \
            [ "$config_cleaned" = "true" ] && [ "$packages_removed" = "true" ]; then

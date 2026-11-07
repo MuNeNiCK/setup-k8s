@@ -29,7 +29,10 @@ _resolve_auto_proxy_mode() {
 # Resolve PROXY_MODE=auto (requires K8S_VERSION).
 resolve_proxy_mode() {
     if [ "$PROXY_MODE" = auto ]; then
-        PROXY_MODE=$(_resolve_auto_proxy_mode "$K8S_VERSION")
+        local version=""
+        # A version that is not known yet (dry run) means a current release
+        case "$K8S_VERSION" in [0-9]*) version="$K8S_VERSION" ;; esac
+        PROXY_MODE=$(_resolve_auto_proxy_mode "$version")
         log_info "Proxy mode auto: using ${PROXY_MODE} (Kubernetes ${K8S_VERSION}, kernel $(_kernel_release))"
         if [ "${ACTION:-}" = join ]; then
             log_info "  kube-proxy runs in the cluster's mode; pass --proxy-mode if it differs from ${PROXY_MODE}"
@@ -57,17 +60,20 @@ install_node_dependencies() {
             return 1
         fi
         system_prepare
-        return 0
+        return
     fi
 
     log_info "Installing dependencies via ${DISTRO_PKG}..."
-    pkg_refresh
+    if ! pkg_refresh; then
+        log_error "Failed to refresh the package indexes"
+        return 1
+    fi
     # shellcheck disable=SC2046 # space-separated package names
     if ! pkg_install $(pkg_base_dependencies); then
         log_error "Failed to install base dependencies"
         return 1
     fi
-    system_prepare
+    system_prepare || return 1
 
     if [ -n "${DISTRO_KMOD_PKG:-}" ] && ! modprobe -n br_netfilter >/dev/null 2>&1; then
         log_info "br_netfilter not available — installing ${DISTRO_KMOD_PKG}..."

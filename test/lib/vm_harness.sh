@@ -185,7 +185,8 @@ poll_vm_command() {
             log_error "Container exited unexpectedly"
             return 1
         fi
-        if $ssh_func "test -f $exit_code_file" >/dev/null 2>&1; then
+        # Non-empty: the file exists before "echo \$? > file" has written to it
+        if $ssh_func "test -s $exit_code_file" >/dev/null 2>&1; then
             break
         fi
         local progress_line
@@ -341,6 +342,30 @@ cleanup_docker_network() {
 }
 
 # Start a VM container with static IP on the Docker network
+# Extra docker run arguments a distribution needs (printed one per line).
+# Alpine cloud images have no bash, sudo, or openssh: install them with an
+# additional cloud-init user-data file in the VM data directory.
+# Usage: _vm_distro_run_args <distro> <vm_data_dir>
+_vm_distro_run_args() {
+    case "$1" in
+        alpine-*)
+            cat > "$2/cloud-init-userdata.yaml" <<'CIEOF'
+#cloud-config
+packages:
+  - bash
+  - ca-certificates
+  - curl
+  - sudo
+  - openssh
+runcmd:
+  - ["sh", "-c", "rc-update add sshd default && rc-service sshd start"]
+CIEOF
+            printf '%s\n' -v "$2/cloud-init-userdata.yaml:/cloud-init-userdata.yaml:ro" \
+                -e "CLOUD_INIT_USER_DATA=/cloud-init-userdata.yaml"
+            ;;
+    esac
+}
+
 # Usage: start_vm <container_name> <static_ip> <host_ssh_port> <data_subdir> [label]
 start_vm() {
     local container_name=$1 static_ip=$2 host_ssh_port=$3 data_subdir=$4
@@ -352,6 +377,8 @@ start_vm() {
 
     local vm_data_dir="$VM_DATA_DIR/$data_subdir"
     mkdir -p "$vm_data_dir"
+    local -a distro_args=()
+    mapfile -t distro_args < <(_vm_distro_run_args "$DISTRO" "$vm_data_dir")
 
     log_info "Starting VM: $container_name (IP: $static_ip, SSH port: $host_ssh_port)"
     if ! docker run -d --rm \
@@ -370,6 +397,7 @@ start_vm() {
         -e "MEMORY=$VM_MEMORY" \
         -e "CPUS=$VM_CPUS" \
         -e "DISK_SIZE=$VM_DISK_SIZE" \
+        "${distro_args[@]}" \
         "$DOCKER_VM_RUNNER_IMAGE" >/dev/null; then
         log_error "Failed to start container $container_name"
         return 1
@@ -392,15 +420,30 @@ setup_root_ssh() {
     local host_ssh_port=$1 label=$2
 
     log_info "[$label] Setting up root SSH access..."
+    # The login user may be set up for sudo or for doas (Alpine)
+    local esc
+    for esc in "sudo -n" "doas -n"; do
+        ssh "${SSH_OPTS[@]}" -p "$host_ssh_port" "$LOGIN_USER@localhost" "$esc true" >/dev/null 2>&1 && break
+    done
     ssh "${SSH_OPTS[@]}" -p "$host_ssh_port" "$LOGIN_USER@localhost" \
-        "sudo mkdir -p /root/.ssh && sudo cp ~/.ssh/authorized_keys /root/.ssh/ && sudo chmod 700 /root/.ssh && sudo chmod 600 /root/.ssh/authorized_keys" >/dev/null 2>&1
+        "$esc mkdir -p /root/.ssh && $esc cp ~/.ssh/authorized_keys /root/.ssh/ && $esc chmod 700 /root/.ssh && $esc chmod 600 /root/.ssh/authorized_keys" >/dev/null 2>&1
 
     if ssh "${SSH_OPTS[@]}" -p "$host_ssh_port" "root@localhost" "echo ok" >/dev/null 2>&1; then
         log_success "[$label] Root SSH access ready"
-    else
-        log_error "[$label] Root SSH access failed"
-        return 1
+        return 0
     fi
+
+    # OpenSSH refuses key logins for locked accounts ("!" in /etc/shadow,
+    # e.g. Alpine cloud images). "*" keeps password login disabled.
+    ssh "${SSH_OPTS[@]}" -p "$host_ssh_port" "$LOGIN_USER@localhost" \
+        "$esc sed -i 's/^root:![^:]*:/root:*:/' /etc/shadow" >/dev/null 2>&1 || true
+    local err
+    if err=$(ssh "${SSH_OPTS[@]}" -p "$host_ssh_port" "root@localhost" "echo ok" 2>&1 >/dev/null); then
+        log_success "[$label] Root SSH access ready (root account unlocked for key login)"
+        return 0
+    fi
+    log_error "[$label] Root SSH access failed: ${err}"
+    return 1
 }
 
 # SSH to a VM as root

@@ -170,14 +170,55 @@ memorySwap:
 EOF
     fi
 
-    # Append kubeadm config patch file if specified
+    # Merge the kubeadm config patch file if specified
     if [ -n "${KUBEADM_CONFIG_PATCH:-}" ] && [ -f "$KUBEADM_CONFIG_PATCH" ]; then
-        log_info "Appending kubeadm config patch from: $KUBEADM_CONFIG_PATCH"
-        printf '\n---\n' >> "$config_file"
-        cat "$KUBEADM_CONFIG_PATCH" >> "$config_file"
+        log_info "Merging kubeadm config patch from: $KUBEADM_CONFIG_PATCH"
+        _kubeadm_merge_patch "$KUBEADM_CONFIG_PATCH" "$config_file" > "${config_file}.merged" || return 1
+        mv "${config_file}.merged" "$config_file"
     fi
 
     echo "$config_file"
+}
+
+# Merge a kubeadm config patch into a generated config (both multi-document
+# YAML). A patch document whose kind is also generated (e.g.
+# KubeletConfiguration with --swap-enabled, KubeProxyConfiguration with
+# --proxy-mode) is merged into it: its top-level fields replace the generated
+# ones (kubeadm rejects two documents of one kind). Other patch documents are
+# appended. Usage: _kubeadm_merge_patch <patch> <generated>
+_kubeadm_merge_patch() {
+    awk '
+        FNR == 1 { f++ }
+        /^---[[:space:]]*$/ { if (f == 1) pn++; else gn++; next }
+        {
+            if (f == 1) { if (!pn) pn = 1; p[pn] = p[pn] $0 "\n"; if ($1 == "kind:") pk[pn] = $2 }
+            else        { if (!gn) gn = 1; g[gn] = g[gn] $0 "\n"; if ($1 == "kind:") gk[gn] = $2 }
+        }
+        function topkey(line) { return (line ~ /^[A-Za-z_][A-Za-z0-9_]*:/) ? substr(line, 1, index(line, ":") - 1) : "" }
+        function merge(doc, patch,   n, lines, i, k, keys, skip, out) {
+            n = split(patch, lines, "\n")
+            for (i = 1; i <= n; i++) { k = topkey(lines[i]); if (k != "" && k != "apiVersion" && k != "kind") keys[k] = 1 }
+            n = split(doc, dl, "\n"); out = ""; skip = 0
+            for (i = 1; i < n; i++) {
+                k = topkey(dl[i])
+                if (k != "") skip = (k in keys)
+                else if (dl[i] !~ /^([ \t-]|#|$)/) skip = 0
+                if (!skip) out = out dl[i] "\n"
+            }
+            n = split(patch, lines, "\n")
+            for (i = 1; i < n; i++) { k = topkey(lines[i]); if (k != "apiVersion" && k != "kind") out = out lines[i] "\n" }
+            return out
+        }
+        function blank(doc) { return doc !~ /[^ \t\n]/ }
+        END {
+            for (i = 1; i <= pn; i++) {
+                if (!(i in pk)) continue
+                for (j = 1; j <= gn; j++) if (gk[j] == pk[i]) { g[j] = merge(g[j], p[i]); used[i] = 1; break }
+            }
+            sep = ""
+            for (j = 1; j <= gn; j++) if (!blank(g[j])) { printf "%s%s", sep, g[j]; sep = "---\n" }
+            for (i = 1; i <= pn; i++) if (!(i in used) && !blank(p[i])) { printf "%s%s", sep, p[i]; sep = "---\n" }
+        }' "$1" "$2"
 }
 
 # ============================================================

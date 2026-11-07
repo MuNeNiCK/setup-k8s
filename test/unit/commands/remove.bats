@@ -157,3 +157,57 @@ _case_help_contains_remove_cleanup() {
 @test "help text contains remove/cleanup" {
     _case_help_contains_remove_cleanup
 }
+
+# --- remove result ---
+# Fake cluster: the node list comes from $NODES_FILE; "delete node" removes
+# the node unless DELETE_FAILS is set.
+_fake_remove_cluster() {
+    NODES_FILE="$BATS_TEST_TMPDIR/nodes"
+    printf '%s\n' 'cp1 10.0.0.1 cp1' 'w1 10.0.0.2 w1' > "$NODES_FILE"
+    _confirm_remove() { :; }
+    remote_session_open() { :; }
+    remote_session_close() { :; }
+    _audit_log() { :; }
+    sleep() { :; }
+    _deploy_ssh() {
+        case "$3" in
+            *"get nodes -o jsonpath"*) cat "$NODES_FILE" ;;
+            *"delete node"*) [ -z "${DELETE_FAILS:-}" ] && sed -i '/^w1 /d' "$NODES_FILE"; true ;;
+            *"get node 'w1'"*) grep -q '^w1 ' "$NODES_FILE" && echo node/w1; true ;;
+            hostname) echo none ;;
+            *) true ;;
+        esac
+    }
+    REMOVE_CONTROL_PLANES=10.0.0.1 REMOVE_NODES=10.0.0.2
+}
+
+@test "remove succeeds only when the node is gone from the cluster" {
+    load_modules; quiet_logs; _fake_remove_cluster
+    run remove_cluster
+    [ "$status" -eq 0 ]
+    DELETE_FAILS=1
+    printf '%s\n' 'cp1 10.0.0.1 cp1' 'w1 10.0.0.2 w1' > "$NODES_FILE"
+    run remove_cluster
+    [ "$status" -ne 0 ]
+}
+
+@test "remove of a node that is not registered resets it without deleting anything" {
+    load_modules; _fake_remove_cluster
+    printf '%s\n' 'cp1 10.0.0.1 cp1' > "$NODES_FILE"
+    CALLS="$BATS_TEST_TMPDIR/calls"
+    _deploy_ssh_orig=$(declare -f _deploy_ssh)
+    eval "${_deploy_ssh_orig/_deploy_ssh/_deploy_ssh_inner}"
+    _deploy_ssh() { echo "$3" >> "$CALLS"; _deploy_ssh_inner "$@"; }
+    run remove_cluster
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Not registered in the cluster"* ]]
+    if grep -q 'delete node' "$CALLS"; then return 1; fi
+    grep -q 'kubeadm reset -f' "$CALLS"
+}
+
+@test "remove fails when the node list cannot be read" {
+    load_modules; quiet_logs; _fake_remove_cluster
+    : > "$NODES_FILE"
+    run remove_cluster
+    [ "$status" -ne 0 ]
+}

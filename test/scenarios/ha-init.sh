@@ -247,29 +247,42 @@ run_ha_test() {
         all_pass=false
     fi
 
-    # Check 6: API server responsive
-    # Try with VIP first, fall back to node IP
-    local api_server_args=""
-    if vm_ssh "timeout 30 kubectl get nodes --kubeconfig=/etc/kubernetes/admin.conf" >/dev/null 2>&1; then
-        log_success "CHECK: API server responsive (via kubeconfig)"
+    # Check 6: kube-vip holds the VIP and the API server answers on it
+    local vip_held=false elapsed=0
+    while [ "$elapsed" -lt 60 ]; do
+        if vm_ssh "ip -o addr show | grep -qF ' ${HA_VIP}/'" >/dev/null 2>&1; then vip_held=true; break; fi
+        sleep 5; elapsed=$((elapsed + 5))
+    done
+    if [ "$vip_held" = true ]; then
+        log_success "CHECK: VIP ${HA_VIP} is assigned to an interface (kube-vip leader)"
     else
-        # kubeconfig might point to VIP which may not be reachable in PASST mode
-        # Try directly via node IP
-        if vm_ssh "timeout 30 kubectl get nodes --kubeconfig=/etc/kubernetes/admin.conf --server=https://${vm_ip}:6443 --insecure-skip-tls-verify" >/dev/null 2>&1; then
-            api_server_args="--server=https://${vm_ip}:6443 --insecure-skip-tls-verify"
-            log_warn "CHECK: API server responsive (via node IP fallback, VIP may not work in PASST networking)"
-        else
-            log_error "CHECK: API server NOT responsive"
-            all_pass=false
-        fi
+        log_error "CHECK: VIP ${HA_VIP} is not assigned on the node"
+        all_pass=false
+    fi
+    if [ "$(vm_ssh "curl -sk --connect-timeout 5 https://${HA_VIP}:6443/readyz" 2>/dev/null)" = "ok" ]; then
+        log_success "CHECK: API server answers on the VIP"
+    else
+        log_error "CHECK: API server does not answer on https://${HA_VIP}:6443"
+        all_pass=false
+    fi
+    if vm_ssh "timeout 30 kubectl get nodes --kubeconfig=/etc/kubernetes/admin.conf" >/dev/null 2>&1; then
+        log_success "CHECK: kubectl works with admin.conf"
+    else
+        log_error "CHECK: kubectl with admin.conf failed"
+        all_pass=false
     fi
 
-    # Check 7: control-plane-endpoint set correctly in kubeadm-config
-    if vm_ssh "kubectl get configmap kubeadm-config -n kube-system -o yaml --kubeconfig=/etc/kubernetes/admin.conf ${api_server_args} 2>/dev/null | grep -q 'controlPlaneEndpoint'" >/dev/null 2>&1; then
-        log_success "CHECK: controlPlaneEndpoint set in kubeadm-config"
-    else
-        log_warn "CHECK: Could not verify controlPlaneEndpoint in kubeadm-config (non-fatal)"
-    fi
+    # Check 7: the cluster endpoint is the VIP
+    local endpoint
+    endpoint=$(vm_ssh "kubectl get configmap kubeadm-config -n kube-system -o jsonpath='{.data.ClusterConfiguration}' --kubeconfig=/etc/kubernetes/admin.conf" 2>/dev/null \
+        | sed -n 's/^controlPlaneEndpoint: *//p' | tr -d "'\"")
+    case "$endpoint" in
+        "${HA_VIP}:6443"|"[${HA_VIP}]:6443")
+            log_success "CHECK: controlPlaneEndpoint = ${endpoint}" ;;
+        *)
+            log_error "CHECK: controlPlaneEndpoint = '${endpoint}' (expected ${HA_VIP}:6443)"
+            all_pass=false ;;
+    esac
 
     # Check 8: setup log contains HA join info
     if grep -q "HA Cluster: Control-Plane Join Information" "$log_file" 2>/dev/null; then
@@ -289,7 +302,7 @@ run_ha_test() {
 
     # Show kube-vip pod status (use grep instead of field-selector which doesn't support wildcards)
     log_info "kube-vip pod status:"
-    vm_ssh "kubectl get pods -n kube-system --kubeconfig=/etc/kubernetes/admin.conf ${api_server_args} 2>/dev/null | grep -E 'NAME|kube-vip' || echo '(could not query pods)'" 2>/dev/null || true
+    vm_ssh "kubectl get pods -n kube-system --kubeconfig=/etc/kubernetes/admin.conf 2>/dev/null | grep -E 'NAME|kube-vip' || echo '(could not query pods)'" 2>/dev/null || true
 
     # ===================================================================
     # Phase 3: Cleanup
@@ -313,6 +326,13 @@ run_ha_test() {
 
     # Append cleanup logs
     vm_ssh "cat /tmp/cleanup-k8s.log" >> "$log_file" 2>/dev/null || true
+    verify_no_leftovers vm_ssh || all_pass=false
+    if vm_ssh "ip -o addr show | grep -qF ' ${HA_VIP}/'" >/dev/null 2>&1; then
+        log_error "CHECK: VIP ${HA_VIP} is still assigned after cleanup"
+        all_pass=false
+    else
+        log_success "CHECK: VIP released after cleanup"
+    fi
 
     # ===================================================================
     # Result

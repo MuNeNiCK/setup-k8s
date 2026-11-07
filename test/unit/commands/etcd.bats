@@ -174,41 +174,6 @@ _case_help_contains_backup_restore() {
 }
 
 # ============================================================
-# Test: etcd.sh core functions defined
-# ============================================================
-_case_etcd_functions_defined() {
-    echo "=== Test: etcd.sh core functions defined ==="
-    (
-        load_modules
-        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
-        _audit_log() { :; }
-        _require_value() { :; }
-        _parse_common_ssh_args() { :; }
-        _SSH_SHIFT=0
-
-        local has_backup="false"
-        type backup_etcd_local >/dev/null 2>&1 && has_backup="true"
-        _assert_eq "backup_etcd_local defined" "true" "$has_backup"
-
-        local has_restore="false"
-        type restore_etcd_local >/dev/null 2>&1 && has_restore="true"
-        _assert_eq "restore_etcd_local defined" "true" "$has_restore"
-
-        local has_find_container="false"
-        type _find_etcd_container >/dev/null 2>&1 && has_find_container="true"
-        _assert_eq "_find_etcd_container defined" "true" "$has_find_container"
-
-        local has_etcdctl="false"
-        type _etcdctl_exec >/dev/null 2>&1 && has_etcdctl="true"
-        _assert_eq "_etcdctl_exec defined" "true" "$has_etcdctl"
-
-        local has_extract="false"
-        type _extract_etcd_binaries >/dev/null 2>&1 && has_extract="true"
-        _assert_eq "_extract_etcd_binaries defined" "true" "$has_extract"
-    )
-}
-
-# ============================================================
 # Test: etcd backup path variables (deep)
 # ============================================================
 _case_etcd_backup_path_variables() {
@@ -408,10 +373,6 @@ _case_resolve_etcd_image_ref_ctr_fallback() {
     _case_help_contains_backup_restore
 }
 
-@test "etcd.sh core functions defined" {
-    _case_etcd_functions_defined
-}
-
 @test "etcd backup path variables" {
     _case_etcd_backup_path_variables
 }
@@ -430,4 +391,56 @@ _case_resolve_etcd_image_ref_ctr_fallback() {
 
 @test "_resolve_etcd_image_ref ctr fallback" {
     _case_resolve_etcd_image_ref_ctr_fallback
+}
+
+# --- backup verification ---
+
+_fake_etcd_backup() {
+    load_modules; quiet_logs
+    _audit_log() { :; }
+    _find_etcd_container() { echo cid1; }
+    SNAP_DIR="$BATS_TEST_TMPDIR/var-lib-etcd"
+    mkdir -p "$SNAP_DIR"
+    _ETCD_DATA_DIR="$SNAP_DIR"
+    # snapshot save writes a file; status answers per STATUS_RC/STATUS_JSON
+    cat > "$FAKE_BIN/crictl" <<FAKE
+#!/bin/sh
+case "\$*" in
+    *"snapshot save "*) for a in "\$@"; do last="\$a"; done; head -c 20480 /dev/urandom > "\$last" ;;
+    *"snapshot status"*) [ "\${STATUS_RC:-0}" -eq 0 ] || exit "\$STATUS_RC"; echo "\${STATUS_JSON:-{\"hash\":1,\"revision\":5,\"totalKey\":42,\"totalSize\":20480}}" ;;
+esac
+FAKE
+    chmod +x "$FAKE_BIN/crictl"
+    ETCD_SNAPSHOT_PATH="$BATS_TEST_TMPDIR/out/snap.db"
+}
+
+@test "backup checks the snapshot with etcdutl and copies it unchanged" {
+    _fake_etcd_backup
+    backup_etcd_local
+    [ -s "$ETCD_SNAPSHOT_PATH" ]
+    [ -z "$(ls "$SNAP_DIR")" ]
+}
+
+@test "backup fails for a damaged or empty snapshot" {
+    _fake_etcd_backup
+    STATUS_RC=2
+    export STATUS_RC
+    run backup_etcd_local
+    [ "$status" -ne 0 ]
+    [ ! -e "$ETCD_SNAPSHOT_PATH" ]
+    export STATUS_RC=0
+    export STATUS_JSON='{"hash":1,"revision":1,"totalKey":0,"totalSize":20480}'
+    run backup_etcd_local
+    [ "$status" -ne 0 ]
+}
+
+@test "etcdctl uses the local client URL of the manifest (IPv6-only clusters)" {
+    load_modules; quiet_logs
+    _ETCD_MANIFEST_PATH="$BATS_TEST_TMPDIR/etcd.yaml"
+    printf '%s\n' '    - --listen-client-urls=https://[::1]:2379,https://[fd00:10:2::15]:2379' > "$_ETCD_MANIFEST_PATH"
+    fake_cmd crictl
+    _etcdctl_exec cid1 endpoint health
+    fake_calls | grep -q -- '--endpoints=https://\[::1\]:2379 '
+    rm -f "$_ETCD_MANIFEST_PATH"
+    [ "$(_etcd_endpoint)" = "https://127.0.0.1:2379" ]
 }

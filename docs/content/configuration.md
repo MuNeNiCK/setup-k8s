@@ -154,7 +154,12 @@ setup-k8s.sh deploy \
   --ssh-key ~/.ssh/id_rsa
 ```
 
-The patch is appended as an additional YAML document to the generated kubeadm config.
+The patch is merged into the generated kubeadm config. A document of a kind
+that setup-k8s also generates (`InitConfiguration`, `ClusterConfiguration`,
+`KubeProxyConfiguration` with `--proxy-mode`, `KubeletConfiguration` with
+`--swap-enabled`) is merged into that document: its top-level fields replace
+the generated ones (a nested block such as `networking:` is replaced as a
+whole). Documents of other kinds are added as they are.
 
 Add API server SANs:
 

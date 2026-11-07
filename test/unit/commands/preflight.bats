@@ -154,31 +154,6 @@ _case_parse_preflight_strict() {
     )
 }
 
-# ============================================================
-# Test: preflight new check functions defined
-# ============================================================
-_case_preflight_new_checks_defined() {
-    echo "=== Test: preflight new check functions defined ==="
-    (
-        load_modules
-        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
-        _require_value() { :; }
-        _preflight_record_pass() { :; }; _preflight_record_fail() { :; }; _preflight_record_warn() { :; }
-
-        local has_selinux="false"
-        type _preflight_check_selinux >/dev/null 2>&1 && has_selinux="true"
-        _assert_eq "_preflight_check_selinux defined" "true" "$has_selinux"
-
-        local has_apparmor="false"
-        type _preflight_check_apparmor >/dev/null 2>&1 && has_apparmor="true"
-        _assert_eq "_preflight_check_apparmor defined" "true" "$has_apparmor"
-
-        local has_unattended="false"
-        type _preflight_check_unattended_upgrades >/dev/null 2>&1 && has_unattended="true"
-        _assert_eq "_preflight_check_unattended_upgrades defined" "true" "$has_unattended"
-    )
-}
-
 @test "PREFLIGHT_* variable defaults" {
     _case_preflight_variables_defaults
 }
@@ -217,10 +192,6 @@ _case_preflight_new_checks_defined() {
 
 @test "parse preflight --preflight-strict" {
     _case_parse_preflight_strict
-}
-
-@test "preflight new check functions defined" {
-    _case_preflight_new_checks_defined
 }
 
 @test "SELinux Enforcing is reported as info, not as a warning" {

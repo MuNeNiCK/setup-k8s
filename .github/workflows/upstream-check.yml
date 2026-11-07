@@ -1,0 +1,35 @@
+name: Upstream Check
+
+# Weekly check for upstream changes that need action: new Kubernetes minors
+# and prereleases, end of life of tested Kubernetes minors and
+# distributions, outdated component defaults, and new distribution releases
+# in the image catalog. One issue per finding (label: upstream), updated
+# while reported and closed when resolved. See scripts/check-upstream.sh.
+
+on:
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: develop
+
+      - name: Find upstream changes
+        run: |
+          sh scripts/check-upstream.sh findings > summary.txt
+          cat summary.txt
+          { echo "### Upstream check"; echo; sed 's/^/- /' summary.txt; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Update issues
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: sh scripts/upstream-issues.sh findings

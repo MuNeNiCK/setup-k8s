@@ -103,16 +103,18 @@ _finalize_containerd_setup() {
 _start_crio_with_diagnostics() {
     _service_reload
     _service_enable crio
-    _service_start crio || {
+    # Restart (not start) so that a running CRI-O loads the new configuration
+    if ! _service_restart crio || ! _service_is_active crio; then
         log_error "Failed to start CRI-O service"
         case "$(_detect_init_system)" in
             systemd)
                 systemctl status crio --no-pager 2>/dev/null || true
                 journalctl -u crio -n 100 --no-pager 2>/dev/null || true
                 ;;
+            openrc) rc-service crio status 2>/dev/null || true ;;
         esac
         return 1
-    }
+    fi
 }
 
 # Write a CRI-O drop-in config with cgroup_manager and pause_image.
@@ -131,6 +133,6 @@ EOF
 
 # Finalize CRI-O setup: start service with diagnostics and configure crictl.
 _finalize_crio_setup() {
-    _start_crio_with_diagnostics
+    _start_crio_with_diagnostics || return 1
     configure_crictl
 }

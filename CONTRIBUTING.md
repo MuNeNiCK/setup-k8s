@@ -139,8 +139,26 @@ When a change affects a specific distribution family or subcommand, run the
 matching scenario on that distribution.
 
 On GitHub, pull requests run ShellCheck, actionlint, the unit tests, and an
-Ubuntu 24.04 smoke test. The full VM matrices run after merging into
-`develop` (and again for `main`); see [test/README.md](test/README.md).
+Ubuntu 24.04 smoke test. These four are required to merge into `main` and
+`develop` (enable auto-merge on the pull request to merge once they pass).
+The full VM matrices run after merging into `develop` (and again for `main`);
+see [test/README.md](test/README.md).
+
+Dependabot proposes GitHub Actions updates against `develop`. A weekly
+workflow (`.github/workflows/upstream-check.yml`) opens an issue labeled
+`upstream` for each upstream change that needs action, and closes it once the
+change is handled:
+
+- a new Kubernetes minor (newer than `test/matrices/kubernetes-minors.txt`)
+  or a prerelease of the next minor, with the availability of the
+  pkgs.k8s.io, CRI-O, and cri-tools releases for it
+- a tested Kubernetes minor or distribution within 60 days of its end of life
+- a component default in `lib/core/defaults.sh` with a newer release
+  (patch, minor, or major), and a newer containerd minor
+- a newer release of a tested distribution in the image catalog, or a test
+  image missing from it
+
+Run `sh scripts/check-upstream.sh` to see the current findings.
 
 ### Documentation
 

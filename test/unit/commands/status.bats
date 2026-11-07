@@ -93,3 +93,71 @@ _load_status_ssh_test_modules() {
 @test "status --help exits 0" {
     _case_status_help_exit
 }
+
+# --- exit status reflects the node's health ---
+
+_fake_node() {
+    _STATUS_K8S_DIR="$BATS_TEST_TMPDIR/kubernetes"
+    mkdir -p "$_STATUS_K8S_DIR/manifests"
+    UP="${UP:-kubelet containerd}"
+    _service_is_active() { case " $UP " in *" $1 "*) return 0 ;; esac; return 1; }
+    for b in kubeadm kubelet; do fake_cmd "$b" 0 "v1.37.2"; done
+    fake_cmd kubectl "${API_RC:-0}" ""
+    unset KUBECONFIG
+}
+
+@test "status exits 2 when Kubernetes is not set up" {
+    load_modules; quiet_logs
+    _STATUS_K8S_DIR="$BATS_TEST_TMPDIR/none"
+    command() { if [ "$1" = -v ] && [ "$2" = kubeadm ]; then return 1; fi; builtin command "$@"; }
+    run status_local
+    [ "$status" -eq 2 ]
+}
+
+@test "status exits 0 for a healthy control plane" {
+    load_modules; quiet_logs; _fake_node
+    touch "$_STATUS_K8S_DIR/manifests/kube-apiserver.yaml" "$_STATUS_K8S_DIR/admin.conf"
+    run status_local
+    [ "$status" -eq 0 ]
+}
+
+@test "status exits 1 when kubelet or the runtime is stopped" {
+    load_modules; quiet_logs
+    UP="containerd" _fake_node
+    touch "$_STATUS_K8S_DIR/kubelet.conf"
+    run status_local
+    [ "$status" -eq 1 ]
+    UP="kubelet" _fake_node
+    run status_local
+    [ "$status" -eq 1 ]
+}
+
+@test "status exits 1 when the API server does not answer" {
+    load_modules; quiet_logs
+    API_RC=1 _fake_node
+    touch "$_STATUS_K8S_DIR/manifests/kube-apiserver.yaml" "$_STATUS_K8S_DIR/admin.conf"
+    run status_local
+    [ "$status" -eq 1 ]
+}
+
+@test "status on a worker without a kubeconfig checks the services only" {
+    load_modules; quiet_logs; _fake_node
+    touch "$_STATUS_K8S_DIR/kubelet.conf"
+    run status_local
+    [ "$status" -eq 0 ]
+    if fake_calls | grep -q '^kubectl --kubeconfig'; then return 1; fi
+}
+
+@test "status --output wide reads CIDRs from the manifests" {
+    load_modules; _fake_node
+    touch "$_STATUS_K8S_DIR/admin.conf"
+    printf '    - --cluster-cidr=10.244.0.0/16\n' > "$_STATUS_K8S_DIR/manifests/kube-controller-manager.yaml"
+    printf '    - --service-cluster-ip-range=10.96.0.0/12\n' > "$_STATUS_K8S_DIR/manifests/kube-apiserver.yaml"
+    _find_etcd_container() { echo cid; }
+    _etcdctl_exec() { echo "127.0.0.1:2379 is healthy"; }
+    STATUS_OUTPUT_FORMAT=wide
+    run status_local
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Pod CIDR: 10.244.0.0/16"* ]]
+    [[ "$output" == *"Service CIDR: 10.96.0.0/12"* ]]
+}

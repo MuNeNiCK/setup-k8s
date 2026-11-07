@@ -195,8 +195,6 @@ run_upgrade_test() {
     log_info "=== Verification ==="
 
     local all_pass=true
-    local target_minor
-    target_minor=$(echo "$TO_VERSION" | cut -d. -f1,2)
 
     # Check 1: deploy exit code
     if [ "$deploy_exit_code" -eq 0 ]; then
@@ -214,33 +212,44 @@ run_upgrade_test() {
         all_pass=false
     fi
 
-    # Check 3: CP kubeadm version contains target
+    # Check 3: CP kubeadm version is the target
     local cp_kubeadm_ver
     cp_kubeadm_ver=$(vm_ssh_root "$_CP_SSH_PORT" "kubeadm version -o short" 2>/dev/null | tr -d '[:space:]') || cp_kubeadm_ver="unknown"
-    if echo "$cp_kubeadm_ver" | grep -q "v${target_minor}"; then
-        log_success "CHECK 3: CP kubeadm version = $cp_kubeadm_ver (contains v${target_minor})"
+    if [ "${cp_kubeadm_ver#Kubernetes}" = "v${TO_VERSION}" ]; then
+        log_success "CHECK 3: CP kubeadm version = ${cp_kubeadm_ver}"
     else
-        log_error "CHECK 3: CP kubeadm version = $cp_kubeadm_ver (expected v${target_minor}.*)"
+        log_error "CHECK 3: CP kubeadm version = ${cp_kubeadm_ver} (expected v${TO_VERSION})"
         all_pass=false
     fi
 
-    # Check 4: CP kubelet version contains target
+    # Check 4: CP kubelet version is the target
     local cp_kubelet_ver
     cp_kubelet_ver=$(vm_ssh_root "$_CP_SSH_PORT" "kubelet --version" 2>/dev/null | tr -d '[:space:]') || cp_kubelet_ver="unknown"
-    if echo "$cp_kubelet_ver" | grep -q "v${target_minor}"; then
-        log_success "CHECK 4: CP kubelet version = $cp_kubelet_ver (contains v${target_minor})"
+    if [ "${cp_kubelet_ver#Kubernetes}" = "v${TO_VERSION}" ]; then
+        log_success "CHECK 4: CP kubelet version = ${cp_kubelet_ver}"
     else
-        log_error "CHECK 4: CP kubelet version = $cp_kubelet_ver (expected v${target_minor}.*)"
+        log_error "CHECK 4: CP kubelet version = ${cp_kubelet_ver} (expected v${TO_VERSION})"
         all_pass=false
     fi
 
-    # Check 5: Worker kubelet version contains target
+    # Check 5: Worker kubelet version is the target
     local worker_kubelet_ver
     worker_kubelet_ver=$(vm_ssh_root "$_WORKER_SSH_PORT" "kubelet --version" 2>/dev/null | tr -d '[:space:]') || worker_kubelet_ver="unknown"
-    if echo "$worker_kubelet_ver" | grep -q "v${target_minor}"; then
-        log_success "CHECK 5: Worker kubelet version = $worker_kubelet_ver (contains v${target_minor})"
+    if [ "${worker_kubelet_ver#Kubernetes}" = "v${TO_VERSION}" ]; then
+        log_success "CHECK 5: Worker kubelet version = ${worker_kubelet_ver}"
     else
-        log_error "CHECK 5: Worker kubelet version = $worker_kubelet_ver (expected v${target_minor}.*)"
+        log_error "CHECK 5: Worker kubelet version = ${worker_kubelet_ver} (expected v${TO_VERSION})"
+        all_pass=false
+    fi
+
+    # Check 5b: the control plane (API server) runs the target version
+    local server_ver
+    server_ver=$(vm_ssh_root "$_CP_SSH_PORT" "kubectl --kubeconfig=/etc/kubernetes/admin.conf version -o json" 2>/dev/null \
+        | awk -F'"' '/"serverVersion"/ {s = 1} s && /"gitVersion"/ {print $4; exit}')
+    if [ "$server_ver" = "v${TO_VERSION}" ]; then
+        log_success "CHECK 5b: API server version = ${server_ver}"
+    else
+        log_error "CHECK 5b: API server version = '${server_ver}' (expected v${TO_VERSION})"
         all_pass=false
     fi
 

@@ -7,68 +7,6 @@ setup() {
 }
 
 # ============================================================
-# Test: kernel version comparison logic
-# ============================================================
-_case_kernel_version_comparison() {
-    echo "=== Test: kernel version comparison ==="
-    # Simulate the fixed comparison from networking.sh
-    _check_kernel() {
-        local major="$1" minor="$2"
-        if [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 13 ]; }; then
-            echo "too_old"
-        elif [ "$major" -lt 4 ] || { [ "$major" -eq 4 ] && [ "$minor" -lt 14 ]; }; then
-            echo "limited"
-        else
-            echo "ok"
-        fi
-    }
-    _assert_eq "kernel 2.6 too old" "too_old" "$(_check_kernel 2 6)"
-    _assert_eq "kernel 3.10 too old" "too_old" "$(_check_kernel 3 10)"
-    _assert_eq "kernel 3.12 too old" "too_old" "$(_check_kernel 3 12)"
-    _assert_eq "kernel 3.13 limited" "limited" "$(_check_kernel 3 13)"
-    _assert_eq "kernel 4.0 limited" "limited" "$(_check_kernel 4 0)"
-    _assert_eq "kernel 4.13 limited" "limited" "$(_check_kernel 4 13)"
-    _assert_eq "kernel 4.14 ok" "ok" "$(_check_kernel 4 14)"
-    _assert_eq "kernel 5.15 ok" "ok" "$(_check_kernel 5 15)"
-    _assert_eq "kernel 6.1 ok" "ok" "$(_check_kernel 6 1)"
-}
-
-# ============================================================
-# Test: networking.sh core functions defined
-# ============================================================
-_case_networking_functions_defined() {
-    echo "=== Test: networking.sh core functions defined ==="
-    (
-        load_modules
-        log_error() { :; }; log_warn() { :; }; log_info() { :; }; log_debug() { :; }
-
-        local has_check_ipvs="false"
-        type check_ipvs_availability >/dev/null 2>&1 && has_check_ipvs="true"
-        _assert_eq "check_ipvs_availability defined" "true" "$has_check_ipvs"
-
-        local has_check_nftables="false"
-        type check_nftables_availability >/dev/null 2>&1 && has_check_nftables="true"
-        _assert_eq "check_nftables_availability defined" "true" "$has_check_nftables"
-
-        local has_configure="false"
-        type configure_network_settings >/dev/null 2>&1 && has_configure="true"
-        _assert_eq "configure_network_settings defined" "true" "$has_configure"
-
-        local has_enable="false"
-        type enable_kernel_modules >/dev/null 2>&1 && has_enable="true"
-        _assert_eq "enable_kernel_modules defined" "true" "$has_enable"
-
-        local has_cleanup="false"
-        type cleanup_cni >/dev/null 2>&1 && has_cleanup="true"
-        _assert_eq "cleanup_cni defined" "true" "$has_cleanup"
-
-        local has_reset="false"
-        type reset_iptables >/dev/null 2>&1 && has_reset="true"
-        _assert_eq "reset_iptables defined" "true" "$has_reset"
-    )
-}
-
-# ============================================================
 # Test: network options defaults
 # ============================================================
 _case_network_options_defaults() {
@@ -279,20 +217,12 @@ _case_install_proxy_mode_packages_logic() {
     [ -z "$(fake_calls)" ]
 }
 
-@test "kernel version comparison" {
-    _case_kernel_version_comparison
-}
-
 @test "network options defaults" {
     _case_network_options_defaults
 }
 
 @test "parse network options" {
     _case_parse_network_options
-}
-
-@test "networking.sh core functions defined" {
-    _case_networking_functions_defined
 }
 
 @test "enable_kernel_modules iptables mode module list" {
@@ -313,4 +243,60 @@ _case_install_proxy_mode_packages_logic() {
 
 @test "install_proxy_mode_packages logic" {
     _case_install_proxy_mode_packages_logic
+}
+
+# --- host preparation result ---
+
+_prepare_fixture() {
+    load_modules; quiet_logs
+    _detect_init_system() { echo "${INIT:-systemd}"; }
+    _CGROUP_ROOT="$BATS_TEST_TMPDIR/cgroup"
+    _MOUNTINFO="$BATS_TEST_TMPDIR/mountinfo"
+    mkdir -p "$_CGROUP_ROOT"
+    touch "$_CGROUP_ROOT/cgroup.controllers"
+    echo '22 1 252:0 / / rw,relatime shared:1 - ext4 /dev/vda1 rw' > "$_MOUNTINFO"
+    fake_cmd mount
+    fake_cmd rc-update
+    fake_cmd rc-service
+    [ -s /etc/machine-id ] || skip "no /etc/machine-id on the test host"
+}
+
+@test "host preparation succeeds with cgroups and a shared root mount" {
+    _prepare_fixture
+    system_prepare
+}
+
+@test "host preparation fails when the root mount stays private" {
+    _prepare_fixture
+    echo '22 1 252:0 / / rw,relatime - ext4 /dev/vda1 rw' > "$_MOUNTINFO"
+    INIT=openrc _K8S_SHARED_MOUNT_SCRIPT="$BATS_TEST_TMPDIR/local.d/k8s.start"
+    run system_prepare
+    [ "$status" -ne 0 ]
+}
+
+@test "host preparation fails without usable cgroups" {
+    _prepare_fixture
+    rm -f "$_CGROUP_ROOT/cgroup.controllers"
+    # pretend v1 already mounted (so nothing is mounted) but without memory
+    mkdir -p "$_CGROUP_ROOT/cpu"
+    run system_prepare
+    [ "$status" -ne 0 ]
+}
+
+@test "CRI-O is restarted and must be active afterwards" {
+    load_modules; quiet_logs
+    _service_reload() { :; }
+    _service_enable() { :; }
+    _detect_init_system() { echo systemd; }
+    CALLS="$BATS_TEST_TMPDIR/calls"
+    _service_restart() { echo "restart $1" >> "$CALLS"; }
+    _service_start() { echo "start $1" >> "$CALLS"; }
+    _service_is_active() { [ "${CRIO_UP:-true}" = true ]; }
+    fake_cmd systemctl
+    fake_cmd journalctl
+    _start_crio_with_diagnostics
+    grep -qx 'restart crio' "$CALLS"
+    CRIO_UP=false
+    run _start_crio_with_diagnostics
+    [ "$status" -ne 0 ]
 }

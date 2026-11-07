@@ -65,5 +65,8 @@ _pkg_zypper_repo_add() {
 }
 
 _pkg_zypper_repo_remove() {
-    zypper --non-interactive removerepo "$1" >/dev/null 2>&1 || true
+    local id
+    for id in "$@"; do
+        zypper --non-interactive removerepo "$id" >/dev/null 2>&1 || true
+    done
 }
