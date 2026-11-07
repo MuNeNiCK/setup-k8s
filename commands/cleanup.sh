@@ -326,8 +326,10 @@ _run_cleanup() {
     log_info "Starting Kubernetes cleanup..."
     check_docker_warning
     stop_kubernetes_services || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
-    stop_cri_services || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    # kubeadm reset removes the pod containers through the runtime, so the
+    # runtime must still run (CRI-O containers outlive a stopped CRI-O)
     reset_kubernetes_cluster || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
+    stop_cri_services || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
     remove_kubernetes_configs || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
     restore_fstab_swap || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))
     restore_zram_swap || CLEANUP_ERRORS=$((CLEANUP_ERRORS + 1))

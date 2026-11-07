@@ -72,3 +72,19 @@ FAKE
     [ "$(cat "$CALLS")" = 'kubeadm reset -f
 release value:"10.0.0.100"' ]
 }
+
+@test "kubeadm reset runs while the container runtime still runs" {
+    ORDER="$BATS_TEST_TMPDIR/order"
+    for fn in stop_kubernetes_services stop_cri_services reset_kubernetes_cluster remove_kubernetes_configs \
+              restore_fstab_swap restore_zram_swap cleanup_cni_conditionally cleanup_network_configs cleanup_kube_configs \
+              cleanup_crictl_config reset_iptables reset_containerd_config _service_reload cleanup_installed_components \
+              cleanup_kubernetes_completions _require_root parse_cleanup_args _ensure_distro_detected confirm_cleanup \
+              check_docker_warning _audit_start _audit_done; do
+        eval "$fn() { echo $fn >> \"\$ORDER\"; }"
+    done
+    DRY_RUN=false
+    run _run_cleanup
+    [ "$status" -eq 0 ]
+    [ "$(grep -n -x reset_kubernetes_cluster "$ORDER" | cut -d: -f1)" -lt "$(grep -n -x stop_cri_services "$ORDER" | cut -d: -f1)" ]
+    [ "$(grep -n -x stop_kubernetes_services "$ORDER" | cut -d: -f1)" -lt "$(grep -n -x reset_kubernetes_cluster "$ORDER" | cut -d: -f1)" ]
+}
