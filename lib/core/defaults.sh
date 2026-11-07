@@ -19,7 +19,7 @@ COLLECT_DIAGNOSTICS="${COLLECT_DIAGNOSTICS:-false}"
 # Default values for global variables
 K8S_VERSION=""            # MAJOR.MINOR
 K8S_PATCH_VERSION=""      # MAJOR.MINOR.PATCH when a patch version was requested
-K8S_PRERELEASE=false      # install from prerelease channels
+K8S_PRERELEASE=false      # prerelease channels (set from the requested version)
 KUBEADM_IMAGE_REPOSITORY=""  # kubeadm imageRepository (empty = registry.k8s.io)
 KUBEADM_PATCHES_DIR=""    # kubeadm patches directory
 ACTION="${ACTION:-}"  # init or join (set by subcommand)

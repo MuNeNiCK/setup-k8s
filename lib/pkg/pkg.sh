@@ -44,6 +44,10 @@ pkg_repo_add()           { _pkg_call repo_add "$@"; }
 pkg_repo_remove()        { _pkg_call repo_remove "$@"; }
 pkg_base_dependencies()  { _pkg_call base_deps; }
 
+# Package version of a Kubernetes version: prereleases use "~" in deb and
+# rpm versions (1.38.0-beta.0 is packaged as 1.38.0~beta.0)
+_pkg_version_native() { echo "$1" | sed 's/-/~/'; }
+
 # Newest MAJOR.MINOR.PATCH of <minor> among the versions on stdin (one per
 # line, release suffix removed). Usage: _pkg_newest_patch <MAJOR.MINOR>
 _pkg_newest_patch() {

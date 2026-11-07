@@ -16,9 +16,9 @@ Options (init and join):
   --proxy-mode MODE         kube-proxy mode: auto, iptables, ipvs, or nftables (default: auto =
                             nftables on Kubernetes 1.33+ with kernel 5.13+, otherwise iptables)
   --kubernetes-version VER  Kubernetes version: MAJOR.MINOR (latest patch) or MAJOR.MINOR.PATCH
-                            (pinned), e.g. 1.37 or 1.37.2 (default: latest stable)
-  --prerelease              Install the next release from the prerelease channels
-                            (pkgs.k8s.io / isv:cri-o prerelease; default version: latest)
+                            (pinned), e.g. 1.37 or 1.37.2 (default: latest stable). A minor
+                            not released yet, or a prerelease such as 1.38.0-beta.0, installs
+                            from the prerelease channels (for testing)
   --image-repository REPO   Pull control-plane images from REPO instead of registry.k8s.io
   --patches DIR             Apply kubeadm patches from DIR (as kubeadm --patches) on init and join
   --kubelet-node-ip IP      Set the kubelet node IP
@@ -70,8 +70,8 @@ parse_setup_args() {
                 ;;
             --kubernetes-version)
                 _require_value $# "$1" "${2:-}"
-                # MAJOR.MINOR (latest patch) or MAJOR.MINOR.PATCH (pinned)
-                if ! echo "$2" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+                # MAJOR.MINOR (latest patch) or MAJOR.MINOR.PATCH[-pre] (pinned)
+                if ! echo "$2" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?)?$'; then
                     log_error "--kubernetes-version must be MAJOR.MINOR or MAJOR.MINOR.PATCH (e.g., 1.37 or 1.37.2), got '$2'"
                     exit 1
                 fi
@@ -81,11 +81,6 @@ parse_setup_args() {
                     *.*.*) K8S_PATCH_VERSION="$2" ;;
                 esac
                 shift 2
-                ;;
-            --prerelease)
-                # shellcheck disable=SC2034 # used by lib/components and lib/core/k8s_version.sh
-                K8S_PRERELEASE=true
-                shift
                 ;;
             --image-repository)
                 _require_value $# "$1" "${2:-}"

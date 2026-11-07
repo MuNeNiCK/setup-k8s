@@ -11,6 +11,14 @@
 
 # --- Local Upgrade ---
 
+# kubeadm refuses alpha/beta and release candidate targets without these
+_kubeadm_prerelease_upgrade_args() {
+    case "$1" in
+        *-rc.*) echo "--allow-release-candidate-upgrades" ;;
+        *-*)    echo "--allow-experimental-upgrades" ;;
+    esac
+}
+
 # Restart kubelet and wait until it stays active (a kubelet that cannot start
 # with the new version or configuration restarts in a loop).
 _upgrade_restart_kubelet() {
@@ -61,6 +69,7 @@ rollback_node_local() {
             return 1
         fi
     fi
+    k8s_select_channel "$(_k8s_minor_version "$target")" "$target" || return 1
     log_info "Rolling back Kubernetes packages from v${current:-unknown} to v${target}..."
     k8s_upgrade_kubeadm "$target" || return 1
     k8s_upgrade_node "$target" || return 1
@@ -86,6 +95,8 @@ upgrade_node_local() {
     K8S_VERSION="$minor_version"
 
     kubeadm_prepare_node_patches "$UPGRADE_TARGET_VERSION" || return 1
+    # A prerelease target comes from the prerelease channels
+    k8s_select_channel "$minor_version" "$UPGRADE_TARGET_VERSION" || return 1
     log_info "Upgrading node (role: $role) from v${current_version} to v${UPGRADE_TARGET_VERSION}..."
 
     # 1. Upgrade kubeadm package
@@ -107,7 +118,8 @@ upgrade_node_local() {
             _preflight_errors="${_preflight_errors}${_preflight_errors:+,}SystemVerification"
         fi
         # shellcheck disable=SC2046 # empty or "--patches DIR"
-        kubeadm upgrade apply "v${UPGRADE_TARGET_VERSION}" --yes ${_preflight_errors:+--ignore-preflight-errors=$_preflight_errors} $(_kubeadm_patches_args)
+        kubeadm upgrade apply "v${UPGRADE_TARGET_VERSION}" --yes ${_preflight_errors:+--ignore-preflight-errors=$_preflight_errors} \
+            $(_kubeadm_prerelease_upgrade_args "$UPGRADE_TARGET_VERSION") $(_kubeadm_patches_args)
     else
         log_info "Step 2: Running kubeadm upgrade node..."
         # On workers, the default kubelet kubeconfig may lack permissions to read
@@ -277,8 +289,8 @@ _parse_upgrade_common_arg() {
     case "$arg" in
         --kubernetes-version)
             _require_value "$argc" "$arg" "$next"
-            if ! echo "$next" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-                log_error "--kubernetes-version for upgrade must be MAJOR.MINOR.PATCH (e.g., 1.33.2)"
+            if ! echo "$next" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$'; then
+                log_error "--kubernetes-version for upgrade must be MAJOR.MINOR.PATCH (e.g., 1.33.2, or a prerelease such as 1.38.0-beta.0)"
                 exit 1
             fi
             UPGRADE_TARGET_VERSION="$next"

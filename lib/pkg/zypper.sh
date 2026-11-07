@@ -29,7 +29,7 @@ _pkg_zypper_install() {
             set -- "$@" "$name"
         else
             case "${spec#*=}" in
-                *.*.*) set -- "$@" "${name}=${spec#*=}" ;;
+                *.*.*) set -- "$@" "${name}=$(_pkg_version_native "${spec#*=}")" ;;
                 *)     set -- "$@" "$name" ;;  # repositories are per minor version
             esac
         fi

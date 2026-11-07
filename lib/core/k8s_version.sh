@@ -36,6 +36,30 @@ user-namespaces=1.36"
 # Fallback pause image tag when kubeadm cannot report it.
 _K8S_PAUSE_FALLBACK="3.10.2"
 
+# A prerelease version (1.38.0-alpha.1, -beta.0, -rc.1)
+k8s_is_prerelease() { case "$1" in *-*) return 0 ;; esac; return 1; }
+
+# Use the prerelease channels (pkgs.k8s.io, isv:cri-o, dl.k8s.io latest-*)
+# when the requested version is a prerelease or its minor has no stable
+# release yet. Usage: k8s_select_channel <MAJOR.MINOR> [exact_version]
+k8s_select_channel() {
+    local minor="$1" exact="${2:-}" stable
+    K8S_PRERELEASE=false
+    if [ -n "$exact" ]; then
+        k8s_is_prerelease "$exact" && K8S_PRERELEASE=true
+    else
+        stable=$(curl -fsSL --retry 3 --retry-delay 2 https://dl.k8s.io/release/stable.txt) || {
+            log_error "Failed to fetch the stable Kubernetes version from dl.k8s.io"
+            return 1
+        }
+        k8s_version_ge "$minor" "$(_k8s_minor_version "$stable")" && [ "$minor" != "$(_k8s_minor_version "$stable")" ] \
+            && K8S_PRERELEASE=true
+    fi
+    if [ "$K8S_PRERELEASE" = true ]; then
+        log_warn "Kubernetes ${exact:-$minor} is not released yet: installing from the prerelease channels (for testing)"
+    fi
+}
+
 # Extract MAJOR.MINOR from a version string (e.g., "1.32.5" -> "1.32").
 _k8s_minor_version() { echo "$1" | sed 's/^v//' | cut -d. -f1,2; }
 
@@ -111,18 +135,11 @@ determine_k8s_version() {
             log_info "Using the Kubernetes minor version provided by ${DISTRO_NAME:-the distribution}: ${K8S_VERSION}"
         fi
     fi
-    if [ "${K8S_PRERELEASE:-false}" = true ] && [ "${DISTRO_K8S_SOURCE:-}" = distro ]; then
-        log_error "--prerelease is not available when Kubernetes comes from ${DISTRO_NAME:-distribution} packages"
-        log_error "  Use --distro generic to install prerelease binaries"
-        return 1
-    fi
-    if [ -n "${K8S_PATCH_VERSION:-}" ] && [ "${K8S_PRERELEASE:-false}" = true ]; then
-        log_error "--prerelease selects the latest prerelease of a minor version; use --kubernetes-version MAJOR.MINOR"
-        return 1
+    if [ -n "$K8S_VERSION" ] && [ "${DISTRO_K8S_SOURCE:-}" != distro ]; then
+        k8s_select_channel "$K8S_VERSION" "${K8S_PATCH_VERSION:-}" || return 1
     fi
     if [ -z "$K8S_VERSION" ]; then
         local marker=stable
-        [ "${K8S_PRERELEASE:-false}" = true ] && marker=latest
         log_info "Determining the latest ${marker} Kubernetes minor version..."
         local STABLE_VER
         if ! STABLE_VER=$(curl -fsSL --retry 3 --retry-delay 2 "https://dl.k8s.io/release/${marker}.txt"); then

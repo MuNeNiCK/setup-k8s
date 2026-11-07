@@ -41,8 +41,10 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 - `--kubernetes-version` accepts an exact patch version (`1.37.2`) for
   `init`, `join`, and `deploy`; the control plane is pinned to the installed
   kubeadm version.
-- `--prerelease` installs the next Kubernetes release from the prerelease
-  channels of pkgs.k8s.io and isv:cri-o.
+- Prerelease Kubernetes versions: a minor without a stable release yet, or
+  a prerelease version (`1.38.0-beta.0`), installs from the prerelease
+  channels of pkgs.k8s.io and isv:cri-o, with a warning; `upgrade` accepts
+  prerelease targets.
 - `--image-repository REPO` pulls control-plane and pause images from a
   mirror.
 - `--patches DIR` passes kubeadm patches to `init`, `join`, and
@@ -95,8 +97,8 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
   with sha256 verification (`HELM_VERSION`, `KUSTOMIZE_VERSION`) instead of
   running upstream install scripts (Kustomize's from the `master` branch).
 - runc downloads are verified against the published checksums.
-- `--distro generic` (and `--prerelease`, whose channel has no cri-tools
-  package) installs crictl from the cri-tools GitHub release.
+- `--distro generic` (and prerelease versions, whose channel has no
+  cri-tools package) installs crictl from the cri-tools GitHub release.
 - The script is distributed as a GitHub release asset
   (`releases/latest/download/setup-k8s.sh`) instead of being fetched from
   `raw/main`. `curl | sh` downloads one file; modules are no longer downloaded

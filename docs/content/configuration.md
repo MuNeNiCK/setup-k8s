@@ -34,16 +34,22 @@ The control plane runs the same version as the installed kubeadm; kubeadm does n
 
 ### Prerelease versions
 
-`--prerelease` installs the next Kubernetes release (alpha, beta, or release candidate) from the prerelease channels of pkgs.k8s.io and `isv:cri-o`:
+A Kubernetes minor that has no stable release yet, or a prerelease version
+(alpha, beta, release candidate), is installed from the prerelease channels
+of pkgs.k8s.io and `isv:cri-o`, with a warning:
 
 ```bash
 curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
-  init --prerelease                         # latest prerelease
+  init --kubernetes-version 1.38              # latest prerelease of 1.38 while it is not released
 curl -fsSL https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh | sudo sh -s -- \
-  init --prerelease --kubernetes-version 1.38
+  init --kubernetes-version 1.38.0-beta.0     # this prerelease
 ```
 
-The prerelease channel has no cri-tools package, so crictl is installed from the cri-tools GitHub release. Prereleases are for testing only. `--prerelease` is not available on distributions that install Kubernetes from distribution packages (Alpine, Arch); use `--distro generic` there.
+`upgrade --kubernetes-version 1.38.0-beta.0` upgrades to a prerelease the same
+way. The prerelease channel has no cri-tools package, so crictl is installed
+from the cri-tools GitHub release. Prereleases are for testing only. They are
+not available on distributions that install Kubernetes from distribution
+packages (Alpine, Arch); use `--distro generic` there.
 
 ## Proxy mode
 
