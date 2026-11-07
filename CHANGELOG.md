@@ -19,9 +19,6 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
   set for the container runtime's image pulls; the cluster's own addresses
   and networks are always excluded. `test/scenarios/proxy.sh` verifies it
   with all other outbound connections blocked.
-- `test/scenarios/legacy-upgrade.sh` sets a node up with an earlier
-  setup-k8s version and manages it with the current one (upgrade, cleanup,
-  new init).
 - A weekly upstream check (`scripts/check-upstream.sh`) opens an issue for
   each upstream change that needs action: new Kubernetes minors and
   prereleases, end of life of tested Kubernetes minors and distributions,
@@ -177,12 +174,6 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
   NotReady nodes and Pending CoreDNS before a CNI plugin is installed are
   reported, not failures. `--resume` no longer joins workers again that
   already joined.
-- Nodes set up by earlier setup-k8s versions can be upgraded and cleaned up:
-  versionlock entries on RHEL-family distributions (which blocked upgrades
-  and new installs) are removed, Arch AUR `*-bin` packages are replaced by
-  the official packages, and cleanup removes repository and key files with
-  the earlier names (`docker-ce.repo`, `kubernetes-apt-keyring.gpg`,
-  `crio-apt-keyring.gpg`).
 - Swap came back after a reboot when it was enabled by a systemd swap unit
   that is not in `/etc/fstab` (for example a swap file unit), so kubelet did
   not start. All systemd swap units now get a drop-in that keeps them from

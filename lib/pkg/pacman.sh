@@ -48,8 +48,7 @@ _pkg_pacman_remove() {
     pacman -Rdd --noconfirm $installed
 }
 
-# Exact package name (pacman -Qi also matches packages that only provide it,
-# e.g. kubeadm-bin provides kubeadm)
+# Exact package name (pacman -Qi also matches packages that only provide it)
 _pkg_pacman_installed() {
     pacman -Qq 2>/dev/null | grep -qxF "$1"
 }

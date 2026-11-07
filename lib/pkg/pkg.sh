@@ -22,7 +22,7 @@
 #                                       Add a signed repository. For deb, SUITE
 #                                       defaults to "/" (flat repository). For rpm,
 #                                       URL is the baseurl.
-#   pkg_repo_remove ID...               Remove repositories added with pkg_repo_add
+#   pkg_repo_remove ID                  Remove a repository added with pkg_repo_add
 #   pkg_base_dependencies               Print the native names of tools every node needs
 #   pkg_format                          Print deb, rpm, apk, or pacman
 

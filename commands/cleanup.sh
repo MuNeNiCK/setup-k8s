@@ -147,17 +147,13 @@ _cleanup_leftovers() {
     if command -v apt-mark >/dev/null 2>&1; then
         apt-mark showhold 2>/dev/null | grep -E '^(kube|cri-tools$|cri-o$)' | sed 's/^/hold /'
     fi
-    if command -v dnf >/dev/null 2>&1 && dnf versionlock list >/dev/null 2>&1; then
-        dnf versionlock list 2>/dev/null | grep -o -E '(kubeadm|kubelet|kubectl|cri-tools|cri-o)' | sort -u | sed 's/^/versionlock /'
-    fi
     if command -v zypper >/dev/null 2>&1; then
         zypper --non-interactive locks 2>/dev/null | grep -o -E '\b(kubeadm|kubelet|kubectl|cri-tools|cri-o)\b' | sort -u | sed 's/^/lock /'
     fi
     for file in apt/sources.list.d/kubernetes.list apt/sources.list.d/cri-o.list apt/sources.list.d/docker.list \
                 apt/keyrings/kubernetes.gpg apt/keyrings/cri-o.gpg apt/keyrings/docker.gpg \
-                apt/keyrings/kubernetes-apt-keyring.gpg apt/keyrings/crio-apt-keyring.gpg \
                 yum.repos.d/kubernetes.repo yum.repos.d/cri-o.repo yum.repos.d/docker.repo \
-                yum.repos.d/docker-ce.repo yum.repos.d/containers.repo \
+                yum.repos.d/containers.repo \
                 zypp/repos.d/kubernetes.repo zypp/repos.d/cri-o.repo zypp/repos.d/containers.repo \
                 default/kubelet sysconfig/kubelet systemd/system/kubelet.service init.d/kubelet \
                 systemd/system/containerd.service.d/10-setup-k8s-proxy.conf systemd/system/crio.service.d/10-setup-k8s-proxy.conf; do

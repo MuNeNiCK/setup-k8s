@@ -379,7 +379,7 @@ PATCH"
         services_stopped=true config_cleaned=true packages_removed=true
         if grep -q '^service:' <<<"$leftovers"; then services_stopped=false; fi
         if grep -q -E '^(file|directory):' <<<"$leftovers"; then config_cleaned=false; fi
-        if grep -q -E '^(binary|package|hold|lock|versionlock):' <<<"$leftovers"; then packages_removed=false; fi
+        if grep -q -E '^(binary|package|hold|lock|selinux-module):' <<<"$leftovers"; then packages_removed=false; fi
         if [ -n "$leftovers" ]; then
             log_error "CHECK: left behind after cleanup: $(echo "$leftovers" | tr '\n' ' ')"
         else

@@ -16,6 +16,7 @@ esac
 SUDO_USER="${SUDO_USER:-}"
 
 SETUP_K8S_VERSION="${SETUP_K8S_VERSION:-dev}"
+# shellcheck disable=SC2034 # used by lib/remote/bundle.sh
 SETUP_K8S_RELEASE_URL="https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh"
 
 # Path of the running bundle file, used to transfer the script to remote
@@ -29,13 +30,7 @@ if [ "${BUNDLED_MODE:-false}" = true ]; then
 else
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
     if [ ! -f "$SCRIPT_DIR/lib/core/bootstrap.sh" ]; then
-        # Typically the source file was downloaded on its own, e.g. with the
-        # earlier raw/main URL. It needs the rest of the repository.
-        echo "Error: this copy of setup-k8s.sh needs the lib/ and commands/ directories of the repository." >&2
-        echo "setup-k8s is distributed as a single file; use the release asset instead:" >&2
-        echo "  curl -fsSL $SETUP_K8S_RELEASE_URL | sudo sh -s -- <subcommand> [options]" >&2
-        echo "or download it once and run it from the file:" >&2
-        echo "  curl -fsSLO $SETUP_K8S_RELEASE_URL && sudo sh setup-k8s.sh <subcommand> [options]" >&2
+        echo "Error: lib/ not found next to $0" >&2
         exit 1
     fi
     # shellcheck source=lib/core/bootstrap.sh

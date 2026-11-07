@@ -44,7 +44,6 @@ Subcommand scenarios:
 ./scenarios/cert-renew.sh --distro ubuntu-24.04-cloud-amd64
 ./scenarios/swap-reboot.sh --distro ubuntu-24.04-cloud-amd64   # swap stays off across reboots
 ./scenarios/options.sh --distro ubuntu-24.04-cloud-amd64       # patch version, image repository, kubeadm patches, Helm, Kustomize
-./scenarios/legacy-upgrade.sh --distro rocky-9-cloud-amd64    # node set up by an earlier setup-k8s: upgrade, cleanup, init
 ./scenarios/proxy.sh --distro ubuntu-24.04-cloud-amd64          # through an HTTP proxy, all other outbound HTTP(S) blocked
 ./scenarios/upgrade.sh --deploy-args "--cri crio"                # CRI-O follows the Kubernetes minor
 ./scenarios/upgrade.sh --distro ubuntu-24.04-cloud-amd64
@@ -61,7 +60,7 @@ Subcommand scenarios:
 | `ShellCheck & Unit Tests` | pull requests and pushes to `main` and `develop` | ShellCheck, actionlint, and the bats unit tests. |
 | `Setup Option Tests` | every pull request (Ubuntu 24.04 smoke test); pull requests to `main` and manual runs (full matrix) | The setup/remove lifecycle across the setup option matrix (`matrices/kubernetes-minors.txt`). |
 | `Setup Distro Tests` | pull requests to `main`; manual runs | The setup/remove lifecycle across `matrices/distro-cloud-images.txt`. |
-| `Scenario Tests` | pull requests to `main`; manual runs | Join, preflight, deploy/remove, backup/restore, cert renew, upgrade, swap persistence, init options, generic, HA, and nodes set up by earlier versions. |
+| `Scenario Tests` | pull requests to `main`; manual runs | Join, preflight, deploy/remove, backup/restore, cert renew, upgrade, swap persistence, init options, generic, HA, proxy, and CRI-O upgrade checks. |
 | `Upstream Check` | weekly; manual runs | Opens an issue per upstream change that needs action (`scripts/check-upstream.sh`). |
 | `docs` | pull requests and pushes to `main` that change `docs/` | Builds the site; deploys it from `main`. |
 | `Release` | `v*` tags | Builds and publishes the release asset. |

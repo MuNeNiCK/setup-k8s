@@ -51,21 +51,6 @@ _pkg_dnf_exclude_add() {
     fi
 }
 
-# Remove versionlock entries for the given packages. Earlier setup-k8s
-# versions pinned Kubernetes packages with the versionlock plugin; the entries
-# block installing any other version.
-_pkg_dnf_unlock() {
-    local bin name locked
-    bin=$(_pkg_dnf_bin)
-    locked=$("$bin" versionlock list 2>/dev/null) || return 0
-    for name in "$@"; do
-        if printf '%s\n' "$locked" | grep -qE "^(Package name: )?${name}(-[0-9]+:|-[0-9]|$| )"; then
-            log_info "Removing versionlock entry for ${name}..."
-            "$bin" versionlock delete "$name" >/dev/null 2>&1 || log_warn "Failed to remove versionlock entry for ${name}"
-        fi
-    done
-}
-
 # Newest patch of <minor> available for <name> (installed or not)
 _pkg_dnf_minor_version() {
     local bin opt=""
@@ -83,8 +68,6 @@ _pkg_dnf_install() {
     local spec name bin
     bin=$(_pkg_dnf_bin)
     _pkg_resolve_minor_specs _pkg_dnf_minor_version
-    # shellcheck disable=SC2046 # names are space-separated package names
-    _pkg_dnf_unlock $(_pkg_spec_names)
     set --
     for spec in $_PKG_SPECS; do
         name="${spec%%=*}"
@@ -138,8 +121,6 @@ _pkg_dnf_remove() {
     local installed bin
     installed=$(_pkg_filter_installed "$@")
     [ -z "$installed" ] && return 0
-    # shellcheck disable=SC2086 # names are space-separated package names
-    _pkg_dnf_unlock $installed
     bin=$(_pkg_dnf_bin)
     # shellcheck disable=SC2086
     "$bin" remove -y $installed || return 1
@@ -169,8 +150,5 @@ EOF
 }
 
 _pkg_dnf_repo_remove() {
-    local id
-    for id in "$@"; do
-        rm -f "${_DNF_REPOS_DIR}/${id}.repo"
-    done
+    rm -f "${_DNF_REPOS_DIR}/$1.repo"
 }

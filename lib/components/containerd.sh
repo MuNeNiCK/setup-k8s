@@ -138,8 +138,7 @@ containerd_install() {
 }
 
 containerd_cleanup() {
-    # docker-ce: repository file name of earlier setup-k8s versions (rpm)
-    pkg_repo_remove docker docker-ce 2>/dev/null || true
+    pkg_repo_remove docker 2>/dev/null || true
     pkg_repo_remove containers 2>/dev/null || true
     local bin had_binary=false
     [ -f "${_CONTAINERD_BIN_DIR}/containerd" ] && had_binary=true

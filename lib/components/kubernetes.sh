@@ -258,7 +258,6 @@ k8s_install() {
             ;;
         distro)
             _k8s_require_distro_version "$K8S_VERSION" || return 1
-            _k8s_remove_legacy_packages || return 1
             # shellcheck disable=SC2046 # space-separated package specs
             pkg_install --hold $(_k8s_distro_specs "${K8S_PATCH_VERSION:-$K8S_VERSION}") || return 1
             ;;
@@ -277,30 +276,6 @@ k8s_install() {
     _enable_and_start_kubelet
 }
 
-# Remove packages of earlier setup-k8s versions that the distribution
-# packages replace (they conflict with, or only provide, the same names; for
-# example kubeadm-bin replaces kubeadm). Without names, all of them.
-# Usage: _k8s_remove_legacy_packages [package...]
-_k8s_remove_legacy_packages() {
-    [ -n "${DISTRO_K8S_LEGACY_PKGS:-}" ] || return 0
-    local legacy name selected=""
-    for legacy in $DISTRO_K8S_LEGACY_PKGS; do
-        if [ $# -eq 0 ]; then
-            selected="${selected} ${legacy}"
-            continue
-        fi
-        for name in "$@"; do
-            case "$legacy" in "${name}"-*) selected="${selected} ${legacy}" ;; esac
-        done
-    done
-    # shellcheck disable=SC2086 # space-separated package names
-    selected=$(_pkg_filter_installed $selected)
-    [ -n "$selected" ] || return 0
-    log_info "Replacing packages installed by an earlier setup-k8s version:${selected:+ }${selected}"
-    # shellcheck disable=SC2086
-    pkg_remove $selected
-}
-
 k8s_upgrade_kubeadm() {
     local target="$1"
     log_info "Upgrading kubeadm to v${target}..."
@@ -310,7 +285,6 @@ k8s_upgrade_kubeadm() {
             pkg_install --hold --repo kubernetes "kubeadm=${target}"
             ;;
         distro)
-            _k8s_remove_legacy_packages kubeadm || return 1
             pkg_install --hold "kubeadm=${target}"
             ;;
         binary) _install_k8s_binary kubeadm "$target" ;;
@@ -323,7 +297,6 @@ k8s_upgrade_node() {
     case "$DISTRO_K8S_SOURCE" in
         pkgs)   pkg_install --hold --repo kubernetes "kubelet=${target}" "kubectl=${target}" cri-tools ;;
         distro)
-            _k8s_remove_legacy_packages kubelet kubectl || return 1
             pkg_install --hold "kubelet=${target}" "kubectl=${target}"
             ;;
         binary)
@@ -333,11 +306,11 @@ k8s_upgrade_node() {
     esac
 }
 
-# Distribution packages a "distro" install puts on the node (and earlier
-# setup-k8s versions did); cni-plugins is kept with --preserve-cni.
+# Distribution packages a "distro" install puts on the node; cni-plugins is
+# kept with --preserve-cni.
 k8s_distro_installed_pkgs() {
     local pkg out=""
-    for pkg in $_K8S_CORE_PKGS ${DISTRO_K8S_PKGS:-} kubelet-openrc ${DISTRO_K8S_LEGACY_PKGS:-}; do
+    for pkg in $_K8S_CORE_PKGS ${DISTRO_K8S_PKGS:-} kubelet-openrc; do
         [ "$pkg" = cni-plugins ] && [ "${PRESERVE_CNI:-false}" = true ] && continue
         case " $out " in *" $pkg "*) ;; *) out="${out}${out:+ }${pkg}" ;; esac
     done
@@ -350,8 +323,7 @@ k8s_remove() {
     case "$DISTRO_K8S_SOURCE" in
         pkgs)
             pkg_remove kubeadm kubectl kubelet kubernetes-cni cri-tools || rc=1
-            # kubernetes-apt-keyring: key file name of earlier setup-k8s versions
-            pkg_repo_remove kubernetes kubernetes-apt-keyring
+            pkg_repo_remove kubernetes
             ;;
         distro)
             # shellcheck disable=SC2046 # space-separated package names

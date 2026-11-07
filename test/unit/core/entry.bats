@@ -80,13 +80,6 @@ setup() {
     [[ "$output" == *"Deploy Dry-Run Plan"* ]]
 }
 
-@test "entry script without lib/ points to the release asset" {
-    cp "$PROJECT_ROOT/setup-k8s.sh" "$BATS_TEST_TMPDIR/lonely.sh"
-    run sh "$BATS_TEST_TMPDIR/lonely.sh" init
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"releases/latest/download/setup-k8s.sh"* ]]
-}
-
 @test "bundle transfers itself: generate_deploy_bundle copies the running file" {
     load_modules
     # shellcheck disable=SC2034 # read by generate_deploy_bundle
@@ -97,10 +90,9 @@ setup() {
     cmp "$BUNDLE" "$BATS_TEST_TMPDIR/copy.sh"
 }
 
-@test "the source entry point alone (earlier raw/main URL) points to the release asset" {
+@test "the source entry point needs lib/ next to it" {
     cp "$PROJECT_ROOT/setup-k8s.sh" "$BATS_TEST_TMPDIR/setup-k8s.sh"
-    # From a directory without the repository (as after curl ... | sh)
-    run sh -c 'cd "$1" && sh -s -- init < setup-k8s.sh' _ "$BATS_TEST_TMPDIR"
+    run sh -c 'cd "$1" && sh setup-k8s.sh init' _ "$BATS_TEST_TMPDIR"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"releases/latest/download/setup-k8s.sh | sudo sh -s --"* ]]
+    [[ "$output" == *"lib/ not found"* ]]
 }
