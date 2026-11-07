@@ -2,14 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Version numbers will follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
-once tagged releases begin.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Each release section is also published as the notes of its GitHub release.
 
-No tagged releases have been published yet. Changes made before this file was
-introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k8s/commits/main).
+Changes made before this file was introduced are recorded in the
+[git history](https://github.com/MuNeNiCK/setup-k8s/commits/main).
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-11-07
+
+First tagged release. setup-k8s is now distributed as a single file:
+`https://github.com/MuNeNiCK/setup-k8s/releases/latest/download/setup-k8s.sh`
+(with a `.sha256` checksum). The earlier `raw/main/setup-k8s.sh` URL no longer
+works on its own and prints how to use the release asset.
 
 ### Added
 
@@ -183,4 +190,5 @@ introduced are recorded in the [git history](https://github.com/MuNeNiCK/setup-k
 - Binary downloads fail when the published sha256 checksum cannot be fetched
   or does not match (verification was previously skipped silently).
 
-[Unreleased]: https://github.com/MuNeNiCK/setup-k8s/commits/develop
+[Unreleased]: https://github.com/MuNeNiCK/setup-k8s/compare/v0.1.0...develop
+[0.1.0]: https://github.com/MuNeNiCK/setup-k8s/releases/tag/v0.1.0
