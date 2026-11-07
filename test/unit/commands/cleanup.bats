@@ -13,6 +13,8 @@ setup() {
     command() { if [ "$1" = -v ]; then case "$2" in kubeadm|kubelet|kubectl|crio|apt-mark|dnf|zypper) return 1 ;; esac; fi; builtin command "$@"; }
     pkg_installed() { case " ${INSTALLED:-} " in *" $1 "*) return 0 ;; esac; return 1; }
     DISTRO_PKG=apt
+    # No Kubernetes processes unless a test says so
+    fake_cmd pgrep 1
 }
 
 @test "a clean node has no leftovers" {
@@ -48,4 +50,25 @@ setup() {
     INSTALLED="kubeadm"
     run cleanup_installed_components
     [ "$status" -ne 0 ]
+}
+
+@test "a Kubernetes process still running is reported" {
+    cat > "$FAKE_BIN/pgrep" <<'FAKE'
+#!/bin/sh
+[ "$2" = kube-vip ]
+FAKE
+    chmod +x "$FAKE_BIN/pgrep"
+    [ "$(_cleanup_leftovers)" = "process kube-vip" ]
+}
+
+@test "the VIP is released after kubeadm reset has removed kube-vip" {
+    CALLS="$BATS_TEST_TMPDIR/calls"
+    _CLEANUP_KUBE_VIP_MANIFEST="$BATS_TEST_TMPDIR/kube-vip.yaml"
+    _generate_kube_vip_manifest 10.0.0.100 eth0 img /etc/kubernetes/admin.conf > "$_CLEANUP_KUBE_VIP_MANIFEST"
+    command() { if [ "$1" = -v ] && [ "$2" = kubeadm ]; then return 0; fi; builtin command "$@"; }
+    kubeadm() { echo "kubeadm $*" >> "$CALLS"; rm -f "$_CLEANUP_KUBE_VIP_MANIFEST"; }
+    kube_vip_release() { echo "release $(grep -A1 'name: address' "$1" | tail -n 1 | tr -d ' ')" >> "$CALLS"; }
+    reset_kubernetes_cluster
+    [ "$(cat "$CALLS")" = 'kubeadm reset -f
+release value:"10.0.0.100"' ]
 }

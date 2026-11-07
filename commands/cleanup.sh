@@ -117,6 +117,8 @@ cleanup_installed_components() {
 
 # Configuration roots checked by _cleanup_leftovers (overridable for tests)
 _CLEANUP_ETC="/etc"
+# kube-vip static pod manifest (names the VIP to release)
+_CLEANUP_KUBE_VIP_MANIFEST="/etc/kubernetes/manifests/kube-vip.yaml"
 
 # Print what setup-k8s installs or configures and is still present, one item
 # per line. Uses its own checks (PATH lookups, package database queries,
@@ -124,6 +126,11 @@ _CLEANUP_ETC="/etc"
 _cleanup_leftovers() {
     local name file
     hash -r 2>/dev/null || true
+    if command -v pgrep >/dev/null 2>&1; then
+        for name in kubelet kube-apiserver kube-controller-manager kube-scheduler etcd kube-proxy kube-vip; do
+            if pgrep -x "$name" >/dev/null 2>&1; then echo "process ${name}"; fi
+        done
+    fi
     for name in kubeadm kubelet kubectl crio; do
         if command -v "$name" >/dev/null 2>&1; then
             echo "binary $(command -v "$name")"
@@ -160,14 +167,28 @@ _cleanup_leftovers() {
 
 # Reset Kubernetes cluster state
 reset_kubernetes_cluster() {
-    # Before kubeadm reset removes the manifest that names the VIP
-    kube_vip_release || return 1
+    # kubeadm reset deletes the kube-vip manifest, which names the VIP; the VIP
+    # is released after the reset has removed the kube-vip container (a
+    # running kube-vip leader assigns it again)
+    local vip_manifest=""
+    if [ -f "$_CLEANUP_KUBE_VIP_MANIFEST" ]; then
+        vip_manifest=$(mktemp)
+        cp "$_CLEANUP_KUBE_VIP_MANIFEST" "$vip_manifest"
+    fi
     if command -v kubeadm >/dev/null 2>&1; then
         log_info "Resetting kubeadm cluster state..."
         if ! kubeadm reset -f; then
             log_error "kubeadm reset failed"
+            rm -f "$vip_manifest"
             return 1
         fi
+    fi
+    if [ -n "$vip_manifest" ]; then
+        if ! kube_vip_release "$vip_manifest"; then
+            rm -f "$vip_manifest"
+            return 1
+        fi
+        rm -f "$vip_manifest"
     fi
 }
 

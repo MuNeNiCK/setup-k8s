@@ -3,6 +3,9 @@
 # Kubernetes installation (one item per line; nothing when clean). Covers the
 # names used by the current and earlier setup-k8s versions.
 
+for p in kubelet kube-apiserver kube-controller-manager kube-scheduler etcd kube-proxy kube-vip; do
+    pgrep -x "$p" >/dev/null 2>&1 && echo "process:$p"
+done
 for b in kubeadm kubelet kubectl crio; do
     command -v "$b" >/dev/null 2>&1 && echo "binary:$(command -v "$b")"
 done
